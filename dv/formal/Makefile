@@ -8,28 +8,61 @@ IBEX_ROOT=../..
 SAIL=$(shell which sail)
 PSGEN=$(shell which psgen)
 
-SAIL_RISCV_MODEL_DIR=${LOWRISC_SAIL_RISCV_SRC}/model
+# Set CHERIOT=1 to use the CHERIoT Sail model and proof files.
+# Default (CHERIOT=0) uses the standard RISC-V Sail model and vanilla proof files.
+CHERIOT ?= 0
 
+ifeq ($(CHERIOT),1)
+SAIL_RISCV_MODEL_DIR=$(abspath ${IBEX_ROOT}/../cheriot-sail-upstream/sail-riscv/model)
+CHERI=../../src
 include sail-sources.mk
+PSGEN_SRCS=thm/btype.proof thm/ibex.proof thm/mem.proof thm/riscv.proof thm/dti.proof
+VERIFY_TCL=verify.tcl
+else
+SAIL_RISCV_MODEL_DIR=${LOWRISC_SAIL_RISCV_SRC}/model
+include sail-sources-vanilla.mk
+PSGEN_SRCS=thm/vanilla/btype.proof thm/vanilla/ibex.proof thm/vanilla/mem.proof thm/vanilla/riscv.proof
+VERIFY_TCL=verify-vanilla.tcl
+endif
 
-PSGEN_SRCS=thm/btype.proof thm/ibex.proof thm/mem.proof thm/riscv.proof
 PSGEN_FLAGS=-root riscv -task
 
 SAIL_EXTRA_SRCS=spec/main.sail
 
+ifeq ($(CHERIOT),1)
+SAIL_UNREACHABLE=translate lookup_TLB translate_tlb_miss translate_tlb_hit pt_walk
+SAIL_UNREACHABLE+=pmpReadCfgReg pmpReadAddrReg pmpWriteCfg pmpWriteCfgReg pmpWriteAddr pmpWriteAddrReg mseccfgWrite
+SAIL_UNREACHABLE+=pmpAddrRange pmpCheckRWX pmpCheckPerms pmpMatchAddr pmpMatchEntry accessToFault
+
+SAIL_EXTRACTED=encCapabilityToCapability capToEncCap bit_to_bool bool_to_bit to_bits zero_extend capBitsToCapability capBitsToEncCapability
+SAIL_CULL=count_trailing_zeros
+endif
+
 # -sv, use the SystemVerilog backend
-# --sv-comb, generate a always_comb instead of an initial block
-# --sv-inregs --sv-outregs, produce inputs and outputs for every Sail register
-# --sv-nostrings, --sv-nopacked, --sv-nomem, avoid generating some things Jasper doesn't like (FIXME: --sv-nopacked might be better removed?)
-# -Oconstrant_fold, do basic optimisation
+# -sv-comb, generate an always_comb instead of an initial block
+# -sv-inregs -sv-outregs, produce inputs and outputs for every Sail register
+# -sv-nostrings, -sv-nopacked, -sv-nomem, avoid generating some things Jasper doesn't like
+# -Oconstant_fold, do basic optimisation
 # -memo-z3, resolving types requires a sat solver, this helps speed up those queries
-# --sv-unreachable, remove the implementations of functions to either make the design smaller or avoid recursion loops (FIXME: Still necessary?)
-# --sv-fun2wires (n:)?f, transform a function into ports, with n (or 1) slots
+# -sv-unreachable, remove implementations of unreachable functions
+# -sv-fun2wires (n:)?f, transform a function into ports, with n (or 1) slots
+ifeq ($(CHERIOT),1)
+SAIL_SV_FLAGS=-sv -sv-comb -sv-inregs -sv-outregs -sv-nostrings -sv-nopacked -sv-nomem -Oconstant_fold -memo-z3 \
+	$(addprefix -sv-unreachable ,$(SAIL_UNREACHABLE)) \
+	-sv-fun2wires 2:read_ram \
+	-sv-fun2wires 2:write_ram \
+	-sv-fun2wires wX \
+	-sv-fun2wires wC \
+	-sv-fun2wires __WriteRAM_Meta \
+	-sv-fun2wires __ReadRAM_Meta \
+	-sv-fun2wires mem_read_cap_revoked
+else
 SAIL_SV_FLAGS=-sv --sv-comb --sv-inregs --sv-outregs --sv-nostrings --sv-nopacked --sv-nomem -Oconstant_fold -memo-z3 \
 	--sv-unreachable translate --sv-unreachable lookup_TLB --sv-unreachable translate_tlb_miss --sv-unreachable translate_tlb_hit --sv-unreachable pt_walk \
 	--sv-fun2wires 2:read_ram \
 	--sv-fun2wires 2:write_ram \
 	--sv-fun2wires wX
+endif
 
 # Use fusesoc to resolve the tree of components, copy all resolved source files into the build/ directory,
 # and then generate a filelist for jasper to ingest.
@@ -47,16 +80,29 @@ build/fusesoc: $(IBEX_ROOT)/rtl $(IBEX_ROOT)/vendor
 	  lowrisc:ibex:ibex_formal:0.1
 	touch build/fusesoc # Fix timestamps for Makefile
 
-# The sail spec module, constructed from LOWRISC_SAIL_RISCV_SRC, compiled by our fork of the sail compiler
-build/ibexspec.sv: $(SAIL) $(SAIL_SRCS) $(SAIL_EXTRA_SRCS) sail-sources.mk Makefile spec/fix_bugs.py
+# The sail spec module, constructed from the appropriate Sail model
+ifeq ($(CHERIOT),1)
+build/ibexspec.sv: $(SAIL) $(SAIL_SRCS) $(SAIL_EXTRA_SRCS) sail-sources.mk Makefile spec/fix_pmp_bug.py spec/extract_funcs.py spec/cull_funcs.py spec/unreachable_loc_info.py
+	mkdir -p build
+	cd build && $(SAIL) $(SAIL_SRCS) $(addprefix ../,$(SAIL_EXTRA_SRCS)) $(SAIL_SV_FLAGS) $(addprefix -sv_unreachable execute_,$(COMPRESSED_INSTRS)) -o ibexspec
+	python3 spec/fix_pmp_bug.py
+	python3 spec/unreachable_loc_info.py
+	python3 spec/extract_funcs.py $(SAIL_EXTRACTED) > build/extracted.sv
+	python3 spec/cull_funcs.py $(SAIL_CULL)
+else
+build/ibexspec.sv: $(SAIL) $(SAIL_SRCS) $(SAIL_EXTRA_SRCS) sail-sources-vanilla.mk Makefile spec/fix_bugs.py
 	mkdir -p build
 	cd build && $(SAIL) $(SAIL_SRCS) $(addprefix ../,$(SAIL_EXTRA_SRCS)) $(SAIL_SV_FLAGS) $(addprefix -sv_unreachable execute_,$(COMPRESSED_INSTRS)) -o ibexspec
 	python3 spec/fix_bugs.py
+endif
 
 # The compiled property structure, and the associated TCL
 build/psgen-jg.sv: $(PSGEN) $(PSGEN_SRCS) Makefile
 	mkdir -p build
 	$(PSGEN) $(addprefix -path ,$(PSGEN_SRCS)) $(PSGEN_FLAGS) -sv-out build/psgen-jg.sv -tcl-out build/psgen.tcl
+ifeq ($(CHERIOT),1)
+	ln -sf psgen-jg.sv build/psgen.sv
+endif
 
 # Same as above, but generate our own covers, and tweak for consumption by our tools
 build/psgen-yosys.sv: $(PSGEN) $(PSGEN_SRCS) Makefile
@@ -80,17 +126,107 @@ build/aig-manip: aig-manip/src/main.rs
 # Run the jasper environment in interactive mode
 .PHONY: jg
 jg: build/fusesoc build/psgen-jg.sv build/ibexspec.sv
-	jg verify.tcl -allow_unsupported_OS -acquire_proj
+	jg $(VERIFY_TCL) -allow_unsupported_OS -acquire_proj
 
-# Jasper environment for regression and unattended runs
+# Regression run: verify.tcl calls prove_no_liveness directly and exits via
+# exit 0, so jg shuts down without needing the bridge for '--- prove_no_liveness'.
 .PHONY: all
 all: build/fusesoc build/psgen-jg.sv build/ibexspec.sv
-	jg verify.tcl -allow_unsupported_OS -acquire_proj -no_gui --- "prove_no_liveness"
+	jg $(VERIFY_TCL) -allow_unsupported_OS -acquire_proj -no_gui
+
+# VeriCHERI targets.  These check the representability and monotonicity
+# invariants from RPTU-EIS/VeriCHERI directly against the RTL.  Unlike the Sail
+# trace-equivalence flow they use no reference model, so they depend on neither
+# build/ibexspec.sv nor build/psgen-jg.sv — only the fusesoc filelist.  The
+# properties live in check/vericcheri_top.sv and VeriCHERI/CHERIoT-invariants/.
+.PHONY: vericheri
+vericheri: build/fusesoc
+	jg verify-vericcheri.tcl -allow_unsupported_OS -proj jgproject-vericheri -acquire_proj -no_gui
+
+.PHONY: vericheri-gui
+vericheri-gui: build/fusesoc
+	jg verify-vericcheri.tcl -allow_unsupported_OS -proj jgproject-vericheri -acquire_proj
 
 ################################################################################
+# Module-level formal checks (one directory per module, each with check.tcl)
+
+.PHONY: branch-predictor
+branch-predictor:
+	$(MAKE) -C ../../formal/branch_predict batch
+
+.PHONY: branch-predictor-gui
+branch-predictor-gui:
+	$(MAKE) -C ../../formal/branch_predict gui
+
+.PHONY: cache-ctrl
+cache-ctrl: build/fusesoc
+	jg cache-ctrl/check.tcl -allow_unsupported_OS -proj jgproject-cache-ctrl -acquire_proj -no_gui 2>&1 | tee cache-ctrl/run.log; exit $${PIPESTATUS[0]}
+
+.PHONY: cache-ctrl-gui
+cache-ctrl-gui: build/fusesoc
+	jg cache-ctrl/check.tcl -allow_unsupported_OS -proj jgproject-cache-ctrl -acquire_proj
+
+.PHONY: debug-ctrl
+debug-ctrl: build/fusesoc
+	jg debug-ctrl/check.tcl -allow_unsupported_OS -proj jgproject-debug-ctrl -acquire_proj -no_gui 2>&1 | tee debug-ctrl/run.log; exit $${PIPESTATUS[0]}
+
+.PHONY: debug-ctrl-gui
+debug-ctrl-gui: build/fusesoc
+	jg debug-ctrl/check.tcl -allow_unsupported_OS -proj jgproject-debug-ctrl -acquire_proj
+
+.PHONY: instruction-fetch
+instruction-fetch: build/fusesoc
+	jg instruction-fetch/check.tcl -allow_unsupported_OS -proj jgproject-instruction-fetch -acquire_proj -no_gui 2>&1 | tee instruction-fetch/run.log; exit $${PIPESTATUS[0]}
+
+.PHONY: instruction-fetch-gui
+instruction-fetch-gui: build/fusesoc
+	jg instruction-fetch/check.tcl -allow_unsupported_OS -proj jgproject-instruction-fetch -acquire_proj
+
+################################################################################
+# Additional formal analysis flows (require build/fusesoc at minimum)
+
+.PHONY: superlint
+superlint: build/fusesoc
+	jg superlint.tcl -allow_unsupported_OS -acquire_proj -no_gui -command exit 2>&1 | tee superlint_run.log; exit $${PIPESTATUS[0]}
+
+.PHONY: superlint-gui
+superlint-gui: build/fusesoc
+	jg superlint.tcl -allow_unsupported_OS -acquire_proj
+
+.PHONY: xprop
+xprop: build/fusesoc
+	jg xprop.tcl -allow_unsupported_OS -acquire_proj -no_gui -command exit 2>&1 | tee xprop_run.log; exit $${PIPESTATUS[0]}
+
+.PHONY: unr
+unr: build/fusesoc
+	jg unr.tcl -allow_unsupported_OS -acquire_proj -no_gui -command exit 2>&1 | tee unr_run.log; exit $${PIPESTATUS[0]}
+
+.PHONY: autocover
+autocover: build/fusesoc
+	jg autocover.tcl -allow_unsupported_OS -acquire_proj -no_gui -command exit 2>&1 | tee autocover_run.log; exit $${PIPESTATUS[0]}
+
+.PHONY: cheriot-autocover
+cheriot-autocover: build/fusesoc
+	jg cheriot_autocover.tcl -allow_unsupported_OS -acquire_proj -no_gui -command exit 2>&1 | tee cheriot_autocover_run.log; exit $${PIPESTATUS[0]}
+
+.PHONY: cheriot-autocover-gui
+cheriot-autocover-gui:
+	jg cheriot_autocover_gui.tcl -allow_unsupported_OS -acquire_proj
+
+# Variant that also loads the design (requires build/fusesoc to exist)
+.PHONY: cheriot-autocover-gui-full
+cheriot-autocover-gui-full: build/fusesoc
+	jg cheriot_autocover_gui_full.tcl -allow_unsupported_OS -acquire_proj
+
+.PHONY: cheriot-rtlcover
+cheriot-rtlcover: build/fusesoc
+	jg cheriot_rtlcover.tcl -allow_unsupported_OS -acquire_proj -no_gui -command exit 2>&1 | tee cheriot_rtlcover_run.log; exit $${PIPESTATUS[0]}
+
+.PHONY: cheriot-rtlcover-gui
+cheriot-rtlcover-gui: build/fusesoc
+	jg cheriot_rtlcover.tcl -allow_unsupported_OS -acquire_proj
 
 .PHONY: clean
 clean:
 	rm -rf build/ aig-manip/target
 	rm -rf jgproject/ jgproofs/
-

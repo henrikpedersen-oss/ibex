@@ -1,7 +1,7 @@
 // Copyright lowRISC contributors.
 // Copyright 2024 University of Oxford, see also CREDITS.md.
-// Licensed under the Apache License, Version 2.0, see LICENSE for details.
-// Original author: Louis-Emile Ploix
+// Licensed under the Apache License, Version 2.0 (see LICENSE for details).
+// Original Author: Louis-Emile Ploix
 // SPDX-License-Identifier: Apache-2.0
 
 /*
@@ -10,8 +10,6 @@ for more on that).
 
 It just wires up the pre_* state to the spec_post* state.
 */
-
-t_MainMode main_mode;
 
 always_comb begin
     if (wbexc_handling_irq) main_mode = MAIN_IRQ;
@@ -33,9 +31,11 @@ logic [31:0] reg_driven;
 assign reg_driven[0] = 1'b0;
 
 for (genvar i = 1; i < 32; i++) begin: g_regs_cut
-    logic [31:0] free; // Undriven
-    assign reg_driven[i] =
-        (`CR.rf_raddr_a == i && `CR.rf_ren_a) || (`CR.rf_raddr_b == i && `CR.rf_ren_b);
+    t_Capability free; // Undriven
+    // csr_cheri_asr err is a corner case where a CSR instruction (which
+    // depends on register a) might fail to execute due to the PCC missing
+    // some permissions, meaning it does not actually depend on register a.
+    assign reg_driven[i] = (`CR.rf_raddr_a == i && `CR.rf_ren_a && ~`IDC.csr_cheri_asr_err) || (`CR.rf_raddr_b == i && `CR.rf_ren_b);
     assign pre_regs_cut[i] = reg_driven[i] ? pre_regs[i] : free;
 end
 
@@ -45,22 +45,29 @@ spec_api #(
     .int_err_o(spec_int_err),
     .main_mode(main_mode),
 
-    .insn_bits(ex_compressed_instr),
+    .insn_bits(idex_compressed_instr),
+
     .regs_i(pre_regs_cut),
 
     .wx_o(spec_post_wX),
     .wx_addr_o(spec_post_wX_addr),
     .wx_en_o(spec_post_wX_en),
 
-    .mvendor_id_i(CSR_MVENDORID_VALUE),
-    .march_id_i(CSR_MARCHID_VALUE),
+    .mvendor_id_i(CSR_MVENDORID_CHERI_VALUE),
+    .march_id_i(CSR_MARCHID_CHERI_VALUE),
     .mimp_id_i(CSR_MIMPID_VALUE),
     .mhart_id_i(hart_id_i),
-    .mconfigptr_i(CSR_MCONFIGPTR_VALUE),
+    .mconfigptr_i(),
 
     .misa_i(`CSR.MISA_VALUE),
     .mip_i(pre_mip),
     .nextpc_i(pre_nextpc),
+
+    .nmi_i(pre_nmi),
+
+    // Unused
+    .mseccfg_i(),
+    .mseccfg_o(),
 
     `define X(n) .n``_i(pre_``n), .n``_o(spec_post_``n),
     `X_EACH_CSR
@@ -72,6 +79,11 @@ spec_api #(
     .mem_read_snd_addr_o(spec_mem_read_snd_addr),
     .mem_read_fst_rdata_i(spec_mem_read_fst_rdata),
     .mem_read_snd_rdata_i(spec_mem_read_snd_rdata),
+    .mem_read_tag_i(spec_mem_read_tag),
+
+    .mem_revoke_en_o(spec_mem_revoke_en),
+    .mem_revoke_granule_o(spec_mem_revoke_addr),
+    .mem_revoke_i(spec_mem_revoke),
 
     .mem_write_o(spec_mem_write),
     .mem_write_snd_gran_o(spec_mem_write_snd),
@@ -80,5 +92,6 @@ spec_api #(
     .mem_write_fst_wdata_o(spec_mem_write_fst_wdata),
     .mem_write_snd_wdata_o(spec_mem_write_snd_wdata),
     .mem_write_fst_be_o(spec_mem_write_fst_be),
-    .mem_write_snd_be_o(spec_mem_write_snd_be)
+    .mem_write_snd_be_o(spec_mem_write_snd_be),
+    .mem_write_tag_o(spec_mem_write_tag)
 );

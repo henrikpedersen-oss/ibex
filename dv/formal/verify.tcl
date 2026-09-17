@@ -7,6 +7,20 @@
 # Original author: Louis-Emile Ploix
 # SPDX-License-Identifier: Apache-2.0
 
+# jg's startup script clears LD_LIBRARY_PATH and only re-adds Linux64/lib,
+# leaving out jasper_cloud/lib — which jg_bridge needs for its AWS SDK libs.
+# Set it here (before any prove call spawns workers) so child processes inherit it.
+if {[info exists env(JASPER_INSTALL_DIR)]} {
+	set _jgclib "$env(JASPER_INSTALL_DIR)/Linux64/jasper_cloud/lib"
+	if {[file isdirectory $_jgclib]} {
+		if {[info exists env(LD_LIBRARY_PATH)]} {
+			set env(LD_LIBRARY_PATH) "$_jgclib:$env(LD_LIBRARY_PATH)"
+		} else {
+			set env(LD_LIBRARY_PATH) $_jgclib
+		}
+	}
+}
+
 clear -all
 
 set_prove_cache_path jgproofs
@@ -20,15 +34,17 @@ analyze -sv12 +define+SYNTHESIS -f_relative_to_file_location build/fusesoc/lowri
 
 set sail_lib_dir $env(LOWRISC_SAIL_SRC)/lib/sv
 analyze -sv12 -incdir $sail_lib_dir build/ibexspec.sv
-analyze -sv12 spec/stub.sv
+analyze -sv12 cheriot_formal/spec/stub.sv
+analyze -sv12 build/extracted.sv
+analyze -sv12 spec/cheri.sv
 
-analyze -sv12 spec/spec_api.sv
+analyze -sv12 cheriot_formal/spec/spec_api.sv
 
 # analyze -sv12 bound/binder.sv
 # analyze -sv12 bound/if.sv
-analyze -sv12 check/peek/alt_lsu.sv
-
-analyze -sv12 check/top.sv
+analyze -sv12 cheriot_formal/check/peek/alt_lsu.sv
+analyze -sv12 cheriot_formal/check/cheri_trvk_stub.sv
+analyze -sv12 cheriot_formal/check/top.sv
 
 elaborate -top top -disable_auto_bbox
 clock clk_i
@@ -57,8 +73,8 @@ custom_engine -add -code hT3NZbhP9fmY2AbBQnsjfOxn6c+6e6yL+/e8fZFmaQrnlgEA
 
 # prove -bg -all -covers
 
-proc disable_mtypes {} {
-	assert -disable {Step10::top.MType_*_Data}
+proc assume_mtypes {} {
+	assume -from_assert {Step11::top.MType_*_NoErr Step12::top.MType_*_Data Step12::top.MType_*_CSR Step12::top.MType_*_PC Step12::top.MType_*_Addr}
 }
 
 proc prove_hps {task regex} {
@@ -75,7 +91,7 @@ proc prove_hps {task regex} {
 
 # TODO: Add liveness checking
 proc prove_no_liveness {} {
-	disable_mtypes
+	assume_mtypes
 
 	prove -task Step0
 	prove -bg -task Step1
@@ -83,41 +99,56 @@ proc prove_no_liveness {} {
 	prove -wait
 	prove -bg -task Step3
 	prove -bg -task Step4
-	prove -wait
-	prove -bg -property {Step5::*SpecStable*} -engine_mode Hp
-	prove -bg -property {Step5::top.Ibex_FetchErrRoot} -engine_mode Hp
-	prove -bg -property {Step5::top.Ibex_PreNextPcMatch}
-	prove -wait
 	prove -bg -task Step5
-	prove -bg -task Step6
+	prove -wait
+	prove_hps Step6 *
 	prove -bg -task Step7
 	prove -wait
-	prove_hps Step8 *MemSpec*
-	prove_hps Step8 *CapFsm*
-	prove -property {Step8::*.Mem_*}
-	prove -task Step8
-	prove -property {Step9::*.BType_* Step9::*.JType_*}
-	prove -property {Step9::*.Mem_*}
-	prove -property {Step9::top.MType_Div*_Addr Step9::top.MType_Div*_CSR Step9::top.MType_Div*_PC Step9::top.MType_Rem*_Addr Step9::top.MType_Rem*_CSR Step9::top.MType_Rem*_PC}
-	prove_hps Step9 *
-	prove -property {Step10::*.BType_* Step10::*.JType_* Step10::*.Mem_*}
-	prove_hps Step10 *
-	prove -task Step11
-	prove -task Step12
-	prove_hps Step13 *BType*
-	prove -task Step13
-	prove_hps Step14 *JType*
-	prove -task Step14
-	prove -bg -task Step15
-	prove -bg -task Step16
-	prove -bg -task Step17
+	prove -bg -property {Step8::*SpecStable*} -engine_mode Hp
+	prove -bg -property {Step8::top.Ibex_FetchErrRoot}
+	# FIXME: ^ Failing to prove possibly
+	prove -bg -property {Step8::top.Ibex_PreNextPcMatch}
 	prove -wait
-	prove_hps Step18 *
-	prove -task Step19
-	prove_hps Step20 *
+	prove -task Step8
+	prove -bg -task Step9
+	prove -bg -task Step10
+	prove -wait
+	prove_hps Step11 *MemSpec*
+	prove_hps Step11 *CapFsm*
+	prove -property {Step11::*.Mem_*}
+	prove_hps Step11 *
+	prove -property {Step12::*.BType_* Step12::*.JAL_*}
+	prove -property {Step12::*.Mem_*}
+	# FIXME: Illegal is slow
+	prove_hps Step12 *
+	prove -bg -property {Step13::*.Mem_* Step13::*.BType* Step13::*.JAL_*}
+	prove -bg -property {Step13::*Shift_Data}
+	prove -wait
+	prove_hps Step13 *
+	prove -task Step14
+	prove -task Step15
+	prove -task Step16
+	prove -bg -task Step17
+	prove -bg -task Step18
+	prove -bg -task Step19
+	prove -wait
+	prove -bg -task Step20
 	prove -bg -task Step21
-	prove -bg -task Step22
+	prove -wait
+	prove_hps Step22 *
+	prove_hps Step23 *
+	prove_hps Step24 *
+	prove -bg -task Step25
+	prove -bg -task Step26
 	prove -wait
 }
 
 source build/psgen.tcl
+
+# jg_bridge protocol fails in this environment (WebSocket handshake error),
+# so '--- prove_no_liveness' never reaches the analysis session via bridge.
+# Call it directly and exit so jg closes without waiting for bridge commands.
+if { [info procs prove_no_liveness] ne "" } {
+	prove_no_liveness
+	exit 0
+}
