@@ -50,9 +50,18 @@ module ibex_tag_mem (
     input  logic [31:0] addr_i,
     input  logic        wtag_i,
     input  logic        rvalid_i,
+    // The agent deliberately injects responses with no matching request. The
+    // monitor and request driver both filter on this flag; so must this module,
+    // or a spurious rvalid retires a queue entry belonging to a real access and
+    // every tag after it is off by one.
+    input  logic        spurious_response_i,
 
     output logic        rtag_o
 );
+
+  // A response that actually corresponds to an outstanding request.
+  logic real_rvalid;
+  assign real_rvalid = rvalid_i && !spurious_response_i;
 
   // One tag per 8-byte granule, keyed by addr[31:3].
   bit tag_mem [bit [28:0]];
@@ -106,7 +115,7 @@ module ibex_tag_mem (
   // the clock edge. Registering it on rvalid would deliver it a cycle late.
   // Guarded so a stray rvalid cannot underflow the queue -- returning 0 then
   // matches the old tie-off.
-  assign rtag_o = (rvalid_i && (pending_q.size() > 0) && pending_q[0].is_read) ?
+  assign rtag_o = (real_rvalid && (pending_q.size() > 0) && pending_q[0].is_read) ?
                   pending_q[0].tag : 1'b0;
 
   // TEMPORARY instrumentation -- remove once the capability round-trip is
@@ -119,7 +128,7 @@ module ibex_tag_mem (
                $time, we_i ? "WR" : "RD", addr_i, be_i, wtag_i,
                we_i ? keeps_tag : (tag_mem.exists(granule) ? tag_mem[granule] : 1'b0));
     end
-    if (rst_ni && rvalid_i) begin
+    if (rst_ni && rvalid_i) begin // NOTE: prints spurious too, deliberately
       $display("[TAGMEM] %0t RSP is_read=%b rtag=%b depth=%0d", $time,
                (pending_q.size() > 0) ? pending_q[0].is_read : 1'b0,
                rtag_o, pending_q.size());
@@ -127,7 +136,7 @@ module ibex_tag_mem (
   end
 
   always_ff @(posedge clk_i) begin
-    if (rst_ni && rvalid_i && (pending_q.size() > 0)) begin
+    if (rst_ni && real_rvalid && (pending_q.size() > 0)) begin
       void'(pending_q.pop_front());
     end
   end

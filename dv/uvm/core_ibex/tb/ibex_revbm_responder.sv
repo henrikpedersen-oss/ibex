@@ -91,4 +91,17 @@ module ibex_revbm_responder (
   logic [31:0] unused_addr;
   assign unused_addr = revbm_addr_i;
 
+  // TEMPORARY instrumentation -- remove once the capability round-trip is
+  // understood. This port was tied off until 2026-09-18, so its handshake
+  // timing has never been exercised against TRVK.
+  always_ff @(posedge clk_i) begin
+    if (rst_ni && revbm_req_i) begin
+      $display("[REVBM] %0t REQ addr=%08h gnt=%b", $time, revbm_addr_i, revbm_gnt_o);
+    end
+    if (rst_ni && revbm_rvalid_o) begin
+      $display("[REVBM] %0t RSP rdata=%08h intg=%02h err=%b",
+               $time, revbm_rdata_o, revbm_rdata_intg_o, revbm_err_o);
+    end
+  end
+
 endmodule

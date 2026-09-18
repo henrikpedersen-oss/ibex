@@ -243,6 +243,7 @@ module core_ibex_tb_top;
     .addr_i   (data_mem_vif.addr    ),
     .wtag_i   (data_wtag            ),
     .rvalid_i (data_mem_vif.rvalid  ),
+    .spurious_response_i (data_mem_vif.spurious_response),
     .rtag_o   (data_rtag            )
   );
 
@@ -260,6 +261,29 @@ module core_ibex_tb_top;
     .revbm_rdata_intg_o (revbm_rdata_intg),
     .revbm_err_o        (                )
   );
+
+  // TEMPORARY instrumentation -- remove once the capability round-trip is
+  // understood. TRVK issues a revocation-bitmap lookup for one capability load
+  // and not another; this prints the six terms of revbm_req_required so the
+  // differing one can be identified, plus the tag TRVK actually emits upstream.
+  if (BaseIsa == ibex_pkg::BaseIsaRV32IorCHERIoT) begin : g_trvk_probe
+    always_ff @(posedge clk) begin
+      if (rst_n && core_ibex_tb_top.dut.u_ibex_top.gen_cheriot_trvk.i_ibex_trvk.upstream_rvalid_o) begin
+        $display({"[TRVK] %0t up_tag=%b | seal=%b ptr_vld=%b rsp_tag=%b rsp_vld=%b ",
+                  "mis=%b mis_vld=%b oor=%b -> req_reqd=%b"},
+          $time,
+          core_ibex_tb_top.dut.u_ibex_top.gen_cheriot_trvk.i_ibex_trvk.upstream_tag_o,
+          core_ibex_tb_top.dut.u_ibex_top.gen_cheriot_trvk.i_ibex_trvk.is_sealing_cap,
+          core_ibex_tb_top.dut.u_ibex_top.gen_cheriot_trvk.i_ibex_trvk.ptr_storage_valid_q,
+          core_ibex_tb_top.dut.u_ibex_top.gen_cheriot_trvk.i_ibex_trvk.downstream_rsp_out.tag,
+          core_ibex_tb_top.dut.u_ibex_top.gen_cheriot_trvk.i_ibex_trvk.downstream_rsp_out_valid,
+          core_ibex_tb_top.dut.u_ibex_top.gen_cheriot_trvk.i_ibex_trvk.misalign_flag_out,
+          core_ibex_tb_top.dut.u_ibex_top.gen_cheriot_trvk.i_ibex_trvk.misalign_flag_out_valid,
+          core_ibex_tb_top.dut.u_ibex_top.gen_cheriot_trvk.i_ibex_trvk.revbm_out_of_range,
+          core_ibex_tb_top.dut.u_ibex_top.gen_cheriot_trvk.i_ibex_trvk.revbm_req_required);
+      end
+    end
+  end
 
   `define IBEX_RF_PATH core_ibex_tb_top.dut.u_ibex_top.gen_regfile_ff.register_file_i
 
