@@ -82,6 +82,10 @@ void setStats(int enable)
 #undef READ_CTR
 }
 
+// LOCAL PATCH (not upstream riscv-isa-sim -- reapply after any vendor resync):
+// the TEST_RESULT payload was hardcoded to TEST_PASS, so `code` was written into
+// the CORE_STATUS word and then never consulted -- a failing test still reported
+// PASS. Derive the payload from `code`: zero passes, anything else fails.
 void __attribute__((noreturn)) tohost_exit(uintptr_t code)
 {
   asm volatile("fence;"
@@ -90,7 +94,8 @@ void __attribute__((noreturn)) tohost_exit(uintptr_t code)
                "2:;"
                "j 2b;"
               :
-              : "r"(SIGNATURE_ADDR), "r"((code << 8) | CORE_STATUS), "r"((TEST_PASS << 8) | TEST_RESULT)  /* Inputs */
+              : "r"(SIGNATURE_ADDR), "r"((code << 8) | CORE_STATUS),
+                "r"(((code ? TEST_FAIL : TEST_PASS) << 8) | TEST_RESULT)  /* Inputs */
               : "memory");
 //  tohost = (code << 1) | 1;
   while (1);

@@ -145,4 +145,6 @@ ${PRJ_DIR}/dv/uvm/core_ibex/tests/core_ibex_test_pkg.sv
 ${PRJ_DIR}/dv/uvm/core_ibex/fcov/core_ibex_fcov_if.sv
 ${PRJ_DIR}/dv/uvm/core_ibex/fcov/core_ibex_fcov_bind.sv
 ${PRJ_DIR}/dv/uvm/core_ibex/fcov/core_ibex_pmp_fcov_if.sv
+${PRJ_DIR}/dv/uvm/core_ibex/tb/ibex_tag_mem.sv
+${PRJ_DIR}/dv/uvm/core_ibex/tb/ibex_revbm_responder.sv
 ${PRJ_DIR}/dv/uvm/core_ibex/tb/core_ibex_tb_top.sv

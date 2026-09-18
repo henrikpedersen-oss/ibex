@@ -209,10 +209,27 @@ _start:
   # CHERIoT-safe exit: tohost_exit() does `lui x15,0x90000; sw ...,0(x15)` which
   # clears c15.tag (lui is an integer op) → CHERI fault on the store.
   # Instead, derive address capability from MTDC (full-memory cap, tag=1, all perms).
-  # Replicates tohost_exit(a0): writes (a0<<8)|CORE_STATUS then TEST_RESULT=1
-  # to SIGNATURE_ADDR = 0x8FFFFFF8.
+  # Replicates tohost_exit(a0): writes (a0<<8)|CORE_STATUS then the TEST_RESULT
+  # word to SIGNATURE_ADDR = 0x8FFFFFF8 (= cfg.signature_addr - 4, which is what
+  # core_ibex_base_test.sv actually waits on).
+  #
+  # LOCAL PATCH (not upstream riscv-isa-sim -- reapply after any vendor resync):
+  # the TEST_RESULT payload used to be `li t1, 1`, a literal TEST_PASS. main()'s
+  # return value was shifted into the CORE_STATUS word and then never consulted,
+  # so every CHERIoT directed test reported PASS no matter what it found --
+  # cheriot_cap_readback returned exit code 2 from .Lfail1_perm and the
+  # regression still scored it 100% PASS. Derive the payload from a0 instead.
+  #
+  # Signature word format is (payload << 8) | type, per directed_tests/ibex_macros.h:
+  #   pass = (TEST_PASS=0 << 8) | TEST_RESULT=1 = 0x00000001
+  #   fail = (TEST_FAIL=1 << 8) | TEST_RESULT=1 = 0x00000101
+  #
+  # Both t0 and t1 must be computed before the cspecialr below, which overwrites
+  # a0 (x10 == c10) with the address capability.
   slli  t0, a0, 8         # t0 = (exit_code << 8) | CORE_STATUS(0)
-  li    t1, 1             # t1 = (TEST_PASS<<8) | TEST_RESULT = 0x00000001
+  sltu  t1, x0, a0        # t1 = (a0 != 0) -> TEST_FAIL(1) else TEST_PASS(0)
+  slli  t1, t1, 8         # t1 = payload << 8
+  ori   t1, t1, 1         # t1 |= TEST_RESULT
   lui   a1, 0x90000       # a1 = 0x90000000 (integer; c11.tag=0, OK — used as addr only)
   addi  a1, a1, -8        # a1 = 0x8FFFFFF8 (SIGNATURE_ADDR)
   .word 0x03D0055B        # cspecialr c10, mtdc  -- c10 ← MTDC (tag=1, full 4GB bounds)

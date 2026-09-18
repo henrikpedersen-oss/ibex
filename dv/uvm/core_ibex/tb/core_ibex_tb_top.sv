@@ -96,6 +96,21 @@ module core_ibex_tb_top;
   logic [ibex_pkg::SCRAMBLE_KEY_W-1:0]   scramble_key;
   logic [ibex_pkg::SCRAMBLE_NONCE_W-1:0] scramble_nonce;
 
+  // CHERIoT capability tags on the data bus. The UVM memory agent models bytes
+  // only, so the tag is held alongside it by ibex_tag_mem (see below). These
+  // were previously 1'b0 / unconnected, which silently untagged every CLC.
+  logic data_wtag;
+  logic data_rtag;
+
+  // TRVK revocation-bitmap port. Previously tied off, which only worked while
+  // data_rtag was constant zero and TRVK therefore never had a lookup to do.
+  logic        revbm_req;
+  logic        revbm_gnt;
+  logic        revbm_rvalid;
+  logic [31:0] revbm_addr;
+  logic [31:0] revbm_rdata;
+  logic [6:0]  revbm_rdata_intg;
+
   // Initiate push pull interface for connection between Ibex and a scrambling key provider.
   push_pull_if #(
     .DeviceDataWidth(ibex_pkg::SCRAMBLE_NONCE_W + ibex_pkg::SCRAMBLE_KEY_W)
@@ -165,18 +180,18 @@ module core_ibex_tb_top;
     .data_be_o                 (data_mem_vif.be            ),
     .data_rdata_i              (data_mem_vif.rdata         ),
     .data_rdata_intg_i         (data_mem_vif.rintg         ),
-    .data_tag_i                (1'b0                       ),
+    .data_tag_i                (data_rtag                  ),
     .data_wdata_o              (data_mem_vif.wdata         ),
     .data_wdata_intg_o         (data_mem_vif.wintg         ),
-    .data_tag_o                (                           ),
+    .data_tag_o                (data_wtag                  ),
     .data_err_i                (data_mem_vif.error         ),
 
-    .trvk_revbm_req_o          (                           ),
-    .trvk_revbm_gnt_i          (1'b0                       ),
-    .trvk_revbm_rvalid_i       (1'b0                       ),
-    .trvk_revbm_addr_o         (                           ),
-    .trvk_revbm_rdata_i        ('b0                        ),
-    .trvk_revbm_rdata_intg_i   ('b0                        ),
+    .trvk_revbm_req_o          (revbm_req                  ),
+    .trvk_revbm_gnt_i          (revbm_gnt                  ),
+    .trvk_revbm_rvalid_i       (revbm_rvalid               ),
+    .trvk_revbm_addr_o         (revbm_addr                 ),
+    .trvk_revbm_rdata_i        (revbm_rdata                ),
+    .trvk_revbm_rdata_intg_i   (revbm_rdata_intg           ),
     .trvk_revbm_err_i          (1'b0                       ),
 
     .irq_software_i            (irq_vif.irq_software       ),
@@ -213,6 +228,37 @@ module core_ibex_tb_top;
 
     .instr_req_shadow_o        (                           ),
     .instr_addr_shadow_o       (                           )
+  );
+
+  // Capability tag storage for the data bus. The UVM memory agent owns the data
+  // and the request/response protocol; this only holds the one bit per 8-byte
+  // granule that the agent has no concept of, returned in step with rvalid.
+  ibex_tag_mem u_data_tag_mem (
+    .clk_i    (clk                  ),
+    .rst_ni   (rst_n                ),
+    .req_i    (data_mem_vif.request ),
+    .gnt_i    (data_mem_vif.grant   ),
+    .we_i     (data_mem_vif.we      ),
+    .be_i     (data_mem_vif.be      ),
+    .addr_i   (data_mem_vif.addr    ),
+    .wtag_i   (data_wtag            ),
+    .rvalid_i (data_mem_vif.rvalid  ),
+    .rtag_o   (data_rtag            )
+  );
+
+  // Revocation-bitmap lookups. Answers "not revoked" for every address; see the
+  // module header for why that is the right answer here and what it does not
+  // model.
+  ibex_revbm_responder u_revbm_responder (
+    .clk_i              (clk             ),
+    .rst_ni             (rst_n           ),
+    .revbm_req_i        (revbm_req       ),
+    .revbm_gnt_o        (revbm_gnt       ),
+    .revbm_rvalid_o     (revbm_rvalid    ),
+    .revbm_addr_i       (revbm_addr      ),
+    .revbm_rdata_o      (revbm_rdata     ),
+    .revbm_rdata_intg_o (revbm_rdata_intg),
+    .revbm_err_o        (                )
   );
 
   `define IBEX_RF_PATH core_ibex_tb_top.dut.u_ibex_top.gen_regfile_ff.register_file_i

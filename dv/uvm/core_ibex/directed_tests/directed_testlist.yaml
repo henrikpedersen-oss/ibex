@@ -251,10 +251,19 @@
     Field-by-field CSC/CLC round-trip check: stores a capability (MTDC,
     then MTCC) to memory and reloads it, verifying tag/perm/base/len/
     addr/type are all preserved exactly, and that an integer store to
-    the same slot clears the tag on reload (revocation). KNOWN FAILING:
-    see tickets.md, NoMemResponseWithoutPendingAccess RTL-timing question.
+    the same slot clears the tag on reload (revocation).
+    KNOWN FAILING on the third round-trip (MTCC): the CLC reads back an
+    all-zero capability. The earlier NoMemResponseWithoutPendingAccess
+    note is stale -- that was a false positive, fixed upstream by
+    0f40baf8. See tickets.md.
   iterations: 1
   test_srcs: cheriot_cap_readback/cheriot_cap_readback.S
+  # NOTE: single sim_opts key only -- YAML silently keeps the last duplicate, so
+  # a second `sim_opts:` here discards the first without warning.
+  # The +uvm_set_verbosity below is TEMPORARY (remove after diagnosis): the memory
+  # agent logs "Read Mem"/"Write Mem" at UVM_HIGH and "Read from uninitialized
+  # addr" at UVM_MEDIUM, but rtl_simulation.yaml hardcodes +UVM_VERBOSITY=UVM_LOW
+  # and UVM takes the first plusarg match, so raising it needs uvm_set_verbosity.
   sim_opts: "+enable_cheriot_seq=1"
   config: cheriot-c-tests
 
