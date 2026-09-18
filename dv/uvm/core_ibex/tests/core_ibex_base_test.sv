@@ -507,7 +507,10 @@ class core_ibex_base_test extends uvm_test;
       // Will only get here if we successfully beat the timeout period
       disable fork;
     end join
-    cur_run_phase.drop_objection(this);
+    // run_phase may have ended and nulled cur_run_phase while we were waiting above.
+    if (cur_run_phase != null) begin
+      cur_run_phase.drop_objection(this);
+    end
   endtask
 
   // Waits for a write to the address of the specified CSR and retrieves the csr data
@@ -533,7 +536,10 @@ class core_ibex_base_test extends uvm_test;
       // Will only get here if we successfully beat the timeout period
       disable fork;
     end join
-    cur_run_phase.drop_objection(this);
+    // run_phase may have ended and nulled cur_run_phase while we were waiting above.
+    if (cur_run_phase != null) begin
+      cur_run_phase.drop_objection(this);
+    end
   endtask
 
   // Waits until the next time the given core_status is written to the signature address

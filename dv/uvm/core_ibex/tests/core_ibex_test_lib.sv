@@ -1061,7 +1061,12 @@ class core_ibex_debug_intr_basic_test extends core_ibex_base_test;
       // Will only get here if dret successfully detected within timeout period
       disable fork;
     end join
-    cur_run_phase.drop_objection(this);
+    // run_phase nulls cur_run_phase once the test is done, and this task can still
+    // be in flight at that point (send_stimulus is forked join_none). Dropping the
+    // objection is pointless once the run phase has ended, so just skip it.
+    if (cur_run_phase != null) begin
+      cur_run_phase.drop_objection(this);
+    end
   endtask
 
   virtual function void check_priv_mode(priv_lvl_e mode);
@@ -1120,7 +1125,9 @@ class core_ibex_directed_test extends core_ibex_debug_intr_basic_test;
           // disable.
           vseq.wait_for_stop();
           disable fork;
-          if (cur_run_phase.get_objection_count(this) > 1) begin
+          // wait_for_stop() above can take long enough that run_phase has already
+          // finished and nulled cur_run_phase, so check before dereferencing it.
+          if (cur_run_phase != null && cur_run_phase.get_objection_count(this) > 1) begin
             cur_run_phase.drop_objection(this);
           end
         end
