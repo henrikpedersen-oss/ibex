@@ -196,7 +196,35 @@ def import_model(directed_test_yaml: pathlib.Path) -> dict:
     https://github.com/pydantic/pydantic/issues/1273
 
     """
-    yaml_data = scripts_lib.read_yaml(directed_test_yaml)
+    # Directed tests are split across several testlists in the same directory --
+    # directed_testlist.yaml for the architectural tests, directed_testlist_wb.yaml
+    # for the white-box suite, and so on -- so each suite can be maintained and
+    # reviewed on its own rather than as one 7000-line file.
+    #
+    # They share a single namespace: a config defined in any testlist is visible
+    # to tests in every other. That is deliberate -- it lets a suite say
+    # `config: cheriot-c-tests` instead of copying the gcc_opts and crt paths,
+    # and a copy would be a real hazard here, because crt_cheriot.S and
+    # syscalls.c carry local patches that a stale duplicate would miss.
+    testlists = sorted(directed_test_yaml.parent.glob('directed_testlist*.yaml'))
+    if directed_test_yaml not in testlists:
+        testlists.insert(0, directed_test_yaml)
+
+    yaml_data = []
+    seen_tests = {}
+    for testlist in testlists:
+        for entry in scripts_lib.read_yaml(testlist):
+            name = entry.get('test')
+            if name is not None:
+                # A name defined in two testlists would silently shadow rather
+                # than error, the same way a duplicate YAML key does. Refuse.
+                if name in seen_tests:
+                    raise ValueError(
+                        f"Directed test '{name}' is defined in both "
+                        f"'{seen_tests[name]}' and '{testlist}'. Test names "
+                        "must be unique across all directed testlists.\n")
+                seen_tests[name] = testlist
+            yaml_data.append(entry)
 
     tests = []
     configs = list(filter((lambda i: i.get('test') is None), yaml_data))
@@ -209,8 +237,8 @@ def import_model(directed_test_yaml: pathlib.Path) -> dict:
         except StopIteration:
             raise ValueError(
                 f"Test '{t['test']}' gave the config '{t['config']}', but "
-                "this config does not exist in the file "
-                f"'{directed_test_yaml}'.\n")
+                "this config is not defined in any directed testlist. "
+                f"Searched: {', '.join(str(p.name) for p in testlists)}.\n")
         tests.append({**t_config, **t})
     try:
         m = DirectedTestsYaml(
