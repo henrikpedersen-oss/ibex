@@ -277,6 +277,17 @@ class riscv_illegal_instr extends uvm_object;
     }
   }
 
+  // LOCAL PATCH (not upstream google/riscv-dv -- reapply after any vendor resync):
+  // ibex raises major_alert_o for an all-zero 16-bit instruction word (0x0000 =
+  // C.ADDI4SPN with all-zero fields) because it treats that encoding as evidence
+  // of zeroed memory being executed (fault-attack detection), tripping the
+  // NoAlertsTriggered assertion in core_ibex_tb_top.sv.
+  constraint no_zero_compressed_c {
+    if (c_op inside {2'b00, 2'b01, 2'b10}) {
+      instr_bin[15:0] != 16'h0;
+    }
+  }
+
   constraint hint_instr_c {
     if (exception == kHintInstr) {
       // C.ADDI
