@@ -268,6 +268,13 @@ module ibex_riscv_compliance (
       .rdata_o  (device_rdata[Ram] )
     );
 
+  // ram_1p has no error output — a RAM access cannot fail. bus.sv ORs
+  // device_err_i into host_err_o unconditionally, so leaving this undriven put X
+  // on the core's instr_err_i for every response: IbexInstrRPayloadX fired from
+  // the first fetch and the X propagated into the decoder, so no instruction
+  // ever retired and every compliance test ran to the 10M-cycle watchdog.
+  assign device_err[Ram] = 1'b0;
+
   // RISC-V test utility, used by the RISC-V compliance test to interact with
   // the simulator.
   riscv_testutil
