@@ -50,19 +50,20 @@ main:
     .word   0x03D0055B              # cspecialr ca0, mtdc
     li      a1, 300
     .word   0x14B5055B              # csetboundsrndn ca0, ca0, a1
+    .word   0xFEA505DB              # cmove ca1, ca0  (save before cget* clears ca0)
 
     # ── Test 1: length <= 300 (rounded DOWN, never exceeds request) ──────────
-    .word   0xFE35055B              # cgetlen a0, ca0
+    .word   0xFE35855B              # cgetlen a0, ca1
     mv      t0, a0                  # t0 = round-down length, kept for Test 4
     li      a2, 301
     bgeu    a0, a2, .Lfail_test1    # fail if length >= 301 (i.e. length > 300)
 
     # ── Test 2: base = 0 (cursor was 0) ───────────────────────────────────────
-    .word   0xFE25055B              # cgetbase a0, ca0
+    .word   0xFE25855B              # cgetbase a0, ca1
     bne     a0, x0, .Lfail_test2
 
     # ── Test 3: tag = 1 (subset of full-range MTDC is always in-bounds) ──────
-    .word   0xFE45055B              # cgettag a0, ca0
+    .word   0xFE45855B              # cgettag a0, ca1
     li      a2, 1
     bne     a0, a2, .Lfail_test3
 

@@ -39,23 +39,27 @@
 main:
     csrsi   mstatus, 8              # set mstatus.MIE (bit 3)
 
-    # Load MTCC (base=0, cursor=0, tag=1, full 32-bit range).
+    # Load MTCC (full 32-bit range, tag=1).  Zero the cursor: crt_cheriot.S
+    # installs the trap handler into MTCC leaving cursor at ~0x80000200, not 0.
     .word   0x03C0055B              # cspecialr ca0, mtcc
+    li      a1, 0
+    .word   0x20B5055B              # csetaddr ca0, ca0, a1  (zero cursor)
 
     # Increment cursor by immediate 4.
     .word   0x0045155B              # cincaddrimm ca0, ca0, 4
+    .word   0xFEA505DB              # cmove ca1, ca0  (save before cget* clears ca0)
 
     # ── Test 1: cursor is now 4 ───────────────────────────────────────────────
-    .word   0xFEF5055B              # cgetaddr a0, ca0
+    .word   0xFEF5855B              # cgetaddr a0, ca1
     li      a2, 4
     bne     a0, a2, .Lfail_test1
 
     # ── Test 2: base unchanged = 0 ────────────────────────────────────────────
-    .word   0xFE25055B              # cgetbase a0, ca0
+    .word   0xFE25855B              # cgetbase a0, ca1
     bne     a0, x0, .Lfail_test2
 
     # ── Test 3: tag = 1 (in-bounds, cursor=4 < top=2^32) ─────────────────────
-    .word   0xFE45055B              # cgettag a0, ca0
+    .word   0xFE45855B              # cgettag a0, ca1
     li      a1, 1
     bne     a0, a1, .Lfail_test3
 

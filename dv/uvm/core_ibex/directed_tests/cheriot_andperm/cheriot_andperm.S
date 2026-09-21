@@ -95,6 +95,15 @@ main:
     bne     a0, a2, .Lfail_test1
 
     # ── Test 2: EX (bit 8) is now clear ──────────────────────────────────────
+    # Rebuild the masked capability first: a0 and ca0 are the same register, so
+    # the cgettag above wrote an integer into it and cleared the tag. cgetperm
+    # then returned 0, which made test 2 pass for the WRONG reason (EX reads as
+    # clear because every permission does) and test 3 fail (GL also read as 0).
+    # Unnoticed because crt_cheriot.S reported TEST_PASS unconditionally until
+    # 2026-09-18.
+    .word   0x03C0055B              # cspecialr ca0, mtcc
+    li      a1, 0xFF                # mask: bits 7:0 only
+    .word   0x1AB5055B              # candperm ca0, ca0, a1
     .word   0xFE05055B              # cgetperm a0, ca0
     andi    a1, a0, 0x100           # isolate EX (bit 8)
     bne     a1, x0, .Lfail_test2   # EX must be 0

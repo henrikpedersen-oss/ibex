@@ -48,14 +48,15 @@ main:
     .word   0x03D0055B              # cspecialr ca0, mtdc
     li      a1, 256
     .word   0x12B5055B              # csetboundsexact ca0, ca0, a1
+    .word   0xFEA505DB              # cmove ca1, ca0  (save before cget* clears ca0)
 
     # ── Test 1: tag = 1 (no rounding needed) ──────────────────────────────────
-    .word   0xFE45055B              # cgettag a0, ca0
+    .word   0xFE45855B              # cgettag a0, ca1
     li      a2, 1
     bne     a0, a2, .Lfail_test1
 
     # ── Test 2: length = 256 ───────────────────────────────────────────────────
-    .word   0xFE35055B              # cgetlen a0, ca0
+    .word   0xFE35855B              # cgetlen a0, ca1
     li      a2, 256
     bne     a0, a2, .Lfail_test2
 

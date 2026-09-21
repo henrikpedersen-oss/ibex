@@ -109,6 +109,13 @@ main:
     #
     # MTCC is the execution root; cgetperm must return a value with bit 8
     # set.  At reset perms = 0x1EB = 0b0001_1110_1011.
+    #
+    # Re-read MTCC first: a0 and ca0 are the same register, so the cgettag above
+    # wrote an integer into it and cleared the tag. cgetperm then returned 0 and
+    # this test failed for that reason, not because MTCC lacks execute. It went
+    # unnoticed because crt_cheriot.S reported TEST_PASS unconditionally until
+    # 2026-09-18.
+    .word   0x03C0055B              # cspecialr ca0, mtcc
     .word   0xFE05055B              # cgetperm a0, ca0
     andi    a1, a0, 0x100           # isolate permit_execute (bit 8)
     beq     a1, x0, .Lfail_test2
@@ -126,6 +133,11 @@ main:
     #
     # MTDC is the memory data root; it must NOT be executable.
     # At reset perms = 0x07F = 0b0000_0111_1111.
+    # Re-read MTDC: cgettag (test 3) wrote an integer to a0=x10=ca0, clearing
+    # the capability part of ca0.  cgetperm on a cleared ca0 returns 0 and
+    # would make tests 4-6 pass for the wrong reason (EX bit clear = pass,
+    # load/store bits clear = fail).
+    .word   0x03D0055B              # cspecialr ca0, mtdc
     .word   0xFE05055B              # cgetperm a0, ca0
     andi    a1, a0, 0x100           # isolate permit_execute (bit 8)
     bne     a1, x0, .Lfail_test4

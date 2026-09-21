@@ -83,23 +83,26 @@ main:
     # Narrow to 256 bytes (base=cursor=0, length=256).
     li      a1, 256
     .word   0x10B5055B              # csetbounds ca0, ca0, a1
+    # Save result to ca1 before cget* checks — each cget* with rd=a0=x10 writes
+    # an integer to x10, which clears ca0's capability tag in the same register.
+    .word   0xFEA505DB              # cmove ca1, ca0  (rd=x11=a1, rs1=x10=ca0)
 
     # ── Test 1: length = 256 after CSetBounds ─────────────────────────────────
-    .word   0xFE35055B              # cgetlen a0, ca0
+    .word   0xFE35855B              # cgetlen a0, ca1  (cs1=x11, rd=x10)
     li      a2, 256
     bne     a0, a2, .Lfail_test1
 
     # ── Test 2: base = 0 (cursor was 0 when CSetBounds was applied) ───────────
-    .word   0xFE25055B              # cgetbase a0, ca0
+    .word   0xFE25855B              # cgetbase a0, ca1
     bne     a0, x0, .Lfail_test2
 
     # ── Test 3: tag = 1 ([0,256) ⊆ [0,2^32) → derivation is legal) ───────────
-    .word   0xFE45055B              # cgettag a0, ca0
+    .word   0xFE45855B              # cgettag a0, ca1
     li      a1, 1
     bne     a0, a1, .Lfail_test3
 
     # ── Test 4: cursor unchanged = 0 ──────────────────────────────────────────
-    .word   0xFEF5055B              # cgetaddr a0, ca0
+    .word   0xFEF5855B              # cgetaddr a0, ca1
     bne     a0, x0, .Lfail_test4
 
     # ── Interrupt state verification ───────────────────────────────────────────

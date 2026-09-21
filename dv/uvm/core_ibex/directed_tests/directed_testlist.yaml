@@ -37,10 +37,22 @@
     PMPEnable: 1
   timeout_s: 300
 
+# -march=rv32im (no C): every mseccfg test's handle_trap() resumes at epc + 4, which
+# is only correct for 4-byte instructions. Under -march=rv32imc GCC emits c.sw/c.lw for
+# the target_arr accesses, so a data PMP fault resumed 2 bytes past the next instruction
+# and decoded garbage -- the 24 match1 tests died on a bogus illegal instruction rather
+# than on the PMP fault they assert. Dropping C keeps every faulting access 4 bytes wide.
+#
+# ePMP/mseccfg tests are plain RISC-V: they exercise mseccfg MML/MMWP, not CHERIoT.
+# This config deliberately sets no sim_opts, so cfg.enable_cheriot_seq stays 0 and
+# core_ibex_base_test leaves cheriot_enable at IbexMuBiOff. crt.S -- not crt_cheriot.S
+# -- is therefore the correct startup file: crt_cheriot.S sets MTCC via cspecialr/
+# csetaddr/cspecialw, and those CHERI opcodes are illegal while cheriot_enable is
+# off, so MTCC would never be written and every trap would vector to 0x80000000.
 - config: epmp-tests
   ld_script: ../../../../vendor/riscv-isa-sim/tests/mseccfg/mseccfg_test.ld
   includes: .
-  gcc_opts: -march=rv32imc -O2 -I . -I ./. -I ../softfloat -I ../riscv -fno-builtin-printf
+  gcc_opts: -march=rv32im -O2 -I . -I ./. -I ../softfloat -I ../riscv -fno-builtin-printf
             -fdata-sections -fno-section-anchors -DPRINTF_SUPPORTED=1
             ../../../vendor/riscv-isa-sim/tests/mseccfg/crt.S
             ../../../vendor/riscv-isa-sim/tests/mseccfg/syscalls.c

@@ -104,6 +104,13 @@ main:
     bne     a0, a1, .Lfail_test1
 
     # Read permissions once; tests 2-5 all inspect this value.
+    #
+    # Re-read MSCRATCHC first: a0 and ca0 are the same register, so the cgettag
+    # above wrote an integer into it and cleared the tag. cgetperm then returned
+    # 0 and tests 2-5 all failed for that reason, not because the permissions
+    # were wrong. It went unnoticed because crt_cheriot.S reported TEST_PASS
+    # unconditionally until 2026-09-18.
+    .word   0x03E0055B              # cspecialr ca0, mscratchc
     .word   0xFE05055B              # cgetperm a0, ca0
 
     # ── Test 2: permit_seal (bit 10) is set ──────────────────────────────────

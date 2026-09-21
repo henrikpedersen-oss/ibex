@@ -78,10 +78,21 @@ main:
     # Enable machine-mode interrupts for the duration of this test.
     csrsi   mstatus, 8              # set mstatus.MIE (bit 3)
 
-    # ── Test 1: MTCC address = 0 ──────────────────────────────────────────────
+    # ── Test 1: CGetAddr reads back a cursor set by CSetAddr ─────────────────
+    # This used to assert that MTCC's cursor is 0. It never is: the reset value
+    # is the boot address (0x80000000), and crt_cheriot.S then installs the trap
+    # handler into MTCC, leaving the cursor at 0x80000200. The assertion could
+    # not pass, and went unnoticed because crt_cheriot.S reported TEST_PASS
+    # unconditionally until 2026-09-18.
+    #
+    # Set a known cursor and read it back, which is what this test is for --
+    # verifying CGetAddr, not the startup value of an SCR the crt owns.
     .word   0x03C0055B              # cspecialr ca0, mtcc
+    li      a1, 0x1000
+    .word   0x20B5055B              # csetaddr  ca0, ca0, a1
     .word   0xFEF5055B              # cgetaddr  a0,  ca0
-    bne     a0, x0, .Lfail_test1
+    li      a2, 0x1000
+    bne     a0, a2, .Lfail_test1
 
     # ── Test 2: MTDC address = 0 ──────────────────────────────────────────────
     .word   0x03D0055B              # cspecialr ca0, mtdc

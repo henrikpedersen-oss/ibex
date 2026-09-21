@@ -78,9 +78,10 @@ main:
     .word   0x28B5055B              # csub a0, ca0, ca1
     bne     a0, x0, .Lfail_test1
 
-    # Advance ca0 cursor by 16 (ca1 still at cursor=0).
-    li      a1, 16
-    .word   0x22B5055B              # cincaddr ca0, ca0, a1
+    # Advance ca0 cursor by 16 (ca1 still at original MTCC cursor).
+    # Use a2 for the offset: li a1 would write to x11=ca1, corrupting its cursor.
+    li      a2, 16
+    .word   0x22C5055B              # cincaddr ca0, ca0, a2  (rs2=x12=a2)
 
     # ── Test 2: CSub(ca0, ca1) = 16 — one cursor advanced ────────────────────
     .word   0x28B5055B              # csub a0, ca0, ca1

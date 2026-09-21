@@ -68,24 +68,36 @@ main:
     # Enable machine-mode interrupts for the duration of this test.
     csrsi   mstatus, 8              # set mstatus.MIE (bit 3)
 
-    # Load MTCC (base=0, cursor=0, tag=1, full 32-bit range).
+    # Load MTCC (base=0, tag=1, full 32-bit range).
+    #
+    # MTCC's cursor is NOT 0, contrary to what this test used to assume: the
+    # reset value is the boot address (0x80000000) and crt_cheriot.S then
+    # installs the trap handler into MTCC, leaving it at 0x80000200. CIncAddr+4
+    # therefore produced 0x80000204, not 4, and the test could never pass. It
+    # went unnoticed because crt_cheriot.S reported TEST_PASS unconditionally
+    # until 2026-09-18.
+    #
+    # Zero the cursor explicitly so the increment is measured from a known base.
     .word   0x03C0055B              # cspecialr ca0, mtcc
+    li      a1, 0
+    .word   0x20B5055B              # csetaddr ca0, ca0, a1
 
     # Increment cursor by 4.
     li      a1, 4
     .word   0x22B5055B              # cincaddr ca0, ca0, a1
+    .word   0xFEA505DB              # cmove ca1, ca0  (save before cget* clears ca0)
 
     # ── Test 1: cursor is now 4 ───────────────────────────────────────────────
-    .word   0xFEF5055B              # cgetaddr a0, ca0
+    .word   0xFEF5855B              # cgetaddr a0, ca1
     li      a2, 4
     bne     a0, a2, .Lfail_test1
 
     # ── Test 2: base unchanged = 0 ────────────────────────────────────────────
-    .word   0xFE25055B              # cgetbase a0, ca0
+    .word   0xFE25855B              # cgetbase a0, ca1
     bne     a0, x0, .Lfail_test2
 
     # ── Test 3: tag = 1 (in-bounds, cursor=4 < top=2^32) ─────────────────────
-    .word   0xFE45055B              # cgettag a0, ca0
+    .word   0xFE45855B              # cgettag a0, ca1
     li      a1, 1
     bne     a0, a1, .Lfail_test3
 

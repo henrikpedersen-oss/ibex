@@ -1,0 +1,254 @@
+# Copyright lowRISC contributors.
+# Licensed under the Apache License, Version 2.0, see LICENSE for details.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Juliet CWE directed tests -- bare metal.
+#
+# Vulnerability patterns from the Juliet Test Suite (NIST/NSA), reduced to
+# bare-metal assembly that demonstrates CHERIoT hardware denying each one:
+# stack/heap overflow, use-after-free, double free, integer overflow, and so on.
+# The check in each case is that the capability loses its tag or traps, rather
+# than that the C program misbehaves.
+#
+# Distinct from sonata-software/examples/juliet_cwe, which runs the same CWE
+# classes as compiled C on the Sonata board via `make sonata-juliet`. These need
+# no board and run under the normal uvm-test-xlm path.
+#
+# Kept in their own testlist so the suite can be maintained and reviewed
+# separately; metadata.py loads every directed_testlist*.yaml in this directory,
+# and configs are shared across them (these use cheriot-c-tests, defined in
+# directed_testlist.yaml).
+#
+# Migrated from ibex-private 2026-09-18, where they lived in
+# directed_testlist_agent.yaml and drove a separate build against that repo.
+#
+# Each test returns 0 on success with a numbered failure code otherwise. Those
+# codes only became observable on 2026-09-18: crt_cheriot.S reported TEST_PASS
+# unconditionally until then, so these tests could not fail through the
+# handshake.
+
+- test: juliet_cwe121_stack_bof
+  desc: >
+    CWE-121 Stack Buffer Overflow (Juliet Test Suite, NIST/NSA).
+    Creates a 64-byte bounded "stack buffer" capability via CSetBounds(MTDC,64).
+    Tests: (1) CGetLen=64; (2) base=0; (3) tag=1; (4) CIncAddr+32→tag=1 (safe);
+    (5) CIncAddr+128 on the cursor-32 cap (cursor→160>top=64) → tag=0 (overflow
+    denied by CHERIoT bounds hardware).
+  iterations: 1
+  test_srcs: juliet_cwe121_stack_bof/juliet_cwe121_stack_bof.S
+  sim_opts: "+enable_cheriot_seq=1"
+  config: cheriot-c-tests
+
+- test: juliet_cwe122_heap_bof
+  desc: >
+    CWE-122 Heap Buffer Overflow (Juliet Test Suite, NIST/NSA).
+    Creates a 256-byte bounded "heap allocation" via CSetBounds(MTDC,256).
+    Tests: (1) CGetLen=256; (2) tag=1; (3) CIncAddr+64→tag=1 (in-bounds);
+    (4) fresh bounded cap, CIncAddr+512 → tag=0 (past top=256, heap overflow
+    denied — CHERIoT prevents the out-of-bounds write).
+  iterations: 1
+  test_srcs: juliet_cwe122_heap_bof/juliet_cwe122_heap_bof.S
+  sim_opts: "+enable_cheriot_seq=1"
+  config: cheriot-c-tests
+
+- test: juliet_cwe416_use_after_free
+  desc: >
+    CWE-416 Use After Free (Juliet Test Suite, NIST/NSA).
+    Simulates free() via CClearTag (CHERIoT revocation primitive).
+    Tests: (1) tag=1 before free; (2) tag=0 after CClearTag (pointer revoked);
+    (3) CGetAddr=0 after CClearTag (cursor unchanged but capability unusable).
+    In CHERIoT, any load/store through a tag=0 pointer raises a CHERI exception.
+  iterations: 1
+  test_srcs: juliet_cwe416_use_after_free/juliet_cwe416_use_after_free.S
+  sim_opts: "+enable_cheriot_seq=1"
+  config: cheriot-c-tests
+
+- test: juliet_cwe415_double_free
+  desc: >
+    CWE-415 Double Free (Juliet Test Suite, NIST/NSA).
+    CClearTag is idempotent: a second CClearTag on an already-cleared capability
+    does nothing (tag stays 0, no corruption).
+    Tests: (1) tag=1 before free; (2) tag=0 after first CClearTag; (3) tag=0
+    after second CClearTag (double free is safe in CHERIoT); (4) cursor=0
+    unchanged through both clears.
+  iterations: 1
+  test_srcs: juliet_cwe415_double_free/juliet_cwe415_double_free.S
+  sim_opts: "+enable_cheriot_seq=1"
+  config: cheriot-c-tests
+
+- test: juliet_cwe190_int_overflow
+  desc: >
+    CWE-190 Integer Overflow or Wraparound (Juliet Test Suite, NIST/NSA).
+    Shows that an overflowed array index (0x7FFFFFFF) is caught by CHERIoT
+    bounds even without software range checks.
+    Tests: (1) CGetLen=64 (bounded buffer); (2) safe CIncAddr+32→tag=1;
+    (3) CIncAddr+0x7FFFFFFF on fresh bounded cap → tag=0 (overflowed index
+    denied — no software bounds check required).
+  iterations: 1
+  test_srcs: juliet_cwe190_int_overflow/juliet_cwe190_int_overflow.S
+  sim_opts: "+enable_cheriot_seq=1"
+  config: cheriot-c-tests
+
+- test: juliet_cwe124_buf_underwrite
+  desc: >
+    CWE-124 Buffer Underwrite (Juliet Test Suite, NIST/NSA).
+    CIncAddr with a negative offset (-4) moves the cursor below the base of a
+    16-byte bounded capability at 0x80080000.  cursor < base is out-of-bounds
+    in CHERIoT → tag cleared immediately.
+    Tests: (1) tag=1 after CSetBounds(16) (baseline); (2) tag=0 after
+    CIncAddr(-4) (cursor < base → underwrite denied); (3) cgetaddr=0x8007FFFC
+    (cursor set to base-4 despite tag=0, confirming arithmetic is correct).
+  iterations: 1
+  test_srcs: juliet_cwe124_buf_underwrite/juliet_cwe124_buf_underwrite.S
+  sim_opts: "+enable_cheriot_seq=1"
+  config: cheriot-c-tests
+
+- test: juliet_cwe193_off_by_one
+  desc: >
+    CWE-193 Off-by-One Error (Juliet Test Suite, NIST/NSA).
+    CHERI bounds are half-open [base, top).  CIncAddr(+16) on a 16-byte
+    capability moves cursor to exactly top, which is excluded → tag=0.
+    CIncAddr(+15) on a fresh cap lands at top-1, which is included → tag=1.
+    Tests: (1) tag=1 after CSetBounds(16) (baseline); (2) tag=0 after
+    CIncAddr(+16) (cursor=top is OOB — off-by-one denied); (3) tag=1 after
+    fresh CSetBounds(16)+CIncAddr(+15) (top-1 is valid last element).
+  iterations: 1
+  test_srcs: juliet_cwe193_off_by_one/juliet_cwe193_off_by_one.S
+  sim_opts: "+enable_cheriot_seq=1"
+  config: cheriot-c-tests
+
+- test: juliet_cwe272_least_privilege
+  desc: >
+    CWE-272 Least Privilege Violation (Juliet Test Suite, NIST/NSA).
+    MTDC resets with perms=0x07F (bits 0-6 set, including SD=bit2=permit-store).
+    CAndPerm(mask=0x07B) strips the SD bit.  The resulting capability cannot
+    authorise stores, enforcing least privilege.  Tag is preserved because
+    CAndPerm on an unsealed capability is a monotone (safe) narrowing.
+    Tests: (1) cgetperm on MTDC=0x07F (baseline); (2) SD bit 2 clear after
+    CAndPerm(0x07B) (write permission removed); (3) tag=1 after CAndPerm
+    (tag preserved — narrowing is safe).
+  iterations: 1
+  test_srcs: juliet_cwe272_least_privilege/juliet_cwe272_least_privilege.S
+  sim_opts: "+enable_cheriot_seq=1"
+  config: cheriot-c-tests
+
+- test: juliet_cwe457_uninit_var
+  desc: >
+    CWE-457 Use of Uninitialized Variable (Juliet Test Suite, NIST/NSA).
+    The CHERIoT null capability (x0, hardwired) has tag=0 and address=0.
+    Any dereference through a tag=0 pointer raises a CHERI exception.
+    An initialized root (MTDC via cspecialr) has tag=1.
+    Tests: (1) cgettag on x0=0 (null/uninit pointer has no valid tag);
+    (2) cgettag on MTDC=1 (initialized root is valid); (3) cgetaddr on
+    x0=0 (null address is zero, not garbage).
+  iterations: 1
+  test_srcs: juliet_cwe457_uninit_var/juliet_cwe457_uninit_var.S
+  sim_opts: "+enable_cheriot_seq=1"
+  config: cheriot-c-tests
+
+# ---------------------------------------------------------------------------
+# RETIRED 2026-09-18: juliet_cwe468_ptr_scaling and juliet_cwe131_buf_size_calc
+#
+# Both asserted that CIncAddr past the end of a buffer clears the tag. Verified
+# against the RTL trace: it does not, and should not. In CHERIoT the cursor may
+# legitimately leave the bounds -- enforcement happens at DEREFERENCE -- and
+# CIncAddr clears the tag only when the result is UNREPRESENTABLE, which for an
+# 8-byte object is many orders of magnitude further out than +8.
+#
+# So they claimed to demonstrate CHERIoT denying a CWE while checking a tag that
+# was never going to clear. They could not have passed on any correct RTL; the
+# failure was hidden because crt_cheriot.S reported TEST_PASS unconditionally.
+#
+# Replaced by four tests that cover both mechanisms explicitly:
+#   juliet_cwe131_fault / juliet_cwe468_fault  -- bounds enforcement on a store
+#   juliet_cwe131_repr  / juliet_cwe468_repr   -- the representability limit
+#
+# Sources remain in the ibex-private backup if the history is ever needed.
+# ---------------------------------------------------------------------------
+- test: juliet_cwe123_write_what_where
+  desc: >
+    CWE-123 Write-What-Where Condition (Juliet Test Suite, NIST/NSA).
+    An attacker-controlled CSetAddr to 0x80090000 (outside the bounded cap
+    [0x80080000, 0x80080010)) clears the tag immediately — the write primitive
+    is neutralised before any store can execute.  CGetAddr still returns
+    0x80090000 (the address was placed; the tag is the protection).
+    Tests: (1) tag=1 on bounded cap (baseline); (2) tag=0 after
+    CSetAddr(0x80090000) (target outside bounds → write denied); (3)
+    cgetaddr=0x80090000 (address placed, tag=0 is the defence).
+  iterations: 1
+  test_srcs: juliet_cwe123_write_what_where/juliet_cwe123_write_what_where.S
+  sim_opts: "+enable_cheriot_seq=1"
+  config: cheriot-c-tests
+
+# ── cheriot-rtos tests (CHERIoT RTOS pattern tests) ──────────────────────────
+# These tests exercise CHERIoT instructions used internally by the CHERIoT RTOS
+# (cheriot-rtos/, Microsoft / CHERIoT contributors).  Each is adapted from a
+# pattern in cheriot-rtos/tests/ but expressed as bare-metal assembly.
+
+
+# ---------------------------------------------------------------------------
+# Added 2026-09-18. juliet_cwe131_buf_size_calc and juliet_cwe468_ptr_scaling
+# both assert that CIncAddr past the end of a buffer clears the tag. It does
+# not: in CHERIoT the cursor may leave the bounds, and enforcement happens at
+# DEREFERENCE. CIncAddr clears the tag only when the result is UNREPRESENTABLE,
+# which is a different mechanism with a much larger threshold.
+#
+# Those are two distinct properties and neither was covered. These four tests
+# cover both, for both CWEs: *_fault checks bounds enforcement on a store,
+# *_repr checks the representability limit.
+# ---------------------------------------------------------------------------
+
+- test: juliet_cwe131_fault
+  desc: >
+    CWE-131 buffer size miscalculation — bounds enforcement at dereference.
+    Builds a 4-byte bounded capability and stores at offset 8. The store is
+    denied by hardware: mcause is set, the target word is unmodified, and an
+    in-bounds store through the same capability still succeeds. Overrides the
+    weak handle_trap from syscalls.c (which would exit the test) with a pure
+    assembly stub that skips the faulting instruction and touches no memory.
+    Returns 0 on success; 1=cap invalid, 2=no trap, 3=memory was modified,
+    4=in-bounds store trapped, 5=interrupt state.
+  iterations: 1
+  test_srcs: juliet_cwe131_fault/juliet_cwe131_fault.S
+  sim_opts: "+enable_cheriot_seq=1"
+  config: cheriot-c-tests
+
+- test: juliet_cwe131_repr
+  desc: >
+    CWE-131 buffer size miscalculation — representability limit of CIncAddr.
+    Confirms an 8-byte capability moved 8 past its end is STILL tagged (out of
+    bounds but representable — the case the original test got wrong), then that
+    moving it 256 MB out does clear the tag. Also checks CIncAddr never traps.
+    Returns 0 on success; 1=tag wrongly cleared, 2=tag wrongly kept,
+    3=cursor wrong, 4-6=interrupt state.
+  iterations: 1
+  test_srcs: juliet_cwe131_repr/juliet_cwe131_repr.S
+  sim_opts: "+enable_cheriot_seq=1"
+  config: cheriot-c-tests
+
+- test: juliet_cwe468_fault
+  desc: >
+    CWE-468 incorrect pointer scaling — bounds enforcement at dereference.
+    Builds a capability bounded to a 2-element int32 array (8 bytes) and stores
+    with a wrong stride at offset 8, one element past the end. The store is
+    denied: mcause is set, memory is unmodified, and an in-bounds store still
+    succeeds. Same handle_trap override as juliet_cwe131_fault.
+    Returns 0 on success; 1=cap invalid, 2=no trap, 3=memory was modified,
+    4=in-bounds store trapped, 5=interrupt state.
+  iterations: 1
+  test_srcs: juliet_cwe468_fault/juliet_cwe468_fault.S
+  sim_opts: "+enable_cheriot_seq=1"
+  config: cheriot-c-tests
+
+- test: juliet_cwe468_repr
+  desc: >
+    CWE-468 incorrect pointer scaling — representability limit of CIncAddr.
+    Confirms a wrong stride that steps one element past an 8-byte array leaves
+    the capability tagged (out of bounds but representable), while a wildly
+    wrong scale factor makes the cursor unrepresentable and clears the tag.
+    Returns 0 on success; 1=tag wrongly cleared, 2=tag wrongly kept,
+    3=cursor wrong, 4-6=interrupt state.
+  iterations: 1
+  test_srcs: juliet_cwe468_repr/juliet_cwe468_repr.S
+  sim_opts: "+enable_cheriot_seq=1"
+  config: cheriot-c-tests

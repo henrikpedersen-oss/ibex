@@ -25,13 +25,20 @@
 #   ra.capability.otype = 5 (OTYPE_SENTRY_IE_BKWD) because MIE=1 at jump
 #   ra.capability.tag   = 1 (valid backward sentry)
 #
+# Return convention:
+#   CJALR overwrites ra with a new backward sentry (cursor = PC+4 of CJALR).
+#   To return to the original caller, we save the caller's backward sentry
+#   in s0 (x8) before the CJALR and restore it to ra after tests at .Ltarget.
+#     cmove s0, c1   = 0xFEA0845B  (funct7=0x7F rs2=0x0A rs1=x1 rd=x8)
+#     cmove c1, c8   = 0xFEA400DB  (funct7=0x7F rs2=0x0A rs1=x8 rd=x1)
+#
 # Encodings:
 #   auipc  a0, 0         = 0x00000517  (AUIPCC/AUIPC, rd=x10, imm=0)
 #   csetaddr ca0,ca0,a1  = .word 0x20B5055B  (funct7=0x10 rs2=x11 rs1=x10 rd=x10)
 #   cspecialr a1,mscratchc = .word 0x03E005DB  (rd=x11, scr=30)
 #   csetaddr a1,a1,t0    = .word 0x205585DB  (funct7=0x10 rs2=x5 rs1=x11 rd=x11)
 #   cseal ca0,ca0,a1     = .word 0x16B5055B  (funct7=0x0B rs2=x11 rs1=x10 rd=x10)
-#   cjalr ra, ca0        = .word 0x240500DB  (funct7=0x12 rs2=x0 rs1=x10 rd=x1)
+#   cjalr ra, ca0        = .word 0x000500E7  (OPCODE_JALR=0x67, imm12=0, rs1=x10, rd=x1)
 #   cgettype a0, ca0     = .word 0xFE15055B  (funct7=0x7F rs2=1 rs1=x10 rd=x10)
 #   cgettag  a0, ca0     = .word 0xFE45055B
 #   cgettype a0, ra      = .word 0xFE10855B  (funct7=0x7F rs2=1 rs1=x1 rd=x10)
@@ -60,17 +67,21 @@ main:
     .word   0x16B5055B              # cseal ca0, ca0, a1
 
     # ── Test 1: sealed capability has tag=1 ──────────────────────────────────
-    .word   0xFE45055B              # cgettag a0, ca0
+    # Use t0 (x5) as rd so ca0 (x10) is not clobbered before Test 2 and CJALR.
+    .word   0xFE4502DB              # cgettag t0, ca0  (rd=x5, rs1=x10)
     li      a2, 1
-    bne     a0, a2, .Lfail_test1
+    bne     t0, a2, .Lfail_test1
 
     # ── Test 2: otype = 1 (OTYPE_SENTRY) ────────────────────────────────────
-    .word   0xFE15055B              # cgettype a0, ca0
+    # Same: use t0 as rd to preserve ca0 for the CJALR below.
+    .word   0xFE1502DB              # cgettype t0, ca0  (rd=x5, rs1=x10)
     li      a2, 1
-    bne     a0, a2, .Lfail_test2
+    bne     t0, a2, .Lfail_test2
 
     # ── Step 6: CJALR ra, ca0 — jump through sentry to .Ltarget ─────────────
-    .word   0x240500DB              # cjalr ra, ca0  (rd=x1=ra, rs1=x10=ca0)
+    # Save caller's return sentry to s0 before CJALR overwrites ra.
+    .word   0xFEA0845B              # cmove s0, c1  (rd=x8=s0, rs1=x1=ra)
+    .word   0x000500E7              # cjalr ra, ca0  (OPCODE_JALR=0x67, imm=0, rs1=x10, rd=x1=ra)
     # Execution continues at .Ltarget (code below is unreachable)
     li      a0, 99
     ret
@@ -98,12 +109,19 @@ main:
     bne     a0, x0, .Lfail_test7
 
     li      a0, 0
-    ret
+    j       .Lreturn
 
+    # .Lfail_test1/.Lfail_test2: before CJALR, ra still holds caller's sentry
 .Lfail_test1: li a0, 1; ret
 .Lfail_test2: li a0, 2; ret
-.Lfail_test3: li a0, 3; ret
-.Lfail_test4: li a0, 4; ret
-.Lfail_test5: li a0, 5; ret
-.Lfail_test6: li a0, 6; ret
-.Lfail_test7: li a0, 7; ret
+    # .Lfail_test3-7: after CJALR, restore ra from s0 before returning
+.Lfail_test3: li a0, 3; j .Lreturn
+.Lfail_test4: li a0, 4; j .Lreturn
+.Lfail_test5: li a0, 5; j .Lreturn
+.Lfail_test6: li a0, 6; j .Lreturn
+.Lfail_test7: li a0, 7; j .Lreturn
+
+    # Restore the caller's backward sentry from s0 into ra, then return.
+.Lreturn:
+    .word   0xFEA400DB              # cmove c1, c8  (rd=x1=ra, rs1=x8=s0)
+    ret

@@ -82,10 +82,21 @@ main:
     bne     a0, a2, .Lfail_test1
 
     # ── Test 2: base unchanged = 0 ────────────────────────────────────────────
+    # a0 and ca0 are the SAME register: the cgetaddr above wrote an integer into
+    # it, which clears the tag and destroys the capability. Every later cget*
+    # would then query a dead capability -- cgetbase returned 0x1000 instead of 0
+    # and this test failed for that reason, not because the RTL was wrong.
+    # Re-materialise the capability before each query.
+    .word   0x03C0055B              # cspecialr ca0, mtcc
+    li      a1, 0x1000
+    .word   0x20B5055B              # csetaddr ca0, ca0, a1
     .word   0xFE25055B              # cgetbase a0, ca0
     bne     a0, x0, .Lfail_test2
 
     # ── Test 3: tag = 1 (0x1000 within full-range MTCC) ──────────────────────
+    .word   0x03C0055B              # cspecialr ca0, mtcc
+    li      a1, 0x1000
+    .word   0x20B5055B              # csetaddr ca0, ca0, a1
     .word   0xFE45055B              # cgettag a0, ca0
     li      a1, 1
     bne     a0, a1, .Lfail_test3

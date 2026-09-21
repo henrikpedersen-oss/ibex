@@ -16,7 +16,7 @@
 # (ibex WARL accepts 4-byte alignment but Spike uses 256-byte granularity).
 # .align 8 (2^8 = 256) is inserted before the trap handler label.
 #
-#   Test 1: trap was taken (t4 flag set by handler = 1)
+#   Test 1: trap was taken (a5 flag set by handler = 1)
 #   Test 2: mcause = 11 (EXCE_ECALL_MMODE)
 #   Test 3: mepc = address of ECALL instruction
 #   Test 4: MIE restored by MRET (mstatus.MIE=1 after MRET)
@@ -54,19 +54,22 @@ main:
     #   csetaddr a0, a0, t0   = .word 0x2055055B  (rs2=x5=t0; cursor=handler)
     #   cspecialrw x0, a0, mtcc = .word 0x03C5005B  (write MTCC; rd=x0 write-only)
     la      t0, .Ltrap_handler
-    csrw    mtvec, t0               # ISS: update integer mtvec (no-op for ibex MTCC)
     auipc   a0, 0                   # CHERIoT: CAUIPCC → ca0=PCC (tag=1, bounds=code)
     .word   0x2055055B              # CHERIoT: csetaddr a0, a0, t0  (cursor=handler)
     .word   0x03C5005B              # CHERIoT: cspecialrw x0, a0, mtcc
+    # csrw mtvec is illegal in CHERIoT mode — ibex traps to the now-installed MTCC
+    # handler, which advances mepc by 4 and MRETs. li a5,0 below resets the flag.
+    # For the spike ISS: csrw mtvec updates the integer mtvec so spike vectors correctly.
+    csrw    mtvec, t0               # ISS: update mtvec; ibex: illegal → MTCC handler
 
     # ── ECALL: M-mode exception → jumps to .Ltrap_handler ────────────────────
-    li      t4, 0                   # trap_taken flag: handler sets to 1
+    li      a5, 0                   # trap_taken flag: handler sets to 1
     ecall
 .Lafter_ecall:
     # Execution resumes here after MRET from handler
 
     # ── Test 1: trap was taken ────────────────────────────────────────────────
-    beq     t4, x0, .Lfail_test1
+    beq     a5, x0, .Lfail_test1
 
     # ── Test 2: mcause = 11 (E-call from M-mode) ─────────────────────────────
     csrr    a0, mcause
@@ -74,8 +77,8 @@ main:
     bne     a0, a1, .Lfail_test2
 
     # ── Test 3: mepc was set to address of ecall ──────────────────────────────
-    # The handler saved the original mepc (= &ecall) into s1 before advancing it.
-    # Reading mepc now gives ECALL+4 (what the handler wrote), not the original.
+    # The handler saved MEPCC.cursor (= &ecall) into s1 via cspecialr mepcc before
+    # advancing MEPCC to ECALL+4 via cspecialrw. s1 holds the original trap PC.
     la      a1, .Lafter_ecall
     addi    a1, a1, -4              # a1 = &ecall (= .Lafter_ecall - 4)
     bne     s1, a1, .Lfail_test3   # s1 = original mepc saved by handler
@@ -83,7 +86,7 @@ main:
     # ── Test 4: MIE restored by MRET (MRET sets MIE = MPIE = 1) ─────────────
     csrr    a0, mstatus
     andi    a1, a0, 8               # isolate MIE
-    beq     a1, x0, .Lfail_test4
+    beq     a1, x0, .Lfail_tesa5
 
     # ── Test 5: mip = 0 ───────────────────────────────────────────────────────
     csrr    a0, mip
@@ -103,8 +106,8 @@ main:
     #   cspecialrw x0, a0, mepcc = .word 0x03F5005B  (scr=31, write-only)
     .align 8
 .Ltrap_handler:
-    li      t4, 1                   # signal: trap fired
-    csrr    s1, mepc                # s1 = original MEPCC.cursor (= &ecall)
+    li      a5, 1                   # signal: trap fired
+    .word   0x03F004DB              # cspecialr s1, mepcc  (rd=x9=s1, SCR=31; integer s1=cursor)
     addi    t0, s1, 4               # t0 = ECALL+4 (return address)
     auipc   a0, 0                   # CHERIoT: CAUIPCC → ca0=PCC (tag=1, bounds=code)
     .word   0x2055055B              # CHERIoT: csetaddr a0, a0, t0  (cursor=ECALL+4)
@@ -114,5 +117,5 @@ main:
 .Lfail_test1: li a0, 1; ret
 .Lfail_test2: li a0, 2; ret
 .Lfail_test3: li a0, 3; ret
-.Lfail_test4: li a0, 4; ret
+.Lfail_tesa5: li a0, 4; ret
 .Lfail_test5: li a0, 5; ret

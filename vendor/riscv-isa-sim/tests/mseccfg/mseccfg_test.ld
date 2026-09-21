@@ -4,19 +4,26 @@
 
 MEMORY
 {
-    /* 
-     * default location 
+    /*
+     * ibex simulation memory map: DRAM at 0x80000000.
+     * The ibex testbench maps ELF VMA to simulation address with a fixed
+     * +0x7FF00000 offset, so VMA 0x100000 lands at simulation 0x80000000.
+     *
+     * TEST_MEM and U_MEM origins are chosen so that:
+     *   TEST_MEM: 0x300000 + 0x7FF00000 = 0x80200000 = TEST_MEM_START in C sources
+     *   U_MEM:    0x340000 + 0x7FF00000 = 0x80240000 = TEST_MEM_END in C sources
+     *
      * NAPOT is used. Thus size must be 2^n.
      * For easier handling, esp. when MML set, trap handler has separated stack at GP
      * - Currently allocate 0x140000. Just avoid overlap with _end.
      */
     M_MEM (AX)  : ORIGIN = 0x100000, LENGTH = 1M
-            
+
     RESERVED  : ORIGIN = 0x000000, LENGTH = 1M
-    
-    TEST_MEM (AX)  : ORIGIN = 0x200000, LENGTH = 256K
-    
-    U_MEM (AX)  : ORIGIN = 0x240000, LENGTH = 64K
+
+    TEST_MEM (AX)  : ORIGIN = 0x300000, LENGTH = 256K
+
+    U_MEM (AX)  : ORIGIN = 0x340000, LENGTH = 64K
 }
 
 OUTPUT_ARCH( "riscv" )
@@ -30,9 +37,9 @@ SECTIONS
 {
     . = 0x100000;
     __global_pointer$ = 0x140000;
-    
-    .text : ALIGN(256) { 
-        *(.text.init) 
+
+    .text : ALIGN(256) {
+        *(.text.init)
         *(.text) *(.text.*) *(.device_code) . = ALIGN(256); . = 0x10000; }
     PROVIDE (__TEXT_END = .);
     

@@ -80,6 +80,13 @@ main:
     bne     a0, a1, .Lfail_test1
 
     # ── Test 2: PCC has execute permission (bit 8) ────────────────────────────
+    # Re-take PCC first: a0 and ca0 are the same register, so the cgettag above
+    # wrote an integer into it and cleared the tag. cgetperm then returned 0 and
+    # this test failed for that reason, not because PCC lacks execute. It went
+    # unnoticed because crt_cheriot.S reported TEST_PASS unconditionally until
+    # 2026-09-18. The cursor differs from the first auipcc (it is the address of
+    # this instruction), which does not matter -- only the permissions are read.
+    .word   0x00000517              # auipcc ca0, 0
     .word   0xFE05055B              # cgetperm a0, ca0
     andi    a1, a0, 0x100           # isolate EX (bit 8)
     beq     a1, x0, .Lfail_test2   # EX must be set
