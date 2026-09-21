@@ -24,3 +24,10 @@ modelsim.ini
 # Compiled CHERIoT-Sail cosim DPI library (built by dv/cosim/cheriot_sail/Makefile)
 dv/cosim/cheriot_sail/*.so
 
+# Xcelium elaboration output for the compliance testbench (dv/riscv_compliance/build_xlm.sh).
+# ~20 MB per build; the glob also covers the -o OUTDIR variants used for coverage runs.
+dv/riscv_compliance/xlm_compliance_out*/
+
+# Linker map emitted by the directed-test builds (-Wl,-Map=link.log in directed_testlist.yaml)
+dv/uvm/core_ibex/link.log
+
