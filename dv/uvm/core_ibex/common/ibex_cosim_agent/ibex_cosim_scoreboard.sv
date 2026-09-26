@@ -28,6 +28,179 @@ class ibex_cosim_scoreboard extends uvm_scoreboard;
   uvm_event reset_e;
   uvm_event check_inserted_iside_error_e;
 
+  // mtval that Ibex will write when it takes an internal (memory-integrity) NMI.
+  //
+  // Read hierarchically rather than taken from RVFI because mtval is not on the
+  // RVFI interface at all. The ISS cannot derive it: Ibex sets mtval to the
+  // address of the transaction that returned bad integrity
+  // (ibex_controller.sv:438), while a standard RISC-V model zeroes mtval on any
+  // interrupt -- so a `csrr rd, mtval` in the handler diverges. Nor can it be
+  // reconstructed from the preceding synchronous trap's tval, because the NMI
+  // carries the dside integrity-error address rather than whatever faulted
+  // first.
+  //
+  // irq_nm_int_mtval is declared at module scope in ibex_controller.sv (line
+  // 183), not inside the `if (MemECC)` generate block that drives it, so this
+  // path resolves in every configuration.
+  //
+  // A hierarchical peek is deliberate: the alternative was adding an RVFI
+  // output, which would edit RTL the team is actively changing. Keep this in DV
+  // so it collides with nothing; replace it with a real RVFI signal later if one
+  // appears.
+  local string nmi_int_mtval_path =
+      "core_ibex_tb_top.dut.u_ibex_top.u_ibex_core.id_stage_i.controller_i.irq_nm_int_mtval";
+
+  // ── mtval / exception-cause checker (#824) ────────────────────────────────
+  //
+  // The architectural mtval the DUT settled on. Read from the CSR itself rather
+  // than csr_mtval_o so the value is the committed one, not the value being
+  // driven during the trap cycle.
+  local string dut_mtval_path =
+      "core_ibex_tb_top.dut.u_ibex_top.u_ibex_core.cs_registers_i.mtval_q";
+
+  // Set when the previous RVFI item trapped, so the comparison happens on the
+  // next item once both sides have settled. Also records whether that trap was
+  // an internal NMI -- see check_mtval_after_trap for why that case is skipped.
+  local bit prev_item_trapped;
+  local bit prev_item_was_nmi_int;
+  local bit dut_mtval_read_failed;
+
+  // OFF unless +check_mtval=1. Deliberately opt-in, not enabled by default.
+  //
+  // Ibex's mtval on a trap is implementation-defined in places where Spike will
+  // not necessarily agree, and none of it is covered by fixup_csr (which exists
+  // precisely because "Spike and Ibex have different WARL behaviours" but does
+  // not handle mtval). Two known divergence risks, both from
+  // ibex_controller.sv:
+  //   :866-868  illegal instruction -> Ibex writes the instruction word
+  //             (non-CHERIoT mode); a standard model may write 0
+  //   :861      instruction access fault -> Ibex writes the PC
+  // riscv_illegal_instr_test runs illegal_instr_ratio=25, so if Spike disagrees
+  // this would fire thousands of times and drown the regression.
+  //
+  // So: implemented and available, but must be characterised on a real run
+  // before being turned on by default. Enable it on a single test first and
+  // look at what it reports; if the only mismatches are the WARL cases above,
+  // add them to fixup_csr and then flip the default.
+  local bit check_mtval_en;
+
+  function void check_mtval_after_trap(ibex_rvfi_seq_item rvfi_instr);
+    uvm_hdl_data_t dut_val;
+    bit [31:0]     iss_mtval;
+
+    if (!check_mtval_en) return;
+
+    if (prev_item_trapped) begin
+      // Skip internal NMIs. set_nmi_int() pushes the DUT's mtval into the ISS
+      // (because Ibex writes the integrity-error address where a standard
+      // RISC-V model zeroes mtval), so comparing here would be tautological --
+      // the DUT's own value checked against itself. Nothing is lost: that path
+      // is covered by the NMI handling, and CHERI faults, which is what this
+      // check exists for, are unaffected.
+      if (prev_item_was_nmi_int) begin
+        prev_item_trapped     = 1'b0;
+        prev_item_was_nmi_int = 1'b0;
+        return;
+      end
+
+      if (!uvm_hdl_read(dut_mtval_path, dut_val)) begin
+        if (!dut_mtval_read_failed) begin
+          dut_mtval_read_failed = 1'b1;
+          `uvm_error(`gfn, $sformatf("Could not read %0s; mtval will not be checked",
+                                     dut_mtval_path))
+        end
+      end else begin
+        riscv_cosim_get_csr(cosim_handle, ibex_pkg::CSR_MTVAL, iss_mtval);
+        if (dut_val[31:0] !== iss_mtval) begin
+          // UVM_ERROR rather than FATAL so a run reports every mtval divergence
+          // instead of stopping at the first, matching the CHERIoT-Sail check
+          // below. In CHERIoT mode the decoded fields are far more useful than
+          // the raw word, so print both.
+          if (cheriot_seq_en) begin
+            `uvm_error(`gfn, $sformatf(
+                {"mtval mismatch after trap at pc 0x%08x: DUT 0x%08x (capcause 0x%02x, ",
+                 "cap_idx %0d) vs ISS 0x%08x (capcause 0x%02x, cap_idx %0d)"},
+                rvfi_instr.pc, dut_val[31:0], dut_val[4:0], dut_val[10:5],
+                iss_mtval, iss_mtval[4:0], iss_mtval[10:5]))
+          end else begin
+            `uvm_error(`gfn, $sformatf("mtval mismatch after trap at pc 0x%08x: DUT 0x%08x vs ISS 0x%08x",
+                                       rvfi_instr.pc, dut_val[31:0], iss_mtval))
+          end
+        end
+      end
+
+      prev_item_trapped     = 1'b0;
+      prev_item_was_nmi_int = 1'b0;
+    end
+
+    if (rvfi_instr.trap) begin
+      prev_item_trapped     = 1'b1;
+      prev_item_was_nmi_int = rvfi_instr.nmi_int;
+    end
+  endfunction
+
+  // ── mcounteren sync ───────────────────────────────────────────────────────
+  //
+  // mcounteren gates U-mode access to the unprivileged counters
+  // (ibex_cs_registers.sv:618, `illegal_csr = (priv_lvl_q == PRIV_LVL_U) &&
+  // !mcounteren[mhpmcounter_idx]`), but it is not on RVFI and was never pushed
+  // to the ISS, so Spike kept it at its reset value of zero. A U-mode
+  // `csrr t0, hpmcounter3` then trapped on the ISS and retired on the DUT.
+  //
+  // The DUT is correct there. From riscv_dv's mcounteren_test on 2026-09-24:
+  //     csrrw x0, mcounteren, x5    x5=0xffffffff
+  //     csrrs x18, mcounteren, x0   x18=0x00001ffd   <- bit 3 set
+  // so mcounteren[3] == 1 and the U-mode read is permitted. Spike trapped only
+  // because it had never been told.
+  //
+  // Pushed rather than compared, for the same reason the mhpmcounter* registers
+  // above are pushed: mcounteren is WARL with implementation-defined width and
+  // masking (bit 1 tied low for the unimplemented `time` counter, bits above
+  // MHPMCounterNum+MHPMCOUNTER_BASE tied low), which the ISS cannot be expected
+  // to reproduce without being told.
+  //
+  // This does mean mcounteren itself is no longer checked here. That coverage is
+  // not lost overall -- it moves to the Sail equivalence proof, which compares
+  // mcounteren properly as of the 2026-09-24 fix to formal-cheriot's abs.sv
+  // (it had been pinning the DUT side to zero with the comment "ibex hardwires
+  // to zero", which is false). Formal is the stronger check of the two.
+  local string dut_mcounteren_path =
+      "core_ibex_tb_top.dut.u_ibex_top.u_ibex_core.cs_registers_i.mcounteren";
+  local bit dut_mcounteren_read_failed;
+
+  function bit [31:0] get_dut_mcounteren();
+    uvm_hdl_data_t val;
+    if (!uvm_hdl_read(dut_mcounteren_path, val)) begin
+      if (!dut_mcounteren_read_failed) begin
+        dut_mcounteren_read_failed = 1'b1;
+        `uvm_error(`gfn, $sformatf(
+            "Could not read %0s; the ISS will keep mcounteren at 0 and U-mode counter reads will mismatch",
+            dut_mcounteren_path))
+      end
+      return 32'h0;
+    end
+    return val[31:0];
+  endfunction
+
+  // Returns the DUT's pending internal-NMI mtval, or 0 if the path cannot be
+  // read. A failed read is reported once rather than silently returning 0,
+  // because silently returning 0 would reintroduce exactly the divergence this
+  // exists to fix.
+  local bit nmi_int_mtval_read_failed;
+  function bit [31:0] get_nmi_int_mtval();
+    uvm_hdl_data_t val;
+    if (!uvm_hdl_read(nmi_int_mtval_path, val)) begin
+      if (!nmi_int_mtval_read_failed) begin
+        nmi_int_mtval_read_failed = 1'b1;
+        `uvm_error(`gfn, $sformatf(
+            "Could not read %0s; internal-NMI mtval will be passed as 0 and a csrr of mtval in the NMI handler will mismatch",
+            nmi_int_mtval_path))
+      end
+      return 32'h0;
+    end
+    return val[31:0];
+  endfunction
+
   bit failed_iside_accesses [bit[31:0]];
   bit iside_pmp_failure     [bit[31:0]];
 
@@ -95,6 +268,12 @@ class ibex_cosim_scoreboard extends uvm_scoreboard;
     // tests run under (opentitan: SecureIbex=1) -- see ibex-private's history
     // for why cfg.secure_ibex alone is not a valid CHERIoT-mode gate.
     void'($value$plusargs("enable_cheriot_seq=%0b", cheriot_seq_en));
+
+    // mtval/exception-cause checker (#824) -- opt-in, see check_mtval_en.
+    void'($value$plusargs("check_mtval=%0b", check_mtval_en));
+    if (check_mtval_en) begin
+      `uvm_info(`gfn, "mtval/exception-cause checking ENABLED (+check_mtval=1)", UVM_LOW)
+    end
     if (cfg.secure_ibex && cheriot_seq_en) begin
       cheriot_sail_cosim_init(cfg.start_pc);
       `uvm_info(`gfn, "CHERIoT-Sail oracle initialised", UVM_LOW)
@@ -147,7 +326,7 @@ class ibex_cosim_scoreboard extends uvm_scoreboard;
         // RVFI item is only notifying about new interrupts, not a retired instruction, so provide
         // cosim with interrupt information and loop back to await the next item.
         riscv_cosim_set_nmi(cosim_handle, rvfi_instr.nmi);
-        riscv_cosim_set_nmi_int(cosim_handle, rvfi_instr.nmi_int);
+        riscv_cosim_set_nmi_int(cosim_handle, rvfi_instr.nmi_int, get_nmi_int_mtval());
         riscv_cosim_set_mip(cosim_handle, rvfi_instr.pre_mip, rvfi_instr.pre_mip);
 
         continue;
@@ -172,7 +351,7 @@ class ibex_cosim_scoreboard extends uvm_scoreboard;
       // handled with the correct priority when they occur together.
       riscv_cosim_set_debug_req(cosim_handle, rvfi_instr.debug_req);
       riscv_cosim_set_nmi(cosim_handle, rvfi_instr.nmi);
-      riscv_cosim_set_nmi_int(cosim_handle, rvfi_instr.nmi_int);
+      riscv_cosim_set_nmi_int(cosim_handle, rvfi_instr.nmi_int, get_nmi_int_mtval());
       riscv_cosim_set_mip(cosim_handle, rvfi_instr.pre_mip, rvfi_instr.post_mip);
       riscv_cosim_set_mcycle(cosim_handle, rvfi_instr.mcycle);
 
@@ -184,10 +363,20 @@ class ibex_cosim_scoreboard extends uvm_scoreboard;
                             ibex_pkg::CSR_MHPMCOUNTER3H + i, rvfi_instr.mhpmcountersh[i]);
       end
 
+      // Must be before the step: the ISS checks mcounteren when it executes the
+      // counter read, so pushing it afterwards would be a cycle too late.
+      riscv_cosim_set_csr(cosim_handle, ibex_pkg::CSR_MCOUNTEREN, get_dut_mcounteren());
+
       riscv_cosim_set_ic_scr_key_valid(cosim_handle, rvfi_instr.ic_scr_key_valid);
 
+      // more_ops: a non-final operation of an expanded (Zcmp) instruction. The
+      // cosim defers stepping the ISS until the final one, so that every memory
+      // access the instruction performs has been observed and queued before the
+      // ISS issues its own -- see deferred_dut_writes in spike_cosim.h.
       if (!riscv_cosim_step(cosim_handle, rvfi_instr.rd_addr, rvfi_instr.rd_wdata, rvfi_instr.pc,
-                            rvfi_instr.trap, rvfi_instr.rf_wr_suppress)) begin
+                            rvfi_instr.intr, rvfi_instr.trap, rvfi_instr.rf_wr_suppress,
+                            rvfi_instr.expanded_insn_valid &&
+                            !rvfi_instr.expanded_insn_last)) begin
         // cosim instruction step doesn't match rvfi captured instruction, report a fatal error
         // with the details
         if (cfg.relax_cosim_check) begin
@@ -197,14 +386,34 @@ class ibex_cosim_scoreboard extends uvm_scoreboard;
         end
       end
 
+      // mtval / exception-cause check (#824).
+      //
+      // riscv_cosim_step() compares only rd_addr, rd_wdata, pc and trap, so
+      // mtval was never checked at all -- and in CHERIoT mode mtval is where the
+      // exception detail lives: capcause in [4:0], cap_idx in [10:5]
+      // (ibex_cheriot_pkg.sv, cheriot_violation_cause()).
+      //
+      // Deliberately compared on the instruction AFTER a trap rather than on the
+      // trapping item itself. Both sides settle by then: Spike writes mtval
+      // inside the step for the trapping instruction, and the DUT's mtval_q is
+      // written on the trap cycle, long before the next instruction retires.
+      // Sampling on the trapping item would race both.
+      check_mtval_after_trap(rvfi_instr);
+
       // Must match the gate on cheriot_sail_cosim_init() above: stepping an
       // oracle that was never initialised, or comparing a CHERIoT model
       // against a DUT running plain RV32, both produce spurious mismatches.
-      if (cfg.secure_ibex && cheriot_seq_en && !rvfi_instr.trap) begin
-        automatic bit cheri_we  = (rvfi_instr.rd_addr != 5'h0) && !rvfi_instr.rf_wr_suppress;
+      // Trap instructions are also stepped so Sail can produce the correct
+      // zmtval/zmcause for exception-cause checks; the rd_wdata comparison is
+      // skipped for them (RTL's rd_wdata is undefined when trap=1).
+      if (cfg.secure_ibex && cheriot_seq_en) begin
+        // On a trap the RTL doesn't commit a capability write, so clear cheri_we.
+        automatic bit cheri_we  = (rvfi_instr.rd_addr != 5'h0) && !rvfi_instr.rf_wr_suppress
+                                  && !rvfi_instr.trap;
         automatic bit cheri_tag = rvfi_instr.rd_wcap[32];
         if (cheriot_sail_cosim_step(rvfi_instr.insn, rvfi_instr.pc,
-                                    cheri_we, rvfi_instr.rd_addr, cheri_tag) != 0) begin
+                                    cheri_we, rvfi_instr.rd_addr, cheri_tag,
+                                    rvfi_instr.rd_wdata, rvfi_instr.trap) != 0) begin
           // UVM_ERROR (not FATAL) so simulation continues to collect all mismatches
           `uvm_error(`gfn, get_cheriot_sail_error_str())
         end

@@ -24,13 +24,15 @@ extern "C" {
 // bit[31:0] → const svBitVecVal * (Xcelium DPI convention for packed vectors)
 void cheriot_sail_cosim_init(const svBitVecVal *boot_addr);
 
-// Advance the model by one retired instruction and compare CHERI outputs.
+// Advance the model by one retired instruction and compare CHERI/integer outputs.
 //
-// insn:        32-bit instruction word (from RTL RVFI rvfi_insn)
-// pc:          program counter of this instruction (rvfi_pc_rdata)
-// cheri_rf_we: 1 if the instruction wrote a capability register  (bit → svBit)
-// cheri_rd:    5-bit destination capability register address     (bit[4:0] → svBitVecVal*)
-// cheri_rtag:  tag bit written to the capability register        (bit → svBit)
+// insn:          32-bit instruction word (from RTL RVFI rvfi_insn)
+// pc:            program counter of this instruction (rvfi_pc_rdata)
+// cheri_rf_we:   1 if the instruction wrote a capability register  (bit → svBit)
+// cheri_rd:      5-bit destination capability register address     (bit[4:0] → svBitVecVal*)
+// cheri_rtag:    tag bit written to the capability register        (bit → svBit)
+// rtl_rd_wdata:  32-bit integer register write data (rvfi_rd_wdata)
+// rtl_trap:      1 if the RTL took a trap this instruction         (bit → svBit)
 //
 // Returns 0 on match, -1 if the model disagrees (errors queued via
 // cheriot_sail_cosim_get_error).
@@ -38,7 +40,9 @@ int cheriot_sail_cosim_step(const svBitVecVal *insn,
                              const svBitVecVal *pc,
                              svBit cheri_rf_we,
                              const svBitVecVal *cheri_rd,
-                             svBit cheri_rtag);
+                             svBit cheri_rtag,
+                             const svBitVecVal *rtl_rd_wdata,
+                             svBit rtl_trap);
 
 // Tear down the model (frees Sail runtime state). Safe to call on cleanup and
 // before re-initializing after a reset.
@@ -46,6 +50,9 @@ void cheriot_sail_cosim_cleanup(void);
 
 // Return the Sail model's mtval value after the last step() (valid when that step was a trap).
 uint32_t    cheriot_sail_cosim_get_mtval(void);
+// Return the Sail model's mcause value after the last step() (valid when that step was a trap).
+// Bit 31 = interrupt flag; bits [4:0] = exception / interrupt code.
+uint32_t    cheriot_sail_cosim_get_mcause(void);
 
 // Error reporting — same pattern as riscv_cosim_get_error.
 int         cheriot_sail_cosim_get_num_errors(void);

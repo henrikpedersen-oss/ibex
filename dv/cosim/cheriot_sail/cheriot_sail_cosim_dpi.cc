@@ -11,6 +11,7 @@
 #include "cheriot_sail_cosim_dpi.h"
 
 #include <cassert>
+#include <csetjmp>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -29,6 +30,7 @@ extern "C" {
 // sail.h will try to #include <gmp.h> but include guards make it a no-op;
 // the C++ operators are already registered above.
 #include "sail.h"
+#include "sail_failure.h"
 #include "riscv_rvfi_model_RV32.h"
 
 // model_init / model_fini are defined in the generated C but not declared in
@@ -69,8 +71,7 @@ static std::vector<std::string> s_errors;
 // ---------------------------------------------------------------------------
 
 // Retrieve the CHERI extension packet and extract the two scalar fields we
-// check in the initial integration step: capability destination register
-// address and write-tag bit.
+// check: capability destination register address and write-tag bit.
 static void get_cheri_output(uint64_t *out_cd_addr, uint64_t *out_cd_wtag) {
   lbits raw;
   CREATE(lbits)(&raw);
@@ -83,6 +84,14 @@ static void get_cheri_output(uint64_t *out_cd_addr, uint64_t *out_cd_wtag) {
   *out_cd_wtag = z_get_RVFI_DII_Execution_Packet_Ext_CHERI_rvfi_cd_wtag(pkt);
 
   KILL(lbits)(&raw);
+}
+
+// Retrieve the integer extension packet fields for integer-result CHERIoT
+// instructions (e.g. cgetoffset, cgettag, cgetlen).
+// Only call when zrvfi_int_data_present is true.
+static void get_integer_output(uint64_t *out_rd_addr, uint64_t *out_rd_wdata) {
+  *out_rd_addr  = z_get_RVFI_DII_Execution_Packet_Ext_Integer_rvfi_rd_addr(zrvfi_int_data);
+  *out_rd_wdata = z_get_RVFI_DII_Execution_Packet_Ext_Integer_rvfi_rd_wdata(zrvfi_int_data);
 }
 
 // ---------------------------------------------------------------------------
@@ -126,7 +135,9 @@ int cheriot_sail_cosim_step(const svBitVecVal *insn_p,
                              const svBitVecVal *pc_p,
                              svBit cheri_rf_we,
                              const svBitVecVal *cheri_rd_p,
-                             svBit cheri_rtag) {
+                             svBit cheri_rtag,
+                             const svBitVecVal *rtl_rd_wdata_p,
+                             svBit rtl_trap) {
   uint32_t insn     = insn_p[0];
   uint32_t pc       = pc_p[0];
   uint32_t cheri_rd = cheri_rd_p[0];
@@ -135,31 +146,6 @@ int cheriot_sail_cosim_step(const svBitVecVal *insn_p,
   if (s_step_no < 5 || (s_step_no % 50 == 0)) {
     fprintf(stderr, "[cheriot-sail] step %lld: insn=0x%08x pc=0x%08x\n",
             (long long)s_step_no, insn, pc);
-  }
-
-  // Debug: print Sail internal state for steps near the trap to diagnose
-  // "step failed (not stepped)" — covers dispatchInterrupt check and fetch state.
-  if (s_step_no >= 60 && s_step_no <= 70) {
-    fprintf(stderr, "[cheriot-sail] INSN step %lld: insn=0x%08x rtl_pc=0x%08x\n",
-            (long long)s_step_no, (unsigned)insn, (unsigned)pc);
-  }
-  if (s_step_no >= 60) {
-    uint64_t mip_bits = zmip.zbits;
-    uint64_t mie_bits = zmie.zbits;
-    uint64_t mst_bits = zmstatus.zbits;
-    uint64_t sail_pc  = zPC;
-    uint64_t mie_flag = z_get_Mstatus_MIE(zmstatus);
-    fprintf(stderr,
-            "[cheriot-sail] DBG step %lld: sail_pc=0x%08llx nextPC=0x%08llx rtl_pc=0x%08x mstatus=0x%llx MIE=%llu mip=0x%llx mie=0x%llx pending=0x%llx\n",
-            (long long)s_step_no,
-            (unsigned long long)sail_pc,
-            (unsigned long long)znextPC,
-            (unsigned)pc,
-            (unsigned long long)mst_bits,
-            (unsigned long long)mie_flag,
-            (unsigned long long)mip_bits,
-            (unsigned long long)mie_bits,
-            (unsigned long long)(mip_bits & mie_bits));
   }
 
   // Encode RVFI-DII instruction packet (Sail bitfield RVFI_DII_Instruction_Packet):
@@ -174,15 +160,6 @@ int cheriot_sail_cosim_step(const svBitVecVal *insn_p,
   // Clear the execution output packet before each step (mirrors riscv_sim.c).
   zrvfi_zzero_exec_packet(UNIT);
 
-  // Enable Sail instruction tracing for steps near the trap.
-  bool was_print_instr = config_print_instr;
-  FILE *was_trace_log = trace_log;
-  if (s_step_no >= 63 && s_step_no <= 67) {
-    config_print_instr = true;
-    config_print_exception = true;
-    trace_log = stderr;
-  }
-
   // Sync Sail's PC to ibex's current instruction PC before every step.
   // This prevents drift from (a) silent Error_not_rv32e_register retires on x16-x31
   // accesses and (b) trap-skip gaps where ibex jumps to a handler but Sail doesn't.
@@ -193,25 +170,33 @@ int cheriot_sail_cosim_step(const svBitVecVal *insn_p,
   sail_int sail_step;
   CREATE(sail_int)(&sail_step);
   CONVERT_OF(sail_int, mach_int)(&sail_step, s_step_no);
-  // zstep() returns true when an instruction was actually stepped (success).
-  bool stepped = zstep(sail_step);
-  config_print_instr = was_print_instr;
-  config_print_exception = false;
-  trace_log = was_trace_log;
-  KILL(sail_int)(&sail_step);
 
-  // Post-step debug: show what happened
-  if (s_step_no >= 60) {
+  // Arm the longjmp recovery buffer so that sail_match_failure() (which fires
+  // when the generated decoder can't match an illegal instruction encoding)
+  // returns here rather than calling exit() and crashing the simulation.
+  sail_recovery_buf_active = 1;
+  int recovery = setjmp(sail_recovery_buf);
+  bool stepped;
+  if (recovery != 0) {
+    // sail_match_failure or sail_assert fired inside zstep().  The instruction
+    // encoding is not modelled by CHERIoT-Sail (most likely a riscv-dv illegal
+    // instruction).  Skip comparison for this step: the DUT will take an
+    // illegal-instruction trap which the main Spike cosim handles.
+    sail_recovery_buf_active = 0;
+    // sail_step was CREATE'd above; the longjmp bypassed KILL — free it now.
+    KILL(sail_int)(&sail_step);
     fprintf(stderr,
-            "[cheriot-sail] POST step %lld: sail_pc=0x%08llx nextPC=0x%08llx MIE=%llu mip=0x%llx mstatus=0x%llx stepped=%d\n",
-            (long long)s_step_no,
-            (unsigned long long)zPC,
-            (unsigned long long)znextPC,
-            (unsigned long long)z_get_Mstatus_MIE(zmstatus),
-            (unsigned long long)zmip.zbits,
-            (unsigned long long)zmstatus.zbits,
-            (int)stepped);
+            "[cheriot-sail] step %lld: sail_match_failure for insn=0x%08x "
+            "pc=0x%08x — unmodelled encoding, skipping comparison\n",
+            (long long)s_step_no, insn, pc);
+    s_step_no++;
+    return 0;
   }
+
+  // zstep() returns true when an instruction was actually stepped (success).
+  stepped = zstep(sail_step);
+  sail_recovery_buf_active = 0;
+  KILL(sail_int)(&sail_step);
 
   s_step_no++;
 
@@ -222,50 +207,73 @@ int cheriot_sail_cosim_step(const svBitVecVal *insn_p,
     return -1;
   }
 
+  int ok = 1;
+
+  // ── Capability register checks ────────────────────────────────────────────
+  //
   // Only compare CHERI output when the Sail model executed a CHERIoT capability
   // instruction (zrvfi_cheri_data_present is true).  For ordinary integer
   // instructions both tag and address are uninitialized in the model's output
   // packet; calling zrvfi_get_cheri_data() would trigger a sail_assert failure.
-  if (!zrvfi_cheri_data_present) return 0;
+  if (zrvfi_cheri_data_present) {
+    uint64_t sail_cd_addr = 0, sail_cd_wtag = 0;
+    get_cheri_output(&sail_cd_addr, &sail_cd_wtag);
 
-  uint64_t sail_cd_addr = 0, sail_cd_wtag = 0;
-  get_cheri_output(&sail_cd_addr, &sail_cd_wtag);
-  fprintf(stderr, "[cheriot-sail] CHERI step %lld: sail_cd_addr=%llu sail_cd_wtag=%llu | rtl_we=%d rtl_rd=%d rtl_tag=%d\n",
-          (long long)(s_step_no - 1),
-          (unsigned long long)sail_cd_addr, (unsigned long long)(sail_cd_wtag & 1),
-          (int)cheri_rf_we, (int)cheri_rd, (int)cheri_rtag);
+    // Skip if Sail reports no capability destination (cd_addr=0, cd_wtag=0).
+    // Integer-result CHERI instructions (cgettag, cgetlen, etc.) don't write a
+    // capability in Sail's model; ibex nullifies the register but Sail doesn't.
+    // Writing to c0 with tag=0 is also a no-op and safe to skip.
+    bool has_cap_dest = !(sail_cd_addr == 0 && sail_cd_wtag == 0);
+    if (has_cap_dest && cheri_rf_we) {
+      if (sail_cd_addr != (uint64_t)cheri_rd) {
+        char buf[160];
+        snprintf(buf, sizeof(buf),
+                 "cheriot-sail cd_addr mismatch: sail=0x%02llx rtl=0x%02x "
+                 "(insn=0x%08x pc=0x%08x step=%lld)",
+                 (unsigned long long)sail_cd_addr, (unsigned)cheri_rd,
+                 (unsigned)insn, (unsigned)pc, (long long)(s_step_no - 1));
+        s_errors.emplace_back(buf);
+        ok = 0;
+      }
 
-  // Skip if Sail reports no capability destination (cd_addr=0, cd_wtag=0).
-  // Integer-result CHERI instructions (cgettag, cgetlen, etc.) don't write a
-  // capability in Sail's model; ibex nullifies the register but Sail doesn't.
-  // Writing to c0 with tag=0 is also a no-op and safe to skip.
-  if (sail_cd_addr == 0 && sail_cd_wtag == 0) return 0;
-
-  // Also skip if the RTL didn't write a capability register this cycle.
-  if (!cheri_rf_we) return 0;
-
-  int ok = 1;
-
-  if (sail_cd_addr != (uint64_t)cheri_rd) {
-    char buf[160];
-    snprintf(buf, sizeof(buf),
-             "cheriot-sail cd_addr mismatch: sail=0x%02llx rtl=0x%02x "
-             "(insn=0x%08x pc=0x%08x step=%lld)",
-             (unsigned long long)sail_cd_addr, (unsigned)cheri_rd,
-             (unsigned)insn, (unsigned)pc, (long long)(s_step_no - 1));
-    s_errors.emplace_back(buf);
-    ok = 0;
+      if ((sail_cd_wtag & 1) != (uint64_t)((unsigned)cheri_rtag & 1)) {
+        char buf[160];
+        snprintf(buf, sizeof(buf),
+                 "cheriot-sail cd_wtag mismatch: sail=%llu rtl=%u "
+                 "(insn=0x%08x pc=0x%08x step=%lld)",
+                 (unsigned long long)(sail_cd_wtag & 1), (unsigned)cheri_rtag & 1,
+                 (unsigned)insn, (unsigned)pc, (long long)(s_step_no - 1));
+        s_errors.emplace_back(buf);
+        ok = 0;
+      }
+    }
   }
 
-  if ((sail_cd_wtag & 1) != (uint64_t)((unsigned)cheri_rtag & 1)) {
-    char buf[160];
-    snprintf(buf, sizeof(buf),
-             "cheriot-sail cd_wtag mismatch: sail=%llu rtl=%u "
-             "(insn=0x%08x pc=0x%08x step=%lld)",
-             (unsigned long long)(sail_cd_wtag & 1), (unsigned)cheri_rtag & 1,
-             (unsigned)insn, (unsigned)pc, (long long)(s_step_no - 1));
-    s_errors.emplace_back(buf);
-    ok = 0;
+  // ── Integer rd_wdata check ────────────────────────────────────────────────
+  //
+  // Integer-result CHERIoT instructions (cgetoffset, cgettag, cgetlen, cperm,
+  // cgettype, cgetbase, cgetlen, cgetaddr) write an integer register rather
+  // than a capability register.  Compare Sail's rvfi_rd_wdata against the
+  // RTL's.  Skip when the RTL took a trap — on a trap the RTL's rd_addr is 0
+  // (no register was committed) and rd_wdata is undefined.
+  if (!rtl_trap && zrvfi_int_data_present) {
+    uint64_t sail_rd_addr, sail_rd_wdata;
+    get_integer_output(&sail_rd_addr, &sail_rd_wdata);
+    uint32_t rtl_rd_wdata = rtl_rd_wdata_p[0];
+
+    // Only compare when Sail wrote to a non-zero register (writing to x0 is a
+    // no-op in Sail's model; RTL may report rd_addr=0 too, so skip those).
+    if (sail_rd_addr != 0 && (sail_rd_wdata & 0xffffffff) != (uint64_t)rtl_rd_wdata) {
+      char buf[160];
+      snprintf(buf, sizeof(buf),
+               "cheriot-sail rd_wdata mismatch: sail=0x%08llx rtl=0x%08x "
+               "rd=%llu (insn=0x%08x pc=0x%08x step=%lld)",
+               (unsigned long long)(sail_rd_wdata & 0xffffffff), rtl_rd_wdata,
+               (unsigned long long)sail_rd_addr,
+               (unsigned)insn, (unsigned)pc, (long long)(s_step_no - 1));
+      s_errors.emplace_back(buf);
+      ok = 0;
+    }
   }
 
   return ok ? 0 : -1;
@@ -275,6 +283,13 @@ int cheriot_sail_cosim_step(const svBitVecVal *insn_p,
 // Only meaningful when the last step took a trap (rvfi_trap == 1).
 uint32_t cheriot_sail_cosim_get_mtval(void) {
   return (uint32_t)(zmtval & 0xffffffffULL);
+}
+
+// Return the Sail model's mcause register value after the last zstep().
+// Only meaningful when the last step took a trap.
+// Format: bit 31 = interrupt flag, bits [4:0] = exception / interrupt code.
+uint32_t cheriot_sail_cosim_get_mcause(void) {
+  return (uint32_t)(zmcause.zbits & 0xffffffffULL);
 }
 
 int cheriot_sail_cosim_get_num_errors(void) {

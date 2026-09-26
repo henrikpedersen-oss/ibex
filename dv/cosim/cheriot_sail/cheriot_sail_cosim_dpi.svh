@@ -17,11 +17,13 @@ import "DPI-C" function void cheriot_sail_cosim_cleanup();
 
 // Advance the model by one retired CHERIoT instruction and compare outputs.
 //
-// insn:        32-bit instruction word (RVFI rvfi_insn)
-// pc:          instruction PC (rvfi_pc_rdata)
-// cheri_rf_we: 1 if instruction wrote a capability register
-// cheri_rd:    5-bit destination capability register address
-// cheri_rtag:  tag bit written to the capability register by the RTL
+// insn:          32-bit instruction word (RVFI rvfi_insn)
+// pc:            instruction PC (rvfi_pc_rdata)
+// cheri_rf_we:   1 if instruction wrote a capability register
+// cheri_rd:      5-bit destination capability register address
+// cheri_rtag:    tag bit written to the capability register by the RTL
+// rtl_rd_wdata:  32-bit integer register write data (rvfi_rd_wdata)
+// rtl_trap:      1 if the RTL took a trap this instruction
 //
 // Returns 0 on match, -1 on mismatch (errors queued in the model).
 import "DPI-C" function int cheriot_sail_cosim_step(
@@ -29,11 +31,16 @@ import "DPI-C" function int cheriot_sail_cosim_step(
   bit [31:0] pc,
   bit        cheri_rf_we,
   bit [ 4:0] cheri_rd,
-  bit        cheri_rtag
+  bit        cheri_rtag,
+  bit [31:0] rtl_rd_wdata,
+  bit        rtl_trap
 );
 
 // Return the Sail model's mtval register after the last step (valid when that step was a trap).
 import "DPI-C" function bit [31:0] cheriot_sail_cosim_get_mtval();
+// Return the Sail model's mcause register after the last step (valid when that step was a trap).
+// Bit 31 = interrupt flag; bits [4:0] = exception / interrupt code.
+import "DPI-C" function bit [31:0] cheriot_sail_cosim_get_mcause();
 
 // Error reporting.
 import "DPI-C" function int  cheriot_sail_cosim_get_num_errors();
