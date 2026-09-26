@@ -1,2 +1,30 @@
-// TODO: Add custom instruction name enum
-CUSTOM_1,
+// CHERIoT instructions, added for the lowRISC CHERIoT-Ibex verification effort.
+//
+// Only the non-trapping subset is listed. See rv32x_instr.sv for which
+// instructions were deliberately left out and why.
+CGETPERM,
+CGETTYPE,
+CGETBASE,
+CGETLEN,
+CGETTAG,
+CGETADDR,
+CGETHIGH,
+CGETTOP,
+CRRL,
+CRAM,
+CMOVE,
+CCLEARTAG,
+CSETBOUNDS,
+CSETBOUNDSEXACT,
+CSETBOUNDSRNDN,
+CSEAL,
+CUNSEAL,
+CANDPERM,
+CSETADDR,
+CINCADDR,
+CSUB,
+CSETHIGH,
+CTESTSUBSET,
+CISEQUAL,
+CINCADDRIMM,
+CSETBOUNDSIMM,

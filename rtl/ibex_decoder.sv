@@ -773,12 +773,25 @@ module ibex_decoder import ibex_cheriot_pkg::*; #(
             default: csr_illegal = 1'b1;
           endcase
 
-          // always allow access to the following CSRs even without ASR permission
+          // Counter CSRs are readable without ASR permission, mirroring ext_check_CSR()
+          // in the CHERIoT Sail model:
+          //   -- 0xB00 mcycle, 0xB02 minstret, 0xB80 mcycleh, 0xB82 minstreth
           //   -- 0xC00-0xC9F (unprivileged read-only counters, per CHERIoT spec Table 7.1)
+          // Sail allows these only for reads, so the safe-list is gated on the access being
+          // read-only. Without that gate a write to mcycle from a compartment lacking ASR
+          // would take the safe-list path and then be dropped silently by csr_we_int in
+          // ibex_cs_registers.sv, where the spec requires an ASR violation. The 0xC range
+          // needs the same gate to report ASR rather than the illegal-instruction exception
+          // that csr_addr[11:10]==2'b11 would otherwise raise.
+          // A CSR access writes unless it is CSRRS/CSRRC (or the immediate forms) with a
+          // zero rs1/uimm field; instr[13:12]==2'b01 is CSRRW/CSRRWI, which always writes.
           csr_cheriot_always_ok_o = (BaseIsa == BaseIsaRV32IorCHERIoT) &
                                     (cheriot_enable_i == IbexMuBiOn) &
-                                    ((instr[31:28] == 4'hc) &&
-                                     ((instr[27] == 1'b0) || (instr[26:25] == 2'b00)));
+                                    (instr[13:12] != 2'b01) & (instr[19:15] == 5'b0) &
+                                    (((instr[31:28] == 4'hc) &&
+                                      ((instr[27] == 1'b0) || (instr[26:25] == 2'b00))) ||
+                                     (instr[31:20] inside {12'hb00, 12'hb02,
+                                                           12'hb80, 12'hb82}));
 
           illegal_insn = csr_illegal;
         end
@@ -809,6 +822,8 @@ module ibex_decoder import ibex_cheriot_pkg::*; #(
                              cheriot_cap_field_sel_o = CFIELD_LEN;  end
                 5'h04: begin cheriot_operator_o.CGET_FIELD = 1'b1;
                              cheriot_cap_field_sel_o = CFIELD_TAG;  end
+                5'h06: begin cheriot_operator_o.CGET_FIELD = 1'b1;
+                             cheriot_cap_field_sel_o = CFIELD_OFFSET; end
                 5'h08: begin cheriot_operator_o.CRRL = 1'b1;
                              cheriot_setbounds_sel_o = SETBOUNDS_CRRL; end
                 5'h09: begin cheriot_operator_o.CRAM = 1'b1;

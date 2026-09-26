@@ -834,8 +834,12 @@ module ibex_top import ibex_pkg::*; import ibex_cheriot_pkg::*; #(
           .cfg_o       (ram_cfg_icache_data_o[way])
         );
 
-        assign icache_tag_alert  = '{default:'b0};
-        assign icache_data_alert = '{default:'b0};
+        // Was `icache_tag_alert = '{default:'b0}` -- assigning the whole IC_NUM_WAYS vector from
+        // inside the per-way genvar loop, so every way drove every bit (*E,MULDRN). Latent: only
+        // reachable with ICacheECC=0, and every config in this repo builds ICacheECC=1. Found via
+        // the Sonata migration 2026-09-22, which builds ICacheECC=0.
+        assign icache_tag_alert[way]  = 1'b0;
+        assign icache_data_alert[way] = 1'b0;
       end
     end
 

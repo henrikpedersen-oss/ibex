@@ -267,31 +267,67 @@ class core_ibex_rf_addr_intg_test extends core_ibex_base_test;
     `DV_CHECK_FATAL(uvm_hdl_read(glitch_path, orig_val));
     `uvm_info(`gfn, $sformatf("Read %x", orig_val), UVM_LOW)
 
-    `DV_CHECK_STD_RANDOMIZE_WITH_FATAL(bit_idx, bit_idx < 5;)
-
-    glitch_val = orig_val;
-    glitch_val[bit_idx] = ~glitch_val[bit_idx];
-
     // Disable TB assertion for alerts.
     `DV_ASSERT_CTRL_REQ("tb_no_alerts_triggered", 1'b0)
 
-    `uvm_info(`gfn, $sformatf("Forcing %s to value 'h%0x", glitch_path, glitch_val), UVM_LOW)
-    `DV_CHECK_FATAL(uvm_hdl_force(glitch_path, glitch_val));
+    ecc_alert_path = $sformatf("%s.%s", shdw_ecc_path, err_signals[ctrl_signal_idx]);
 
-    // Determine how long it takes until the error gets noticed.
-    if (trgt_core_idx == 0) begin
-      // When we are faulting the main core RF, it takes lockstep_delay until we detect the fault.
-      // This is because the shadow core ECC checker is responsible for detecting the fault.
-      clk_vif.wait_n_clks(lockstep_delay);
-    end else begin
-      // When we are faulting the shadow core RF, the fault is immediately detected.
-      #1step;
+    // Try each address bit in turn rather than a single random one.
+    //
+    // Glitching the read address aliases one register's data onto another
+    // register's check bits, which only produces a non-zero syndrome if the two
+    // registers hold DIFFERENT data. Identical data gives identical check bits
+    // and no error -- physically undetectable, not an RTL defect.
+    //
+    // The old code picked one random bit and asserted the error must fire, so a
+    // pass was luck. Checked against the DUT trace for all five failing seeds in
+    // the 2026-09-23 regression and the aliased pair held identical data every
+    // time (21577 x21/x23 both 0, 244 x11/x9 both 0, 30629 x2/x18 both 0, 30639
+    // x9/x25 both 0x80000000, 5642 x28/x30 both 0) -- 5 of 5. Note two of those
+    // force the MAIN regfile, so this is not shadow-specific.
+    //
+    // Reading the register contents directly to pre-select a good pair would be
+    // fragile here: the opentitan config is BaseIsaRV32IorCHERIoT, so x0-x15 and
+    // x16-x31 live in two different generate branches of
+    // ibex_register_file_ff.sv. Probing for a detectable glitch avoids depending
+    // on either path, and asks the question we actually care about: is an
+    // address glitch detectable at all right now?
+    ecc_err = 0;
+    for (bit_idx = 0; bit_idx < 5; bit_idx++) begin
+      glitch_val = orig_val;
+      glitch_val[bit_idx] = ~glitch_val[bit_idx];
+
+      `uvm_info(`gfn, $sformatf("Forcing %s to value 'h%0x (bit %0d)",
+                                glitch_path, glitch_val, bit_idx), UVM_LOW)
+      `DV_CHECK_FATAL(uvm_hdl_force(glitch_path, glitch_val));
+
+      // Determine how long it takes until the error gets noticed.
+      if (trgt_core_idx == 0) begin
+        // When we are faulting the main core RF, it takes lockstep_delay until we detect the
+        // fault. This is because the shadow core ECC checker is responsible for detecting the
+        // fault.
+        clk_vif.wait_n_clks(lockstep_delay);
+      end else begin
+        // When we are faulting the shadow core RF, the fault is immediately detected.
+        #1step;
+      end
+
+      `DV_CHECK_FATAL(uvm_hdl_read(ecc_alert_path, ecc_err))
+      if (|ecc_err) break;
+
+      // Undetectable with this bit -- the aliased register holds the same data.
+      // Release and try the next one.
+      `uvm_info(`gfn, $sformatf(
+                "No ECC error for bit %0d (aliased register holds identical data); trying next",
+                bit_idx), UVM_LOW)
+      `DV_CHECK_FATAL(uvm_hdl_release(glitch_path))
     end
 
-    // Check that the alert matches our expectation.
-    ecc_alert_path = $sformatf("%s.%s", shdw_ecc_path, err_signals[ctrl_signal_idx]);
-    `DV_CHECK_FATAL(uvm_hdl_read(ecc_alert_path, ecc_err))
-    `DV_CHECK_FATAL(|ecc_err, "ECC alert did not fire!")
+    // Every address bit aliased onto a register holding identical data. That is
+    // possible (e.g. most of the regfile still zero) but it means nothing was
+    // exercised, so it must not be reported as a pass.
+    `DV_CHECK_FATAL(|ecc_err,
+                    "ECC alert did not fire for ANY address bit -- no detectable glitch available")
 
     // Release glitch.
     `DV_CHECK_FATAL(uvm_hdl_release(glitch_path))
@@ -543,6 +579,19 @@ class core_ibex_icache_intg_test extends core_ibex_base_test;
         // The response comes in the next clock cycle, so wait one cycle.
         clk_vif.wait_n_clks(1);
 
+        // Filter to ways that also have a tag hit in IC1.  hit_data_ecc_ic1 is
+        // built by ORing ic_data_rdata_i[way] only for ways where tag_match_ic1[way]
+        // is true (ibex_icache.sv:509-513).  Corrupting a way that does not have a
+        // tag match does not affect hit_data_ecc_ic1 and produces no ECC error, so
+        // such ways must be excluded from the candidate set.
+        begin
+          uvm_hdl_data_t tag_match;
+          tag_match = read_data(
+              "u_ibex_core.if_stage_i.gen_icache.icache_i.tag_match_ic1");
+          valid_and_used_ways =
+              valid_and_used_ways.find(way) with (tag_match[way] == 1'b1);
+        end
+
         // Check if at least one data way is valid and used.
         if (valid_and_used_ways.size() > 0) begin
           int unsigned way_idx, bit_idx;
@@ -553,8 +602,9 @@ class core_ibex_icache_intg_test extends core_ibex_base_test;
               $sformatf("The following I$ data ways are valid and used in this clock cycle: %p",
                         valid_and_used_ways), UVM_LOW)
 
-          // Pick a way to corrupt.
-          way_idx = $urandom_range(valid_and_used_ways.size() - 1);
+          // Pick a way to corrupt.  valid_and_used_ways holds actual way indices;
+          // index into it rather than using the list position directly as the way number.
+          way_idx = valid_and_used_ways[$urandom_range(valid_and_used_ways.size() - 1)];
           `uvm_info(`gfn, $sformatf("Corrupting data way %0d", way_idx), UVM_LOW)
 
           // Probe response data.
@@ -571,13 +621,12 @@ class core_ibex_icache_intg_test extends core_ibex_base_test;
           // Disable TB assertion for alerts.
           `DV_ASSERT_CTRL_REQ("tb_no_alerts_triggered", 1'b0)
 
-          // Force the corrupt value.
-          force_data($sformatf("ic_data_rdata[%0d]", way_idx), data_rdata);
-
-          // Give the DUT one clock cycle to react.
-          clk_vif.wait_n_clks(1);
-
           // Decide if an error is expected: if the lookup is valid and the tag hit.
+          // Read BEFORE the force: lookup_valid_ic1 and tag_hit_ic1 are registered
+          // signals that are not affected by forcing ic_data_rdata, so reading
+          // them here vs. after the force is equivalent.  Reading before avoids
+          // any delta-cycle ambiguity when the force triggers combinational
+          // re-evaluation.
           lookup_valid = read_data($sformatf(
               "u_ibex_core.if_stage_i.gen_icache.icache_i.lookup_valid_ic1"));
           tag_hit = read_data($sformatf(
@@ -585,8 +634,36 @@ class core_ibex_icache_intg_test extends core_ibex_base_test;
           exp_alert_minor = lookup_valid & tag_hit;
           `DV_CHECK_FATAL(!$isunknown(exp_alert_minor))
 
-          // Check that the minor alert matches the expectation.
-          alert_minor = dut_vif.signal_probe_alert_minor(dv_utils_pkg::SignalProbeSample);
+          // Force the bit error into the data way.
+          //
+          // ibex_icache.sv:585 computes
+          //   ecc_err_ic1 = lookup_valid_ic1 & (((|data_err_ic1) & tag_hit_ic1) | (|tag_err_ic1))
+          // purely combinationally from ic_data_rdata_i, and the path to
+          // alert_minor_o (ibex_core.sv:1337) adds no register -- so the main
+          // core responds in the cycle of the force, not the next one.
+          //
+          // However, uvm_hdl_force schedules the update through the PLI.  In
+          // Xcelium, downstream always_comb/assign blocks re-evaluate in the
+          // next delta cycle, not in the same PLI callback.  Without the #0
+          // below, uvm_hdl_read("u_ibex_core.icache_ecc_error") observes the
+          // pre-force value (0) and the check fails for every seed.
+          //
+          // alert_minor_o is not used here because it ORs in the lockstep shadow
+          // core's delayed response (ibex_top.sv:1373); the shadow core reacts
+          // one cycle later (LockstepOffset = 1, ibex_lockstep.sv:282-298, 541),
+          // so alert_minor_o at T+1 would reflect the shadow's alert against the
+          // main core's T+1 state -- an unrelated comparison.
+          force_data($sformatf("ic_data_rdata[%0d]", way_idx), data_rdata);
+
+          // Allow Xcelium to propagate the force through the combinational chain:
+          //   ic_data_rdata_i -> hit_data_ecc_ic1 -> data_err_ic1 ->
+          //   ecc_err_ic1 -> icache_ecc_error
+          // A single #0 advances to the next delta and gives all always_comb /
+          // assign blocks one pass to settle before the read below.
+          #0;
+
+          // Check the main core's own alert, not the OR with the lockstep shadow.
+          alert_minor = read_data("u_ibex_core.icache_ecc_error");
           `DV_CHECK_EQ_FATAL(alert_minor, exp_alert_minor)
 
           // Release force and complete task.

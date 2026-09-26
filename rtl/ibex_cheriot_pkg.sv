@@ -860,18 +860,19 @@ package ibex_cheriot_pkg;
     logic CAND_PERM;        // CAndPerm
     logic CUNSEAL;          // CUnseal
     logic CSEAL;            // CSeal
-    logic CGET_FIELD;       // CGetPerm/Type/Base/Len/Tag/Addr/High/Top
+    logic CGET_FIELD;       // CGetPerm/Type/Base/Len/Tag/Addr/High/Top/Offset
   } cheriot_op_t;
 
-  typedef enum logic [2:0] {
-    CFIELD_PERM = 3'h0,
-    CFIELD_TYPE = 3'h1,
-    CFIELD_BASE = 3'h2,
-    CFIELD_LEN  = 3'h3,
-    CFIELD_TAG  = 3'h4,
-    CFIELD_ADDR = 3'h5,
-    CFIELD_HIGH = 3'h6,
-    CFIELD_TOP  = 3'h7
+  typedef enum logic [3:0] {
+    CFIELD_PERM   = 4'h0,
+    CFIELD_TYPE   = 4'h1,
+    CFIELD_BASE   = 4'h2,
+    CFIELD_LEN    = 4'h3,
+    CFIELD_TAG    = 4'h4,
+    CFIELD_ADDR   = 4'h5,
+    CFIELD_HIGH   = 4'h6,
+    CFIELD_TOP    = 4'h7,
+    CFIELD_OFFSET = 4'h8  // CGetOffset: address - base (CHERI-RISC-V rs2=6)
   } cheriot_cap_field_e;
 
   typedef enum logic [2:0] {

@@ -102,7 +102,40 @@ class core_ibex_base_test extends uvm_test;
         isa = {isa, "_Zcb_Zcmp"};
     endcase
 
+    // Zihpm gives the ISS the hpmcounter3-hpmcounter31 CSRs. Without it they do
+    // not exist for Spike at all, so ANY access is an illegal instruction
+    // regardless of privilege or mcounteren -- while Ibex implements
+    // MHPMCounterNum of them and retires the read. That was the mcounteren_test
+    // mismatch: a U-mode `csrr t0, hpmcounter3` with mcounteren[3] set.
+    //
+    // Requires the flake's Spike patch. Stock lowRISC riscv-isa-sim has
+    //     extension_table[EXT_ZIHPM] = false; // IBEX does not implement this extension
+    // and an EMPTY `else if (ext_str == "zihpm")` branch, so this string is
+    // parsed and silently ignored. flake.nix gives that branch a body; without
+    // that patch this line has no effect (verified against isa_parser_t
+    // directly: ZIHPM stayed 0 even for "rv32imc_zicntr_zihpm").
+    //
+    // Same shape as the RV32ZC case above: the ISS lacking something the DUT
+    // implements shows up as a spurious cosim mismatch.
+    //
+    // Gated on MHPMCounterNum so the ISS advertises the counters only when the
+    // DUT has them; MHPMCOUNTER_BASE is 3, so non-zero means hpmcounter3 up.
+    if (mhpm_counter_num_for_isa() > 0) begin
+      isa = {isa, "_Zihpm"};
+    end
+
     return isa;
+  endfunction
+
+  // MHPMCounterNum as set by the testbench top. Non-fatal on a miss, matching
+  // the fetch in build_phase -- a missing value means no counters, which is the
+  // safe assumption for the ISA string.
+  function int unsigned mhpm_counter_num_for_isa();
+    bit [31:0] n;
+    if (!uvm_config_db#(bit [31:0])::get(null, "", "MHPMCounterNum", n)) begin
+      return 0;
+    end
+    return n;
   endfunction
 
   virtual function void build_phase(uvm_phase phase);

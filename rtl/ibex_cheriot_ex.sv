@@ -305,8 +305,9 @@ module ibex_cheriot_ex import ibex_cheriot_pkg::*; import ibex_pkg::*; #(
                                                                  : rf_fullcap_a.top33[31:0];
             CFIELD_LEN:  result_data_o = cheriot_cap_length(rf_fullcap_a);
             CFIELD_TAG:  result_data_o = {31'h0, rf_fullcap_a.valid};
-            CFIELD_ADDR: result_data_o = rf_rdata_a;
-            CFIELD_HIGH: result_data_o = 32'(cheriot_cap_to_mem(rf_rcap_a));
+            CFIELD_ADDR:   result_data_o = rf_rdata_a;
+            CFIELD_HIGH:   result_data_o = 32'(cheriot_cap_to_mem(rf_rcap_a));
+            CFIELD_OFFSET: result_data_o = rf_rdata_a - rf_fullcap_a.base32;
             default:     result_data_o = 32'h0;
           endcase
         end
