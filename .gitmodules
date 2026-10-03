@@ -1,0 +1,8 @@
+[submodule "cheriot-rtos"]
+	path = dv/cheriot-rtos-test-suites/cheriot-rtos
+	url = https://github.com/CHERIoT-Platform/cheriot-rtos.git
+	ignore = dirty
+[submodule "cheri-c-tests"]
+	path = dv/cheriot-rtos-test-suites/cheri-c-tests
+	url = https://github.com/CTSRD-CHERI/cheri-c-tests
+	ignore = dirty
