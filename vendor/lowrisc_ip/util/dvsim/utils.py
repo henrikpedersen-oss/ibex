@@ -351,7 +351,8 @@ def md_results_to_html(title, css_file, md_text):
     # this function converts css style to inline html style
     html_text = transform(html_text,
                           external_styles=css_file,
-                          cssutils_logging_level=log.ERROR)
+                          cssutils_logging_level=log.ERROR,
+                          allow_loading_external_files=True)
     return html_text
 
 
