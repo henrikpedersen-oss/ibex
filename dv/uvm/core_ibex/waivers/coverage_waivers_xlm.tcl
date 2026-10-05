@@ -131,6 +131,28 @@ ibex_waive exclude -type "core_ibex_trvk_fcov_if" -coverbin "trvk_cg.trvk_revoke
 ibex_waive exclude -type "core_ibex_trvk_fcov_if" -coverbin "trvk_cg.trvk_revoked_source_cross.revoked_X_auto[1]_X_auto[1]_X_auto[0]"
 ibex_waive exclude -type "core_ibex_trvk_fcov_if" -coverbin "trvk_cg.trvk_revoked_source_cross.revoked_X_auto[1]_X_auto[1]_X_auto[1]"
 
+# ── CHERIoT structural cross waivers ────────────────────────────────────────
+#
+# cheriot_cs1cd_tag_cross (cp_cheri_cs1_tag × cp_cheri_cd_tag × cp_instr_cget_field):
+#   CGET_* operations write an integer field to rd; result_cap_o.valid is always 0
+#   when the instruction is executing. A tagged result (cd_tag = auto[1]) cannot
+#   occur, regardless of whether cs1 is tagged.  Both {cs1_any, cd_tagged, instr_1}
+#   bins are structurally impossible.
+ibex_waive exclude -type "core_ibex_fcov_if" -coverbin "fcov_cg.cheriot_cs1cd_tag_cross.auto[0]_X_auto[1]_X_bin1"
+ibex_waive exclude -type "core_ibex_fcov_if" -coverbin "fcov_cg.cheriot_cs1cd_tag_cross.auto[1]_X_auto[1]_X_bin1"
+
+# cheriot_ccleartag_cross, cheriot_cmove_cross, cheriot_csethigh_src_cross
+#   (all: cp_cheri_cs1_tag × cp_cheri_cs1_sealed × cp_instr_*):
+#   The "untagged + sealed" combination (auto[0], auto[1]) requires cs1.valid = 0
+#   while cs1.otype ≠ 0.  In the CHERIoT RTL this combination has no architectural
+#   significance: when valid = 0 the instruction produces an untagged result without
+#   inspecting otype, exercising the same RTL path as untagged + unsealed.  The
+#   regression generator does not construct integer-valued registers with non-zero
+#   otype bits, so this bin is structurally unreachable in the current regression.
+ibex_waive exclude -type "core_ibex_fcov_if" -coverbin "fcov_cg.cheriot_ccleartag_cross.auto[0]_X_auto[1]_X_bin1"
+ibex_waive exclude -type "core_ibex_fcov_if" -coverbin "fcov_cg.cheriot_cmove_cross.auto[0]_X_auto[1]_X_bin1"
+ibex_waive exclude -type "core_ibex_fcov_if" -coverbin "fcov_cg.cheriot_csethigh_src_cross.auto[0]_X_auto[1]_X_bin1"
+
 set waiver_dir [file dirname [file normalize [info script]]]
 
 # The two .vRefine files are item-level refinements recorded in 2022 against upstream ibex's
