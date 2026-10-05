@@ -66,17 +66,29 @@ ibex_waive exclude -type "ibex_top" -toggle "scan_rst_ni"
 # which revokes only with +revbm_mode=random|range: their toggle coverage records whether the
 # regression ran the revocation tests (cheriot_revoke_load_barrier*).
 
+# ── ECC error coverpoints ────────────────────────────────────────────────────
+# cp_rf_a_ecc_err, cp_rf_b_ecc_err, cp_icache_ecc_err are DV_FCOV_EXPR_SEEN
+# coverpoints that fire when ECC errors are injected into the register file
+# ports or the I-cache. The opentitan TB configuration does not inject ECC
+# faults at the register-file or I-cache level (icache ECC requires a separate
+# fault-injection agent not present in this regression). These coverpoints are
+# structurally unreachable in the current configuration.
+ibex_waive exclude -type "core_ibex_fcov_if" -coveritem "fcov_cg.cp_rf_a_ecc_err"
+ibex_waive exclude -type "core_ibex_fcov_if" -coveritem "fcov_cg.cp_rf_b_ecc_err"
+ibex_waive exclude -type "core_ibex_fcov_if" -coveritem "fcov_cg.cp_icache_ecc_err"
+
 # ── Fetch FIFO coverpoints (item 3) ─────────────────────────────────────────
 # With ICache=1 (opentitan config), the generate block g_fcov_fetch_fifo in
 # core_ibex_fcov_if.sv is not elaborated; g_no_fcov_fetch_fifo drives all five
 # probes to 0. The iff guards on these coverpoints therefore never become true.
 # These can only be exercised by a separate non-ICache regression configuration,
 # which is not in scope for the current opentitan-config coverage target.
-ibex_waive exclude -type "core_ibex_fcov_if" -covgroup "fcov_cg" -coverpoint "cp_fetch_fifo_bypass"
-ibex_waive exclude -type "core_ibex_fcov_if" -covgroup "fcov_cg" -coverpoint "cp_fetch_fifo_clear_while_full"
-ibex_waive exclude -type "core_ibex_fcov_if" -covgroup "fcov_cg" -coverpoint "cp_fetch_push_during_pop"
-ibex_waive exclude -type "core_ibex_fcov_if" -covgroup "fcov_cg" -coverpoint "cp_fetch_unaligned_compressed"
-ibex_waive exclude -type "core_ibex_fcov_if" -covgroup "fcov_cg" -coverpoint "cp_fetch_unaligned_uncompressed"
+# Syntax: IMC -coveritem format is <cg_name>.<item_name> (help exclude).
+ibex_waive exclude -type "core_ibex_fcov_if" -coveritem "fcov_cg.cp_fetch_fifo_bypass"
+ibex_waive exclude -type "core_ibex_fcov_if" -coveritem "fcov_cg.cp_fetch_fifo_clear_while_full"
+ibex_waive exclude -type "core_ibex_fcov_if" -coveritem "fcov_cg.cp_fetch_push_during_pop"
+ibex_waive exclude -type "core_ibex_fcov_if" -coveritem "fcov_cg.cp_fetch_unaligned_compressed"
+ibex_waive exclude -type "core_ibex_fcov_if" -coveritem "fcov_cg.cp_fetch_unaligned_uncompressed"
 
 # ── TRVK cross bins — structurally or logically unreachable ─────────────────
 #
@@ -99,21 +111,25 @@ ibex_waive exclude -type "core_ibex_fcov_if" -covgroup "fcov_cg" -coverpoint "cp
 #   The same assertion (rvalid_i |-> outstanding_q) guarantees outstanding_q==1
 #   whenever rvalid_i is asserted. cp_trvk_revoked samples on rvalid_i, so
 #   outstanding=0 bins can never be hit.
-ibex_waive exclude -type "core_ibex_trvk_fcov_if" -covgroup "trvk_cg" -cross "trvk_sealing_cross" -bin {not_revoked,auto[1]}
-ibex_waive exclude -type "core_ibex_trvk_fcov_if" -covgroup "trvk_cg" -cross "trvk_sealing_cross" -bin {revoked,auto[1]}
-ibex_waive exclude -type "core_ibex_trvk_fcov_if" -covgroup "trvk_cg" -cross "trvk_revoked_outstanding_cross" -bin {not_revoked,auto[0]}
-ibex_waive exclude -type "core_ibex_trvk_fcov_if" -covgroup "trvk_cg" -cross "trvk_revoked_outstanding_cross" -bin {revoked,auto[0]}
-ibex_waive exclude -type "core_ibex_trvk_fcov_if" -covgroup "trvk_cg" -cross "trvk_revoked_source_cross" -bin {not_revoked,auto[0],auto[0],auto[1]}
-ibex_waive exclude -type "core_ibex_trvk_fcov_if" -covgroup "trvk_cg" -cross "trvk_revoked_source_cross" -bin {not_revoked,auto[0],auto[1],auto[0]}
-ibex_waive exclude -type "core_ibex_trvk_fcov_if" -covgroup "trvk_cg" -cross "trvk_revoked_source_cross" -bin {not_revoked,auto[0],auto[1],auto[1]}
-ibex_waive exclude -type "core_ibex_trvk_fcov_if" -covgroup "trvk_cg" -cross "trvk_revoked_source_cross" -bin {not_revoked,auto[1],auto[0],auto[0]}
-ibex_waive exclude -type "core_ibex_trvk_fcov_if" -covgroup "trvk_cg" -cross "trvk_revoked_source_cross" -bin {not_revoked,auto[1],auto[0],auto[1]}
-ibex_waive exclude -type "core_ibex_trvk_fcov_if" -covgroup "trvk_cg" -cross "trvk_revoked_source_cross" -bin {not_revoked,auto[1],auto[1],auto[0]}
-ibex_waive exclude -type "core_ibex_trvk_fcov_if" -covgroup "trvk_cg" -cross "trvk_revoked_source_cross" -bin {not_revoked,auto[1],auto[1],auto[1]}
-ibex_waive exclude -type "core_ibex_trvk_fcov_if" -covgroup "trvk_cg" -cross "trvk_revoked_source_cross" -bin {revoked,auto[0],auto[0],auto[0]}
-ibex_waive exclude -type "core_ibex_trvk_fcov_if" -covgroup "trvk_cg" -cross "trvk_revoked_source_cross" -bin {revoked,auto[0],auto[1],auto[1]}
-ibex_waive exclude -type "core_ibex_trvk_fcov_if" -covgroup "trvk_cg" -cross "trvk_revoked_source_cross" -bin {revoked,auto[1],auto[0],auto[1]}
-ibex_waive exclude -type "core_ibex_trvk_fcov_if" -covgroup "trvk_cg" -cross "trvk_revoked_source_cross" -bin {revoked,auto[1],auto[1],auto[1]}
+#
+# Syntax: IMC -coverbin format is <cg_name>.<cross_name>.<bin_name> where
+# cross bin names use the _X_ separator between per-CP bin names (help exclude).
+ibex_waive exclude -type "core_ibex_trvk_fcov_if" -coverbin "trvk_cg.trvk_sealing_cross.not_revoked_X_auto[1]"
+ibex_waive exclude -type "core_ibex_trvk_fcov_if" -coverbin "trvk_cg.trvk_sealing_cross.revoked_X_auto[1]"
+ibex_waive exclude -type "core_ibex_trvk_fcov_if" -coverbin "trvk_cg.trvk_revoked_outstanding_cross.not_revoked_X_auto[0]"
+ibex_waive exclude -type "core_ibex_trvk_fcov_if" -coverbin "trvk_cg.trvk_revoked_outstanding_cross.revoked_X_auto[0]"
+ibex_waive exclude -type "core_ibex_trvk_fcov_if" -coverbin "trvk_cg.trvk_revoked_source_cross.not_revoked_X_auto[0]_X_auto[0]_X_auto[1]"
+ibex_waive exclude -type "core_ibex_trvk_fcov_if" -coverbin "trvk_cg.trvk_revoked_source_cross.not_revoked_X_auto[0]_X_auto[1]_X_auto[0]"
+ibex_waive exclude -type "core_ibex_trvk_fcov_if" -coverbin "trvk_cg.trvk_revoked_source_cross.not_revoked_X_auto[0]_X_auto[1]_X_auto[1]"
+ibex_waive exclude -type "core_ibex_trvk_fcov_if" -coverbin "trvk_cg.trvk_revoked_source_cross.not_revoked_X_auto[1]_X_auto[0]_X_auto[0]"
+ibex_waive exclude -type "core_ibex_trvk_fcov_if" -coverbin "trvk_cg.trvk_revoked_source_cross.not_revoked_X_auto[1]_X_auto[0]_X_auto[1]"
+ibex_waive exclude -type "core_ibex_trvk_fcov_if" -coverbin "trvk_cg.trvk_revoked_source_cross.not_revoked_X_auto[1]_X_auto[1]_X_auto[0]"
+ibex_waive exclude -type "core_ibex_trvk_fcov_if" -coverbin "trvk_cg.trvk_revoked_source_cross.not_revoked_X_auto[1]_X_auto[1]_X_auto[1]"
+ibex_waive exclude -type "core_ibex_trvk_fcov_if" -coverbin "trvk_cg.trvk_revoked_source_cross.revoked_X_auto[0]_X_auto[0]_X_auto[0]"
+ibex_waive exclude -type "core_ibex_trvk_fcov_if" -coverbin "trvk_cg.trvk_revoked_source_cross.revoked_X_auto[0]_X_auto[1]_X_auto[1]"
+ibex_waive exclude -type "core_ibex_trvk_fcov_if" -coverbin "trvk_cg.trvk_revoked_source_cross.revoked_X_auto[1]_X_auto[0]_X_auto[1]"
+ibex_waive exclude -type "core_ibex_trvk_fcov_if" -coverbin "trvk_cg.trvk_revoked_source_cross.revoked_X_auto[1]_X_auto[1]_X_auto[0]"
+ibex_waive exclude -type "core_ibex_trvk_fcov_if" -coverbin "trvk_cg.trvk_revoked_source_cross.revoked_X_auto[1]_X_auto[1]_X_auto[1]"
 
 set waiver_dir [file dirname [file normalize [info script]]]
 
