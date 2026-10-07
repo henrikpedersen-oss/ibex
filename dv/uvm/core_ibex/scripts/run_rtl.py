@@ -38,6 +38,10 @@ def _main() -> int:
 
     trr.rtl_test = testopts['rtl_test']
     trr.timeout_s = testopts.get('timeout_s') or md.run_rtl_timeout_s
+    # IBEX_TEST_TIMEOUT_S (root Makefile TIMEOUT_S=) overrides it for one run, e.g. to reach a failure
+    # late in a long test with waves.
+    if os.environ.get('IBEX_TEST_TIMEOUT_S', '').strip():
+        trr.timeout_s = int(os.environ['IBEX_TEST_TIMEOUT_S'])
 
     # Each test in testlist.yaml can (optionally) specify 'sim_opts'
     # which are to be passed to the simulator when running the test.
@@ -45,6 +49,11 @@ def _main() -> int:
     sim_opts_raw = testopts.get('sim_opts')
     if sim_opts_raw:
         sim_opts += sim_opts_raw.replace('\n', '')
+    # Extra plusargs for every test of this run, e.g. IBEX_EXTRA_SIM_OPTS="+riscv_sail_cosim=1"
+    # (set by the root Makefile's PLUSARGS=...).
+    extra_sim_opts = os.environ.get('IBEX_EXTRA_SIM_OPTS', '').strip()
+    if extra_sim_opts:
+        sim_opts += ' ' + extra_sim_opts
     # If discrete_debug_module is enabled, pass some extra sim_opts
     trr.ddm_sim_opts = ''
     if (trr.testtype == TestType.RISCVDV and trr.is_discrete_debug_module):
@@ -70,6 +79,9 @@ def _main() -> int:
         'rtl_trace': trr.rtl_trace.parent/'trace_core',
         'iss_cosim_trace': trr.iss_cosim_trace,
         'core_ibex': md.ibex_dv_root,
+        # IBEX_WAVES_FROM (root Makefile WAVES_FROM=<ns>): with waves, run to that time before probing.
+        'wave_from': (f'-input @"run {int(os.environ["IBEX_WAVES_FROM"])}ns"'
+                      if os.environ.get('IBEX_WAVES_FROM', '').strip() else ''),
         'sim_opts': (f"+signature_addr={md.signature_addr}\n" +
                      f"+test_timeout_s={trr.timeout_s}\n" +
                      f"{get_sim_opts(md.ibex_config, md.simulator)}\n" +
@@ -104,14 +116,16 @@ def _main() -> int:
             for cmd in trr.rtl_cmds:
                 # Note that we don't capture the success or failure of the subprocess:
                 sim_fd.write(f"Running run-rtl command :\n{' '.join(cmd)}\n".encode())
+                # The test's own timeout (+test_timeout_s), not the default: a testlist timeout_s
+                # or IBEX_TEST_TIMEOUT_S above 1800 s used to be cut off here at 1860 s.
                 run_one(md.verbose, cmd,
                         redirect_stdstreams=sim_fd,
-                        timeout_s=md.run_rtl_timeout_s+60,  # Ideally we time-out inside the simulation
+                        timeout_s=trr.timeout_s+60,  # Ideally we time-out inside the simulation
                         reraise=True)  # Allow us to catch timeout exceptions at this level
         except subprocess.TimeoutExpired:
             trr.failure_mode = Failure_Modes.TIMEOUT
             trr.failure_message = "[FAILURE] Simulation process killed due to timeout " \
-                                 f"[{md.run_rtl_timeout_s+60}s].\n"
+                                 f"[{trr.timeout_s+60}s].\n"
 
     trr.export(write_yaml=True)
     # Always return 0 (success), even if the test failed. We've successfully

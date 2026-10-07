@@ -59,7 +59,11 @@
       -LDFLAGS '<ISS_LDFLAGS>'
       -CFLAGS '<ISS_CFLAGS> <EXTRA_COSIM_CFLAGS>'
       -CFLAGS '-I<IBEX_ROOT>/dv/cosim'
+      -CFLAGS '-I<IBEX_ROOT>/dv/cosim/cheriot_sail'
       <ISS_LIBS>
+      -L<IBEX_ROOT>/dv/cosim/cheriot_sail -lcheriotsail_rvfi
+      -L<IBEX_ROOT>/dv/cosim/riscv_sail -lriscvsail_rvfi
+      -LDFLAGS '-Wl,-rpath,<IBEX_ROOT>/dv/cosim/cheriot_sail -Wl,-rpath,<IBEX_ROOT>/dv/cosim/riscv_sail'
       -lstdc++
   sim:
     cmd:
@@ -273,10 +277,12 @@
       -I<IBEX_ROOT>/dv/cosim/cheriot_sail
       <ISS_LIBS>
       -L<IBEX_ROOT>/dv/cosim/cheriot_sail -lcheriotsail_rvfi
+      -L<IBEX_ROOT>/dv/cosim/riscv_sail -lriscvsail_rvfi
       <ISS_CFLAGS>
       <EXTRA_COSIM_CFLAGS>
       <ISS_LDFLAGS>
       -Wld,-Xlinker,-rpath,-Xlinker,<IBEX_ROOT>/dv/cosim/cheriot_sail
+      -Wld,-Xlinker,-rpath,-Xlinker,<IBEX_ROOT>/dv/cosim/riscv_sail
       -lstdc++
   sim:
     cmd:
@@ -301,8 +307,12 @@
       -covworkdir <test_dir>
       -covscope coverage
       -covtest <test_name>.<seed>
+      -covoverwrite
       +enable_ibex_fcov=1
+    # <wave_from> is empty, or '-input @"run <t>ns"' (WAVES_FROM=<t>, scripts/run_rtl.py): the probe
+    # then starts at <t>, so a failure late in a long test is reachable with waves.
     wave_opts: >
       -input @"database -open <test_dir>/waves -shm -default"
+      <wave_from>
       -input @"probe -create core_ibex_tb_top -all -memories -depth all"
       -input @"run"
