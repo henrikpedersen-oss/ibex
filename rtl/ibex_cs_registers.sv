@@ -281,8 +281,6 @@ module ibex_cs_registers import ibex_pkg::*, ibex_cheriot_pkg::*; #(
   logic [31:0]  mshwm_q, mshwm_d;
   logic [31:0]  mshwmb_q;
   logic         mshwm_en, mshwmb_en;
-  logic [31:0]  cdbg_ctrl_q;
-  logic         cdbg_ctrl_en;
   decoded_cap_t pcc_cap_q, pcc_cap_d;
 
   // CSRs for recoverable NMIs
@@ -691,14 +689,6 @@ module ibex_cs_registers import ibex_pkg::*, ibex_cheriot_pkg::*; #(
         end
       end
 
-      CSR_CDBG_CTRL: begin
-        if (cheriot_enable_i == IbexMuBiOn) begin
-          csr_rdata_int = cdbg_ctrl_q;
-        end else begin
-          illegal_csr = 1'b1;
-        end
-      end
-
       default: begin
         illegal_csr = 1'b1;
       end
@@ -764,7 +754,6 @@ module ibex_cs_registers import ibex_pkg::*, ibex_cheriot_pkg::*; #(
 
     mshwm_en     = 1'b0;
     mshwmb_en    = 1'b0;
-    cdbg_ctrl_en = 1'b0;
 
     double_fault_seen_o = 1'b0;
 
@@ -879,8 +868,6 @@ module ibex_cs_registers import ibex_pkg::*, ibex_cheriot_pkg::*; #(
         CSR_MSHWM:     mshwm_en     = (BaseIsa == BaseIsaRV32IorCHERIoT)
                                     & (cheriot_enable_i == IbexMuBiOn);
         CSR_MSHWMB:    mshwmb_en    = (BaseIsa == BaseIsaRV32IorCHERIoT)
-                                    & (cheriot_enable_i == IbexMuBiOn);
-        CSR_CDBG_CTRL: cdbg_ctrl_en = (BaseIsa == BaseIsaRV32IorCHERIoT)
                                     & (cheriot_enable_i == IbexMuBiOn);
 
         default:;
@@ -1328,32 +1315,19 @@ module ibex_cs_registers import ibex_pkg::*, ibex_cheriot_pkg::*; #(
       .rd_error_o()
       );
 
-    // cheriot debug feature control
-    ibex_csr #(
-      .Width     (32),
-      .ShadowCopy(ShadowCSR),
-      .ResetValue('0)
-    ) u_cdbg_ctrl_csr (
-      .clk_i     (clk_i),
-      .rst_ni    (rst_ni),
-      .wr_data_i ({31'h0, csr_wdata_int[0]}),
-      .wr_en_i   (cdbg_ctrl_en),
-      .rd_data_o (cdbg_ctrl_q),
-      .rd_error_o()
-      );
-
-    assign csr_dbg_tclr_fault_o = cdbg_ctrl_q[0];
-
   end else begin: g_mshwm_tieoff
     assign mshwm_q    = '0;
     assign mshwmb_q   = '0;
-    assign cdbg_ctrl_q = '0;
-
-    assign csr_dbg_tclr_fault_o = 1'b0;
 
     logic unused_mshwm_sigs;
-    assign unused_mshwm_sigs = ^{mshwm_d, mshwmb_en, cdbg_ctrl_en, mshwm_en_combi};
+    assign unused_mshwm_sigs = ^{mshwm_d, mshwmb_en, mshwm_en_combi};
   end
+
+  // There is no cdbg_ctrl CSR (0xBC4): the CHERIoT ISA has no such CSR, so an access raises an
+  // illegal instruction in either mode (REQ_ISA_11; it used to be a read/write CSR in CHERIoT mode
+  // whose bit 0 made tag-clearing results fault instead). The debug feature it enabled stays off:
+  // csr_dbg_tclr_fault_o holds the CSR's former reset value.
+  assign csr_dbg_tclr_fault_o = 1'b0;
 
   // -----------------
   // PMP registers
