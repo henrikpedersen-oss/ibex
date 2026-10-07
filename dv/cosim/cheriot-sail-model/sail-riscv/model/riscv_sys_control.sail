@@ -27,7 +27,10 @@ function is_CSR_defined (csr : csreg, p : Privilege) -> bool =
     0x302 => p == Machine & (haveSupMode() | haveNExt()), // medeleg
     0x303 => p == Machine & (haveSupMode() | haveNExt()), // mideleg
     0x304 => p == Machine, // mie
-    0x305 => p == Machine, // mtvec
+    /* CHERIoT replaces mtvec with MTCC and mepc with MEPCC: as CSRs both are
+     * illegal, as in the RTL (ibex_cs_registers.sv). Local patch; the upstream
+     * model instead hit internal_error / silently accepted the write. */
+    0x305 => false, // mtvec
     0x306 => p == Machine & haveUsrMode(), // mcounteren
     0x30A => p == Machine & haveUsrMode(), // menvcfg
     0x310 => p == Machine & (sizeof(xlen) == 32), // mstatush
@@ -35,7 +38,7 @@ function is_CSR_defined (csr : csreg, p : Privilege) -> bool =
     0x320 => p == Machine, // mcountinhibit
     /* machine mode: trap handling */
     0x340 => p == Machine, // mscratch
-    0x341 => p == Machine, // mepc
+    0x341 => false, // mepc (CHERIoT: MEPCC, see mtvec above)
     0x342 => p == Machine, // mcause
     0x343 => p == Machine, // mtval
     0x344 => p == Machine, // mip
@@ -77,13 +80,16 @@ function is_CSR_defined (csr : csreg, p : Privilege) -> bool =
     0x180 => haveSupMode() & (p == Machine | p == Supervisor), // satp
 
     /* user mode: counters */
-    0xC00 => haveUsrMode(),    // cycle
+    /* Local change (ibex_cheriot_verification, under review): cycle/instret are Zicntr, not
+     * U-mode, so they exist on M-mode-only CHERIoT, whose ext_check_CSR allow list already permits
+     * reading them without ASR. time stays U-mode-gated: ibex implements no time CSR. */
+    0xC00 => true,             // cycle
     0xC01 => haveUsrMode(),    // time
-    0xC02 => haveUsrMode(),    // instret
+    0xC02 => true,             // instret
 
-    0xC80 => haveUsrMode() & (sizeof(xlen) == 32),     // cycleh
+    0xC80 => sizeof(xlen) == 32,                       // cycleh
     0xC81 => haveUsrMode() & (sizeof(xlen) == 32),     // timeh
-    0xC82 => haveUsrMode() & (sizeof(xlen) == 32),     // instreth
+    0xC82 => sizeof(xlen) == 32,                       // instreth
 
     /* user mode: Zkr */
     0x015 => haveZkr(),

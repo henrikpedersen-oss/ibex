@@ -4,6 +4,14 @@
 
 // List of CSRs to ignore for coverage purposes. These CSRs are ignored as they
 // are less critical and achieving full coverage isn't necessary.
+//
+// The user-mode read-only aliases (CSR_INSTRET, CSR_HPMCOUNTER*, CSR_CYCLEH, CSR_INSTRETH,
+// CSR_HPMCOUNTER*H) and the HPM counters: CHERIoT is M-mode only and the opentitan config has no
+// HPM hardware, so accesses to these CSRs trap as illegal instructions and are never counted as
+// completed reads/writes by the CSR coverpoints.
+//
+// Every line inside the macro, comment lines included, must end in '\': a comment line without
+// one ends the macro there and the rest of the list is parsed as code.
 `define IGNORED_CSRS \
   // Performance counter control \
   CSR_MCOUNTINHIBIT, \
@@ -40,10 +48,7 @@
   // Performance counters — machine-mode read/write \
   CSR_MCYCLE, \
   CSR_MINSTRET, \
-  // Performance counters — user-mode read-only aliases (CSR_INSTRET, CSR_HPMCOUNTER*,
-  // CSR_CYCLEH, CSR_INSTRETH, CSR_HPMCOUNTER*H).  CHERIoT is M-mode only; the HPM hardware
-  // is not implemented in the opentitan config, so accesses to these CSRs trap as illegal
-  // instructions and are never counted as completed reads/writes by the CSR coverpoints. \
+  // Performance counters, user-mode read-only aliases and HPM counters (see above) \
   CSR_INSTRET, \
   CSR_HPMCOUNTER3, \
   CSR_HPMCOUNTER4, \

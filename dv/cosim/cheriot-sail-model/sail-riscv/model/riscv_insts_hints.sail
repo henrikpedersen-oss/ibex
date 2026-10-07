@@ -11,6 +11,20 @@
 /* that are not already implicitly handled.                           */
 
 /* ****************************************************************** */
+/* CHERIoT-Ibex verification local change: the register-carrying RVC
+ * HINTs below never read or write their register, so the RV32E check in
+ * rX/wX/rC/wC (Error_not_rv32e_register) never fired for them and a HINT
+ * naming x16-x31 retired as a no-op. RV32E makes every encoding that
+ * specifies x16-x31 reserved, and the core raises an illegal-instruction
+ * exception for them. Raise the same error here, which riscv_step.sail
+ * turns into handle_illegal() exactly as for any other x16-x31 access.
+ * Found by TestRIG (c.addi x20, 0 = 0x0a01).
+ */
+val hint_rv32e_check : regidx -> unit effect {escape}
+function hint_rv32e_check(r) =
+  if unsigned(r) > 15 then throw Error_not_rv32e_register() else ()
+
+/* ****************************************************************** */
 union clause ast = C_NOP_HINT : (bits(6))
 
 mapping clause encdec_compressed = C_NOP_HINT(im5 @ im40)
@@ -30,7 +44,7 @@ mapping clause encdec_compressed = C_ADDI_HINT(rsd)
   <-> 0b000 @ 0b0 @ rsd : regidx @ 0b00000 @ 0b01
       if rsd != zreg
 
-function clause execute (C_ADDI_HINT(rsd)) = RETIRE_SUCCESS
+function clause execute (C_ADDI_HINT(rsd)) = { hint_rv32e_check(rsd); RETIRE_SUCCESS }
 
 mapping clause assembly = C_ADDI_HINT(rsd)
       if rsd != zreg
@@ -71,7 +85,7 @@ mapping clause encdec_compressed = C_MV_HINT(rs2)
   <-> 0b100 @ 0b0 @ 0b00000 @ rs2 : regidx @ 0b10
       if rs2 != zreg
 
-function clause execute (C_MV_HINT(rs2)) = RETIRE_SUCCESS
+function clause execute (C_MV_HINT(rs2)) = { hint_rv32e_check(rs2); RETIRE_SUCCESS }
 
 mapping clause assembly = C_MV_HINT(rs2)
       if rs2 != zreg
@@ -86,7 +100,7 @@ mapping clause encdec_compressed = C_ADD_HINT(rs2)
   <-> 0b100 @ 0b1 @ 0b00000 @ rs2 : regidx @ 0b10
       if rs2 != zreg
 
-function clause execute (C_ADD_HINT(rs2)) = RETIRE_SUCCESS
+function clause execute (C_ADD_HINT(rs2)) = { hint_rv32e_check(rs2); RETIRE_SUCCESS }
 
 mapping clause assembly = C_ADD_HINT(rs2)
       if rs2 != zreg
@@ -101,7 +115,7 @@ mapping clause encdec_compressed = C_SLLI_HINT(nzui5 @ nzui40, rsd)
   <-> 0b000 @ nzui5 : bits(1) @ rsd : regidx @ nzui40 : bits(5) @ 0b10
       if (nzui5 @ nzui40 == 0b000000 | rsd == zreg) & (sizeof(xlen) == 64 | nzui5 == 0b0)
 
-function clause execute (C_SLLI_HINT(shamt, rsd)) = RETIRE_SUCCESS
+function clause execute (C_SLLI_HINT(shamt, rsd)) = { hint_rv32e_check(rsd); RETIRE_SUCCESS }
 
 mapping clause assembly = C_SLLI_HINT(shamt, rsd)
       if shamt == 0b000000 | rsd == zreg

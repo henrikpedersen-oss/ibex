@@ -1,0 +1,6 @@
+70af9c21 sail-riscv 99e4993a -- vendored from TestRIG-private riscv-implementations/cheriot-sail (sail-riscv: CHERIoT DII step_exception drain loop fix), with local changes to sail-riscv/model/riscv_insts_cext.sail and riscv_sys_control.sail
+
+Local changes since. The DPI build compiles generated_definitions/c/riscv_rvfi_model_RV32.c and never regenerates it, so every change must be in that file; source changes are mirrored in the .sail files so a regeneration keeps them:
+- 2026-09-28 generated C only, try_execute: Error_not_rv32e_register handled as handle_illegal again, as the .sail source says (a hand-edit had made it RETIRE_SUCCESS).
+- 2026-09-30 riscv_insts_hints.sail: C_ADDI_HINT, C_MV_HINT, C_ADD_HINT, C_SLLI_HINT raise Error_not_rv32e_register for x16-x31 (hint_rv32e_check); they never accessed their register, so a HINT naming x16-x31 retired as a no-op while the RTL traps (RV32E reserves those encodings). Found by TestRIG: c.addi x20, 0 = 0x0a01. Not yet reported upstream.
+- 2026-10-04 src/cheri_sys_regs.sail + generated C (zext_is_CSR_defined): uccsr (0x8C0), sccsr (0x9C0) and mccsr (0xBC0) are not defined, so any access is an illegal instruction. They are legacy CHERI-RISC-V registers that CHERIoT drops; the CHERIoT RTL does not implement them and Microsoft's formal fork (ac58b3f8) disables the same clauses. Model finding, spec GAP-MF-1.

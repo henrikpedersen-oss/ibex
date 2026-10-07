@@ -31,3 +31,25 @@ dv/riscv_compliance/xlm_compliance_out*/
 # Linker map emitted by the directed-test builds (-Wl,-Map=link.log in directed_testlist.yaml)
 dv/uvm/core_ibex/link.log
 
+
+# TestRIG build and run outputs (dv/testrig/README.md)
+dv/testrig/xlm_testrig_out/
+dv/testrig/vlt_testrig_out/
+dv/testrig/cov_work/
+# Written by xrun / SimVision into the directory they run in.
+dv/testrig/xrun.key
+dv/testrig/xmsc.log
+dv/testrig/.simvision/
+# Built by 'make -C dv/cosim/cheriot_sail emulator' (Verilator TestRIG flow).
+dv/cosim/cheriot_sail/cheriot_sail_rvfi_emulator
+
+# CHERIoT RTOS test SoC build and run outputs, including kept results (dv/cheriot-rtos-test-suites/README.md)
+dv/cheriot-rtos-test-suites/xlm_rtos_out*/
+dv/cheriot-rtos-test-suites/cov_work/
+# Written by xrun / imc / SimVision into the directory they run in.
+dv/cheriot-rtos-test-suites/xrun.key
+dv/cheriot-rtos-test-suites/xrun.history
+dv/cheriot-rtos-test-suites/imc.key
+dv/cheriot-rtos-test-suites/mdv.log
+dv/cheriot-rtos-test-suites/.simvision/
+dv/cheriot-rtos-test-suites/*.shm/

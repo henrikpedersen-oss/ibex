@@ -107,22 +107,54 @@ module ibex_fetch_fifo #(
 
   // If there is an error, rdata is unknown
 `ifdef DII_SIM
-  logic [31:0] instr_rdata_dii;
-  logic [31:0] instr_pc;
-  logic        instr_ack;
+  // Direct Instruction Injection (DII) for TestRIG. The testbench supplies the whole
+  // instruction word by hierarchical reference, bypassing the two-word reconstruction.
+  //   32-bit instruction: dii_insn[31:0] = instr
+  //   16-bit instruction: dii_insn[15:0] = compressed instruction
 
-  // for DII we directly force out_rdata_o (re-aligned instruction)
-  // to keep the unaligned/aligned_is_compressed signals in sync
-  //   32-bit instruction; instr_rdata_dii[31:0] = instr
-  //   16-bit instruction: instr_rdata_dii[15:0] = compressed instruction
-  //                       instr_rdata_dii[31:0] = don't care
+  // Driven/read hierarchically by the testbench. One instruction in flight: the testbench offers
+  // dii_insn with dii_valid, the core consumes it once (dii_ack), and the testbench offers the
+  // next only after that one has retired. Nothing acked can then be flushed by a branch, trap or
+  // fence.i, so nothing ever needs replaying.
+  logic [31:0] dii_insn;
+  logic        dii_valid;
+  logic [31:0] dii_pc;
+  logic        dii_ack;
+
+  // Set on consumption, cleared when the testbench withdraws the packet, so the core cannot
+  // take the same packet twice in the cycles before the testbench reacts to dii_ack.
+  logic        dii_taken_q;
+  logic        dii_avail;
+  logic [31:0] dii_insn_muxed;
+  logic        dii_in_range;
+
+  // Outside [DII_BASE, DII_TOP) serve a deterministic NOP rather than a stale instruction,
+  // so out-of-range fetches are reproducible and the stream still drains to reset.
+  localparam logic [31:0] DII_BASE     = 32'h8000_0000;
+  localparam logic [31:0] DII_TOP      = 32'h8001_0000;
+  localparam logic [31:0] DII_OOR_INSN = 32'h0000_0013; // addi x0,x0,0
+
+  assign dii_pc       = out_addr_o;
+  assign dii_in_range = (out_addr_o >= DII_BASE) && (out_addr_o < DII_TOP);
+  assign dii_avail    = dii_valid && !dii_taken_q;
+  // Not in a cycle where the fetch stage is being cleared: the packet stays offered and is
+  // consumed from the new PC instead. Out-of-range fetches still ack (the packet was sent).
+  assign dii_ack      = out_ready_i && out_valid_o && !clear_i;
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin : dii_ff
+    if (!rst_ni) begin
+      dii_taken_q <= 1'b0;
+    end else if (!dii_valid) begin
+      dii_taken_q <= 1'b0;
+    end else if (dii_ack) begin
+      dii_taken_q <= 1'b1;
+    end
+  end
+  assign dii_insn_muxed = dii_in_range ? dii_insn : DII_OOR_INSN;
 
   assign unaligned_is_compressed = out_addr_o[1] & cheriot_force_uc_i
-                                 | ((instr_rdata_dii[1:0] != 2'b11) & ~err);
-  assign aligned_is_compressed   = ~out_addr_o[1] & (instr_rdata_dii[1:0] != 2'b11) & ~err;
-
-  assign instr_ack = out_ready_i & out_valid_o;
-  assign instr_pc  = out_addr_o;
+                                 | ((dii_insn_muxed[1:0] != 2'b11) & ~err);
+  assign aligned_is_compressed   = ~out_addr_o[1] & (dii_insn_muxed[1:0] != 2'b11) & ~err;
 `else
   assign unaligned_is_compressed = cheriot_force_uc_i | ((rdata[17:16] != 2'b11) & ~err);
   assign aligned_is_compressed   = (rdata[ 1: 0] != 2'b11) & ~err;
@@ -137,7 +169,7 @@ module ibex_fetch_fifo #(
       // unaligned case
 
 `ifdef DII_SIM
-     out_rdata_o      = instr_rdata_dii;
+      out_rdata_o     = dii_insn_muxed;
 `else
       out_rdata_o     = rdata_unaligned;
 `endif
@@ -152,7 +184,7 @@ module ibex_fetch_fifo #(
     end else begin
       // aligned case
 `ifdef DII_SIM
-     out_rdata_o      = instr_rdata_dii;
+      out_rdata_o     = dii_insn_muxed;
 `else
       out_rdata_o     = rdata;
 `endif
@@ -160,6 +192,10 @@ module ibex_fetch_fifo #(
       out_err_plus2_o = 1'b0;
       out_valid_o     = valid;
     end
+`ifdef DII_SIM
+    // Only present an instruction while an unconsumed DII packet is on offer.
+    out_valid_o = out_valid_o & dii_avail;
+`endif
   end
 
   /////////////////////////

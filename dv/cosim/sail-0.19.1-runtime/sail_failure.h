@@ -48,20 +48,28 @@
 #define SAIL_FAILURE_H
 
 #include "sail.h"
+#include <setjmp.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+/* Recovery jump buffer: when sail_recovery_buf_active != 0, sail_match_failure
+ * and sail_assert longjmp here instead of calling exit().  Callers set this
+ * around zstep() to catch unrecognized instruction encodings gracefully. */
+extern jmp_buf sail_recovery_buf;
+extern int     sail_recovery_buf_active;
+
 /*
  * This function should be called whenever a pattern match failure
- * occurs. Pattern match failures are always fatal.
+ * occurs. Pattern match failures are always fatal unless sail_recovery_buf
+ * is active, in which case it performs a longjmp.
  */
 void sail_match_failure(const_sail_string msg);
 
 /*
  * sail_assert implements the assert construct in Sail. If any
- * assertion fails we immediately exit the model.
+ * assertion fails we immediately exit the model (or longjmp if active).
  */
 unit sail_assert(bool b, const_sail_string msg);
 

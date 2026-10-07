@@ -1067,10 +1067,67 @@ module ibex_icache import ibex_pkg::*; #(
   // (e.g. cache hit data can become available ahead of an older outstanding miss).
   assign data_valid = |fill_out_arb;
 
+`ifdef DII_SIM
+  // Direct Instruction Injection (DII) for TestRIG, the ICache = 1 counterpart of the DII_SIM
+  // block in ibex_fetch_fifo.sv (with ICache = 1 there is no prefetch buffer, so no fetch FIFO).
+  // The testbench drives dii_insn / dii_valid by hierarchical reference and reads dii_ack; the
+  // protocol is the fetch FIFO's: one packet on offer, consumed once.
+  //
+  // The cache itself is left alone: fills, hits, ECC and scrambling run on whatever the bus
+  // returns. Only the output stage changes:
+  //   - rdata_o is the injected word (an out-of-range PC gets a NOP, as in the fetch FIFO);
+  //   - every "is the instruction at the output address compressed?" decision, which upstream
+  //     takes from the fetched halfword (rdata_o[1:0], skid_data_q[1:0], output_data[17:16]),
+  //     is taken from the injected word, so the address advances by the size of the
+  //     instruction the core executes, not of the bus data underneath;
+  //   - valid_o is gated, and ready_i masked, while no unconsumed packet is on offer, so the
+  //     output stage cannot advance past an instruction the testbench has not supplied.
+  // Skid-buffer loads that happen while no packet is on offer are taken on the previous packet's
+  // compressedness; the skid logic stays self-consistent either way (it only tracks which
+  // halfwords have been popped), so the next packet is still served from the right address.
+  // Not replicated: cheriot_force_uc_i, which this module does not have (see ibex_if_stage.sv).
+  logic [31:0] dii_insn;
+  logic        dii_valid;
+  logic        dii_ack;
+
+  logic        dii_taken_q;
+  logic        dii_avail;
+  logic        dii_in_range;
+  logic [31:0] dii_insn_muxed;
+  logic        dii_compressed;
+  logic        dii_ready;
+
+  localparam logic [31:0] DII_BASE     = 32'h8000_0000;
+  localparam logic [31:0] DII_TOP      = 32'h8001_0000;
+  localparam logic [31:0] DII_OOR_INSN = 32'h0000_0013; // addi x0,x0,0
+
+  assign dii_in_range   = ({output_addr_q, 1'b0} >= DII_BASE) && ({output_addr_q, 1'b0} < DII_TOP);
+  assign dii_avail      = dii_valid && !dii_taken_q;
+  assign dii_insn_muxed = dii_in_range ? dii_insn : DII_OOR_INSN;
+  assign dii_compressed = (dii_insn_muxed[1:0] != 2'b11);
+  assign dii_ready      = ready_i & dii_avail;
+  // Not on a branch: the packet stays on offer and is consumed from the new PC instead.
+  assign dii_ack        = ready_i && valid_o && !branch_i;
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin : dii_ff
+    if (!rst_ni) begin
+      dii_taken_q <= 1'b0;
+    end else if (!dii_valid) begin
+      dii_taken_q <= 1'b0;
+    end else if (dii_ack) begin
+      dii_taken_q <= 1'b1;
+    end
+  end
+`endif
+
   // Skid buffer data
   assign skid_data_d = output_data[31:16];
 
+`ifdef DII_SIM
+  assign skid_en     = data_valid & (dii_ready | skid_ready);
+`else
   assign skid_en     = data_valid & (ready_i | skid_ready);
+`endif
 
   if (ResetAll) begin : g_skid_data_ra
     always_ff @(posedge clk_i or negedge rst_ni) begin
@@ -1093,11 +1150,27 @@ module ibex_icache import ibex_pkg::*; #(
 
   // The data in the skid buffer is ready if it's a complete compressed instruction or if there's
   // an error (no need to wait for the second half)
+`ifdef DII_SIM
+  assign skid_complete_instr = skid_valid_q & (dii_compressed | skid_err_q);
+`else
   assign skid_complete_instr = skid_valid_q & ((skid_data_q[1:0] != 2'b11) | skid_err_q);
+`endif
 
   // Data can be loaded into the skid buffer for an unaligned uncompressed instruction
   assign skid_ready = output_addr_q[1] & ~skid_valid_q & (~output_compressed | output_err);
 
+`ifdef DII_SIM
+  assign output_ready = (dii_ready | skid_ready) & ~skid_complete_instr;
+
+  assign output_compressed = dii_compressed;
+
+  assign skid_valid_d =
+      branch_i ? 1'b0 :
+      (skid_valid_q ? ~(dii_ready & (dii_compressed | skid_err_q)) :
+                      (data_valid &
+                       (((output_addr_q[1] & (~output_compressed | output_err)) |
+                        (~output_addr_q[1] & output_compressed & ~output_err & dii_ready)))));
+`else
   assign output_ready = (ready_i | skid_ready) & ~skid_complete_instr;
 
   assign output_compressed = (rdata_o[1:0] != 2'b11);
@@ -1113,6 +1186,7 @@ module ibex_icache import ibex_pkg::*; #(
                        (((output_addr_q[1] & (~output_compressed | output_err)) |
                         // - a compressed instruction misaligns the stream
                         (~output_addr_q[1] & output_compressed & ~output_err & ready_i)))));
+`endif
 
   always_ff @(posedge clk_i or negedge rst_ni) begin
     if (!rst_ni) begin
@@ -1130,7 +1204,11 @@ module ibex_icache import ibex_pkg::*; #(
                         // Output data available and, output stream aligned, or skid data available,
                         (data_valid & (~output_addr_q[1] | skid_valid_q |
                                        // or this is an error or an unaligned compressed instruction
+`ifdef DII_SIM
+                                       output_err | dii_compressed));
+`else
                                        output_err | (output_data[17:16] != 2'b11)));
+`endif
 
   // Update the address on branches and every time an instruction is driven
   assign output_addr_en = branch_i | (ready_i & valid_o);
@@ -1188,8 +1266,16 @@ module ibex_icache import ibex_pkg::*; #(
     end
   end
 
+`ifdef DII_SIM
+  // Only present an instruction while an unconsumed DII packet is on offer.
+  assign valid_o     = output_valid & dii_avail;
+  assign rdata_o     = dii_insn_muxed;
+  logic unused_dii_output_data;
+  assign unused_dii_output_data = ^{output_data_hi, output_data_lo, skid_data_q};
+`else
   assign valid_o     = output_valid;
   assign rdata_o     = {output_data_hi, (skid_valid_q ? skid_data_q : output_data_lo)};
+`endif
   assign addr_o      = {output_addr_q, 1'b0};
   assign err_o       = (skid_valid_q & skid_err_q) | (~skid_complete_instr & output_err);
   // Error caused by the second half of a misaligned uncompressed instruction

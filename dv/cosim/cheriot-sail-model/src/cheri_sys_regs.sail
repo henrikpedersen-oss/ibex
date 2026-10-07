@@ -118,9 +118,12 @@ function clause ext_write_CSR (0xBC0, value) = { mccsr = legalize_ccsr(mccsr, va
 function clause ext_write_CSR (0xBC1, value) = { MSHWM  = legalize_mshwm(value); Some(MSHWM) }
 function clause ext_write_CSR (0xBC2, value) = { MSHWMB = legalize_mshwm(value); Some(MSHWMB) }
 
-function clause ext_is_CSR_defined (0x8C0, p) = haveUsrMode()  // uccsr
-function clause ext_is_CSR_defined (0x9C0, p) = haveSupMode() & (p == Machine | p == Supervisor) // sccsr
-function clause ext_is_CSR_defined (0xBC0, p) = p == Machine | p == Supervisor // mccsr
+// Local (VENDORED_FROM 2026-10-04): uccsr/sccsr/mccsr are legacy CHERI-RISC-V registers that
+// CHERIoT drops; the CHERIoT RTL does not implement them, so access is an illegal instruction.
+// Microsoft's formal fork (ac58b3f8) disables the same clauses.
+function clause ext_is_CSR_defined (0x8C0, p) = false  // uccsr, was haveUsrMode()
+function clause ext_is_CSR_defined (0x9C0, p) = false  // sccsr, was haveSupMode() & (p == Machine | p == Supervisor)
+function clause ext_is_CSR_defined (0xBC0, p) = false  // mccsr, was p == Machine | p == Supervisor
 
 function clause ext_is_CSR_defined (0xBC1, Machine) = true // MSHWM
 function clause ext_is_CSR_defined (0xBC2, Machine) = true // MSHWMB

@@ -20,6 +20,8 @@ interface core_ibex_rvfi_if(input logic clk);
   logic [4:0]  rd_addr;
   logic [31:0] rd_wdata;
   logic [32:0] rd_wcap;
+  logic [32:0] rs1_rcap;
+  logic [32:0] rs2_rcap;
   logic [31:0] pc_rdata;
   logic [31:0] pc_wdata;
   logic [31:0] mem_addr;
@@ -27,13 +29,23 @@ interface core_ibex_rvfi_if(input logic clk);
   logic [3:0]  mem_wmask;
   logic [31:0] mem_rdata;
   logic [31:0] mem_wdata;
+  logic        mem_is_cap;
+  logic [32:0] mem_rcap;
+  logic [32:0] mem_wcap;
   logic [31:0] ext_pre_mip;
   logic [31:0] ext_post_mip;
   logic        ext_nmi;
   logic        ext_nmi_int;
-  logic [31:0] ext_debug_req;
-  logic [31:0] ext_rf_wr_suppress;
+  logic        ext_debug_req;       // 1 bit, as rvfi_ext_debug_req in ibex_core.sv
+  logic        ext_rf_wr_suppress;  // 1 bit, as rvfi_ext_rf_wr_suppress in ibex_core.sv
   logic [63:0] ext_mcycle;
+  // Micro-op boundary markers for expanded instructions (Zcmp cm.push/cm.pop/
+  // cm.mvsa01/...). Ibex retires one RVFI item per expanded operation, all at
+  // the same PC; _last marks the final one. The cosim needs this to know when a
+  // multi-operation instruction is complete -- see ibex_cosim_scoreboard.sv.
+  logic        ext_expanded_insn_valid;
+  logic [15:0] ext_expanded_insn;
+  logic        ext_expanded_insn_last;
   logic        ext_irq_valid;
 
   logic [31:0] ext_mhpmcounters [10];
@@ -58,6 +70,8 @@ interface core_ibex_rvfi_if(input logic clk);
     input rd_addr;
     input rd_wdata;
     input rd_wcap;
+    input rs1_rcap;
+    input rs2_rcap;
     input pc_rdata;
     input pc_wdata;
     input mem_addr;
@@ -65,8 +79,14 @@ interface core_ibex_rvfi_if(input logic clk);
     input mem_wmask;
     input mem_rdata;
     input mem_wdata;
+    input mem_is_cap;
+    input mem_rcap;
+    input mem_wcap;
     input ext_pre_mip;
     input ext_post_mip;
+    input ext_expanded_insn_valid;
+    input ext_expanded_insn;
+    input ext_expanded_insn_last;
     input ext_nmi;
     input ext_nmi_int;
     input ext_debug_req;

@@ -129,5 +129,21 @@ $(OUT): $(ALL_OBJS)
 	@nm $@ | grep -c "zrvfi_get_cheri_data" && echo "OK: zrvfi_get_cheri_data exported" || echo "WARN: zrvfi_get_cheri_data not found"
 	@nm $@ | grep -c "cheriot_sail_cosim_step" && echo "OK: cheriot_sail_cosim_step exported" || echo "WARN: cheriot_sail_cosim_step not found"
 
+# Standalone RVFI-DII emulator for the Verilator TestRIG flow (`--rvfi-dii <port>`).
+# Same model, platform and runtime objects as the DPI library, so both TestRIG
+# flows check against one model; riscv_sim.c supplies main() instead of the DPI.
+EMU_OUT  := cheriot_sail_rvfi_emulator
+EMU_OBJS := $(C_OBJS) $(BUILD_DIR)/riscv_sim.o
+
+$(BUILD_DIR)/riscv_sim.o: $(SAIL_RISCV_DIR)/c_emulator/riscv_sim.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(EMU_OUT): $(EMU_OBJS)
+	$(CC) $^ $(shell pkg-config --libs gmp) $(shell pkg-config --libs zlib) -lpthread -ldl -o $@
+	@echo "Built: $@"
+
+.PHONY: emulator
+emulator: $(EMU_OUT)
+
 clean:
-	rm -rf $(OUT) $(BUILD_DIR)
+	rm -rf $(OUT) $(EMU_OUT) $(BUILD_DIR)

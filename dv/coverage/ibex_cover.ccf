@@ -1,0 +1,74 @@
+// Copyright lowRISC contributors.
+// Licensed under the Apache License, Version 2.0, see LICENSE for details.
+// SPDX-License-Identifier: Apache-2.0
+
+// Code-coverage configuration shared by every Xcelium flow that instruments ibex_top: the UVM
+// testbench (yaml/rtl_simulation.yaml via scripts/compile_tb.py), RISC-V compliance
+// (dv/riscv_compliance/build_xlm.sh), TestRIG (dv/testrig/testrig_xlm_build.sh), the Sonata Xcelium
+// flow (sonata-xlm/sonata_xlm_build.sh) and the CHERIoT RTOS test SoC
+// (dv/cheriot-rtos-test-suites/cheriot_rtos_cover.ccf, which includes this file and adds the
+// memory subsystem on top).
+//
+// One file so that every suite's database models the same items under ibex_top: when two suites
+// selected different metrics or scopes, IMC merged two different models and the combined numbers
+// shrank (items dropped) or were diluted (one suite's extra items added to the denominators).
+// Suite-specific ADDITIONS go in a CCF that includes this one; nothing here may be deselected per
+// suite, or the models diverge again. Every build passes -covdut ibex_top, except the RTOS SoC
+// (-covdut cheriot_rtos_soc, needed to reach cheriot_mem_subsys), whose ibex_top subtree is
+// therefore the same items under a different root.
+//
+// This is lowRISC's dv/tools/xcelium/cover.ccf with ${DUT_TOP} written out as ibex_top, so it does
+// not depend on each build exporting DUT_TOP. It still needs ${dv_root} for common.ccf (all builds
+// export it). Covergroup scoring options are deliberately absent: Xcelium 24.03 rejects
+// -beftsc/-betfsc together with a "..." wildcard (*E,CGNMWC) and set_functional_scoring
+// (*E,ICFUC); covergroups are collected by -coverage all regardless.
+
+// Xcelium's recommended common settings (expression operators, branch/statement/assign scoring,
+// SV toggle scoring, toggle on ports only, X->0/1 toggles), as maintained by lowRISC.
+include_ccf ${dv_root}/tools/xcelium/common.ccf
+
+// Code coverage on ibex_top and below.
+select_coverage -befts -module ibex_top...
+
+// Black-box pre-verified IPs from coverage collection.
+deselect_coverage -betfs -module pins_if
+deselect_coverage -betfs -module clk_rst_if
+deselect_coverage -betfs -module prim_alert_sender...
+deselect_coverage -betfs -module prim_alert_receiver...
+deselect_coverage -betfs -module prim_count...
+deselect_coverage -betfs -module prim_esc_sender...
+deselect_coverage -betfs -module prim_esc_receiver...
+deselect_coverage -betfs -module prim_onehot_check...
+deselect_coverage -betfs -module prim_prince...
+deselect_coverage -betfs -module prim_lfsr...
+deselect_coverage -betfs -module prim_secded_inv_64_57_dec...
+deselect_coverage -betfs -module prim_secded_inv_39_32_dec...
+deselect_coverage -betfs -module prim_secded_inv_64_57_enc...
+deselect_coverage -betfs -module prim_secded_inv_39_32_enc...
+
+// Black-box DV CDC module.
+deselect_coverage -betfs -module prim_cdc_rand_delay
+
+// csr_assert_fpv is an auto-generated csr read assertion module. So only assertion coverage is
+// meaningful to collect.
+deselect_coverage -betf -module *csr_assert_fpv...
+select_coverage -assert -module *csr_assert_fpv
+
+// Only enable assertion coverage
+deselect_coverage -betf -module *tlul_assert...
+select_coverage -assert -module *tlul_assert
+
+// Only collect toggle coverage on ibex_top's ports and the black-boxed IP (above) ports.
+deselect_coverage -toggle -module ibex_top...
+select_coverage -toggle -module ibex_top
+
+select_coverage -toggle -module prim_alert_sender
+select_coverage -toggle -module prim_alert_receiver
+select_coverage -toggle -module prim_count
+select_coverage -toggle -module prim_esc_sender
+select_coverage -toggle -module prim_esc_receiver
+select_coverage -toggle -module prim_onehot_check
+select_coverage -toggle -module prim_prince
+select_coverage -toggle -module prim_lfsr
+select_coverage -toggle -module prim_secded_inv_64_57_dec
+select_coverage -toggle -module prim_secded_inv_39_32_dec

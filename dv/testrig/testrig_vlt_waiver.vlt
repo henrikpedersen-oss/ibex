@@ -1,0 +1,16 @@
+// Waivers for the TestRIG testbench build (testrig_vlt_build.sh), on top of upstream's
+// lint/verilator_waiver.vlt. Only warnings caused by the testbench, or not design defects, go here.
+
+`verilator_config
+
+// The TestRIG top forces x1-x15's capability flops to the memory root, and MEPCC's address to the
+// boot address, for one cycle after each reset so the RTL starts where the Sail model does
+// (core_ibex_testrig_tb_top.sv). Verilator counts a force as a second driver of the forced flop.
+lint_off -rule MULTIDRIVEN -file "*/rtl/ibex_register_file_ff.sv" -match "*rf_reg_q*"
+lint_off -rule MULTIDRIVEN -file "*/rtl/ibex_csr.sv" -match "*rdata_q*"
+
+// Controller/ID-stage handshake: Verilator sees a combinational loop through whole vectors that is
+// not a real loop bit-for-bit. A simulation-speed hint only; the RTL already carries lint_off
+// UNOPTFLAT for the neighbouring paths (ibex_core.sv, ibex_cheriot_ex.sv).
+lint_off -rule UNOPTFLAT -file "*/rtl/ibex_controller.sv"
+lint_off -rule UNOPTFLAT -file "*/rtl/ibex_id_stage.sv"

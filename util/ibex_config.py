@@ -280,6 +280,11 @@ def main():
         SimOpts('dsim_opts', 'DSim compile',
                 lambda p, v: ['-defparam', p + '=' + v],
                 lambda d, v: ['+define+' + d + '=' + v], '.'),
+        # Verilator's -G only reaches parameters of the top-level module, so
+        # leave --ins_hier_path empty and declare the parameters in the top.
+        SimOpts('vlt_opts', 'Verilator compile',
+                lambda p, v: ['-G' + p + '=' + v],
+                lambda d, v: ['+define+' + d + '=' + v], '.'),
     ]
 
     argparser = argparse.ArgumentParser(description=(
