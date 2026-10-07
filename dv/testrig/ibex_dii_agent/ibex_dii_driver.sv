@@ -4,9 +4,17 @@
 
 typedef class ibex_dii_agent;
 
-// Injects DII instructions into the fetch FIFO (see the DII_SIM block in ibex_fetch_fifo.sv) and
-// handles the end-of-test reset. Every item gets exactly one response; end_of_test is set once per
-// test, which is what the instruction source turns into its single halt.
+// Injects DII instructions at the fetch output (the DII_SIM blocks in ibex_fetch_fifo.sv and
+// ibex_icache.sv) and handles the end-of-test reset. Every item gets exactly one response;
+// end_of_test is set once per test, which is what the instruction source turns into its single halt.
+//
+// Every injected word the core takes is handed to the scoreboard, which steps the reference model
+// with it and checks that the core retired that word. Before the closing reset one probe NOP is
+// injected (and not reported to the instruction source), so the last instruction of a test has a
+// successor: a trap or mret there has its target checked like any other.
+//
+// A test that cannot complete (no dii_ack, an instruction that never retires, an incomplete drain)
+// is a UVM_ERROR: a hung core must not pass.
 //
 // Plusargs:
 //   +dii_drain_timeout=<n> cycles to wait for injected instructions to retire at the end of a
@@ -19,7 +27,7 @@ class ibex_dii_driver extends uvm_driver #(ibex_dii_seq_item);
   `uvm_component_utils(ibex_dii_driver)
   `uvm_component_new
 
-  // Filler for the interrupt barrier slot: retires harmlessly.
+  // Filler for the interrupt barrier slot and the end-of-test probe: retires harmlessly.
   localparam bit [31:0] DII_DRAIN_INSN = 32'h0000_0013; // addi x0, x0, 0
 
   ibex_dii_agent agent;
@@ -31,8 +39,7 @@ class ibex_dii_driver extends uvm_driver #(ibex_dii_seq_item);
   int unsigned drain_timeout  = 1000;
   int unsigned retire_timeout = 200;
 
-  // Per-test state. Counted in software: dii_vif.instr_in is updated by a nonblocking assignment
-  // on the same edge as dii_ack, so it still reads the old value in that time step.
+  // Per-test state, counted here on dii_ack.
   protected bit          insn_injected;
   protected int unsigned num_injected;
   // Set when a test was aborted; its remaining instructions and closing RST are swallowed.
@@ -57,7 +64,6 @@ class ibex_dii_driver extends uvm_driver #(ibex_dii_seq_item);
   virtual task run_phase(uvm_phase phase);
     clk_vif.wait_for_reset();
     @(dii_vif.cb);
-    dii_vif.enable_count_instr();
 
     forever begin
       seq_item_port.get_next_item(req);
@@ -90,6 +96,16 @@ class ibex_dii_driver extends uvm_driver #(ibex_dii_seq_item);
       `uvm_info(`gfn, "RST with no instructions injected: halt without reset", UVM_MEDIUM)
       rsp.end_of_test = 1'b1;
     end else begin
+      // The instruction source has had a reply for every instruction it sent; the probe's
+      // retirement is the scoreboard's alone.
+      agent.hold_rvfi(num_injected);
+      inject(DII_DRAIN_INSN);
+      if (test_aborted) begin
+        // The probe could not complete: abort_test() has drained, reset and set end_of_test,
+        // and this RST is the one that closes the test.
+        test_aborted = 1'b0;
+        return;
+      end
       drain_and_reset();
       rsp.end_of_test = 1'b1;
     end
@@ -119,6 +135,7 @@ class ibex_dii_driver extends uvm_driver #(ibex_dii_seq_item);
     dii_vif.set_dii_ready(1'b0);
     insn_injected = 1'b1;
     num_injected++;
+    agent.scoreboard.injected(insn);
 
     // One instruction in flight: offer the next only once this one has retired (or trapped),
     // so a redirect (branch, jump, trap, fence.i) never flushes an instruction already taken.
@@ -131,7 +148,7 @@ class ibex_dii_driver extends uvm_driver #(ibex_dii_seq_item);
 
   protected task abort_test(string why);
     dii_vif.set_dii_ready(1'b0);
-    `uvm_warning(`gfn, {why, ": aborting test"})
+    `uvm_error(`gfn, {why, ": aborting test"})
     drain_and_reset();
     test_aborted    = 1'b1;
     rsp.end_of_test = 1'b1;
@@ -164,12 +181,11 @@ class ibex_dii_driver extends uvm_driver #(ibex_dii_seq_item);
     bit retired;
 
     dii_vif.set_dii_ready(1'b0);
-    dii_vif.disable_count_instr();
     agent.hold_rvfi(num_injected);
     wait_retired(drain_timeout, retired);
     if (!retired) begin
-      `uvm_warning(`gfn, $sformatf("Drain incomplete after %0d cycles (%0d of %0d retired): resetting anyway",
-                                   drain_timeout, dii_vif.instr_out, num_injected))
+      `uvm_error(`gfn, $sformatf("Drain incomplete after %0d cycles (%0d of %0d retired): resetting anyway",
+                                 drain_timeout, dii_vif.instr_out, num_injected))
       num_drain_timeouts++;
     end
     @(dii_vif.cb);
@@ -177,7 +193,6 @@ class ibex_dii_driver extends uvm_driver #(ibex_dii_seq_item);
     clk_vif.apply_reset(.reset_width_clks(2));
     @(dii_vif.cb);
 
-    dii_vif.enable_count_instr();
     agent.release_rvfi();
     insn_injected = 1'b0;
     num_injected  = 0;
@@ -202,11 +217,12 @@ class ibex_dii_driver extends uvm_driver #(ibex_dii_seq_item);
 
   virtual function void report_phase(uvm_phase phase);
     super.report_phase(phase);
+    // Each was already reported as a UVM_ERROR when it happened.
     if (num_aborted_tests != 0) begin
-      `uvm_warning(`gfn, $sformatf("%0d test(s) aborted on dii_ack timeout", num_aborted_tests))
+      `uvm_info(`gfn, $sformatf("%0d test(s) aborted", num_aborted_tests), UVM_NONE)
     end
     if (num_drain_timeouts != 0) begin
-      `uvm_warning(`gfn, $sformatf("%0d end-of-test drain(s) timed out", num_drain_timeouts))
+      `uvm_info(`gfn, $sformatf("%0d end-of-test drain(s) timed out", num_drain_timeouts), UVM_NONE)
     end
   endfunction
 endclass : ibex_dii_driver

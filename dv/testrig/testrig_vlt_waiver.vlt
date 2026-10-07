@@ -1,3 +1,7 @@
+// Copyright lowRISC contributors.
+// Licensed under the Apache License, Version 2.0, see LICENSE for details.
+// SPDX-License-Identifier: Apache-2.0
+
 // Waivers for the TestRIG testbench build (testrig_vlt_build.sh), on top of upstream's
 // lint/verilator_waiver.vlt. Only warnings caused by the testbench, or not design defects, go here.
 

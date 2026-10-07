@@ -1,3 +1,9 @@
+// Copyright lowRISC contributors.
+// Licensed under the Apache License, Version 2.0, see LICENSE for details.
+// SPDX-License-Identifier: Apache-2.0
+
+// DII signals between the testbench and the core's DII_SIM hooks (ibex_fetch_fifo.sv,
+// ibex_icache.sv), the retirement count the driver waits on, and the DII interrupt lines.
 interface core_ibex_dii_intf (
   input clk, input rst_n, input rvfi_valid
 );
@@ -28,21 +34,13 @@ interface core_ibex_dii_intf (
     output irq_external;
   endclocking
 
-  logic [31:0] instr_in;
+  // Retirements since the last reset (every rvfi_valid; a Zcmp instruction counts once per
+  // micro-op).
   logic [31:0] instr_out;
 
-  bit count_instr_in = 0;
   // When low, instr_gnt_i to ibex is suppressed, preventing ibex from fetching
   // (and looping on) the DII register while the driver is waiting for QCVEngine.
   bit dii_ready = 0;
-
-  function void enable_count_instr();
-    count_instr_in = 1;
-  endfunction
-
-  function void disable_count_instr();
-    count_instr_in = 0;
-  endfunction
 
   function void set_dii_ready(bit r);
     dii_ready = r;
@@ -58,16 +56,9 @@ interface core_ibex_dii_intf (
 
   always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
-      instr_in  <= '0;
       instr_out <= '0;
-    end else begin
-      if (dii_ack && count_instr_in) begin
-        instr_in <= instr_in + 32'b1;
-      end
-
-      if (rvfi_valid) begin
-        instr_out <= instr_out + 32'b1;
-      end
+    end else if (rvfi_valid) begin
+      instr_out <= instr_out + 32'b1;
     end
   end
 endinterface : core_ibex_dii_intf

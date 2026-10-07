@@ -1,3 +1,9 @@
+// Copyright Microsoft Corporation
+// Licensed under the Apache License, Version 2.0, see LICENSE for details.
+// SPDX-License-Identifier: Apache-2.0
+//
+// From microsoft/cheriot-ibex dv/testrig/dpi (75761f82), commented-out debug output removed.
+
 #include <svdpi.h>
 #include <cassert>
 #include <iostream>
@@ -40,14 +46,4 @@ void testrig_send_exec_pkt(TestRIG::Connection* conn, svBitVecVal* pkt_val) {
   exec_pkt = *reinterpret_cast<TestRIG::RVFI_DII_Execution_Packet*>(pkt_val);
 
   conn->put_execution(exec_pkt);
-  //std::cout << "Got an exec packet\n";
-
-  //for (int i = 0;i < 23; ++i) {
-  //  std::cout << std::hex << (uint32_t) pkt_val[i] << std::endl;
-  //}
-
-  //std::cout << "order: " << std::hex << exec_pkt.rvfi_order << " rvfi_insn: "
-  //  << std::hex << exec_pkt.rvfi_insn << " rvfi_mem_wdata: " << std::hex
-  //  << exec_pkt.rvfi_mem_wdata << " rvfi_intr: " << std::hex
-  //  << (uint32_t) exec_pkt.rvfi_intr << std::endl;
 }

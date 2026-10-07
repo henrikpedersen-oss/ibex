@@ -1075,7 +1075,7 @@ module ibex_icache import ibex_pkg::*; #(
   //
   // The cache itself is left alone: fills, hits, ECC and scrambling run on whatever the bus
   // returns. Only the output stage changes:
-  //   - rdata_o is the injected word (an out-of-range PC gets a NOP, as in the fetch FIFO);
+  //   - rdata_o is the injected word, at every PC, as the reference model executes it;
   //   - every "is the instruction at the output address compressed?" decision, which upstream
   //     takes from the fetched halfword (rdata_o[1:0], skid_data_q[1:0], output_data[17:16]),
   //     is taken from the injected word, so the address advances by the size of the
@@ -1092,19 +1092,11 @@ module ibex_icache import ibex_pkg::*; #(
 
   logic        dii_taken_q;
   logic        dii_avail;
-  logic        dii_in_range;
-  logic [31:0] dii_insn_muxed;
   logic        dii_compressed;
   logic        dii_ready;
 
-  localparam logic [31:0] DII_BASE     = 32'h8000_0000;
-  localparam logic [31:0] DII_TOP      = 32'h8001_0000;
-  localparam logic [31:0] DII_OOR_INSN = 32'h0000_0013; // addi x0,x0,0
-
-  assign dii_in_range   = ({output_addr_q, 1'b0} >= DII_BASE) && ({output_addr_q, 1'b0} < DII_TOP);
   assign dii_avail      = dii_valid && !dii_taken_q;
-  assign dii_insn_muxed = dii_in_range ? dii_insn : DII_OOR_INSN;
-  assign dii_compressed = (dii_insn_muxed[1:0] != 2'b11);
+  assign dii_compressed = (dii_insn[1:0] != 2'b11);
   assign dii_ready      = ready_i & dii_avail;
   // Not on a branch: the packet stays on offer and is consumed from the new PC instead.
   assign dii_ack        = ready_i && valid_o && !branch_i;
@@ -1269,7 +1261,7 @@ module ibex_icache import ibex_pkg::*; #(
 `ifdef DII_SIM
   // Only present an instruction while an unconsumed DII packet is on offer.
   assign valid_o     = output_valid & dii_avail;
-  assign rdata_o     = dii_insn_muxed;
+  assign rdata_o     = dii_insn;
   logic unused_dii_output_data;
   assign unused_dii_output_data = ^{output_data_hi, output_data_lo, skid_data_q};
 `else

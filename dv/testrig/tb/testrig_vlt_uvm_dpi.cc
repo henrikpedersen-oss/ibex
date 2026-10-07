@@ -1,3 +1,13 @@
+// Copyright 2010-2017 Mentor Graphics Corporation
+// Copyright 2010-2013 Synopsys, Inc.
+// Copyright 2010-2018 Cadence Design Systems, Inc.
+// Copyright 2013 NVIDIA Corporation
+// Copyright lowRISC contributors.
+// Licensed under the Apache License, Version 2.0, see LICENSE for details.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Derived from Accellera UVM 1800.2-2017 src/dpi/uvm_dpi.cc.
+
 // UVM DPI for the TestRIG build in testrig_vlt_build.sh: $UVM_HOME/dpi/uvm_dpi.cc without
 // uvm_hdl.c. uvm_hdl.c only has VCS/Questa/Xcelium back ends (#error otherwise); the TestRIG
 // bench makes no uvm_hdl_* calls, so the SV side is built with UVM_HDL_NO_DPI. What is kept is

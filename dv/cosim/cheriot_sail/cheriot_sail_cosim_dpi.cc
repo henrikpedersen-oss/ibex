@@ -13,6 +13,7 @@
 #include <cassert>
 #include <csetjmp>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -31,6 +32,7 @@ extern "C" {
 // the C++ operators are already registered above.
 #include "sail.h"
 #include "sail_failure.h"
+#include "rts.h"  // read_tag_bool: the model's tag memory
 #include "riscv_rvfi_model_RV32.h"
 
 // model_init / model_fini are defined in the generated C but not declared in
@@ -68,6 +70,14 @@ extern bool     rv_enable_misaligned;
 static bool s_initialized = false;
 static int64_t s_step_no  = 0;
 static std::vector<std::string> s_errors;
+
+// Init and per-step trace on stderr, only with CHERIOT_SAIL_TRACE set: TestRIG
+// re-initialises the model for every test, so an unconditional trace printed
+// thousands of lines per run. Errors are reported through s_errors regardless.
+static bool trace_enabled(void) {
+  static const bool enabled = getenv("CHERIOT_SAIL_TRACE") != nullptr;
+  return enabled;
+}
 // The model refuses to run a trap loop through an untagged PCC and MTCC
 // (cheri_addr_checks.sail: not_implemented "Untagged PCC and MTCC infinite
 // loops"). Architecturally every later fetch faults back to MTCC, so until the
@@ -116,9 +126,9 @@ static void get_integer_output(uint64_t *out_rd_addr, uint64_t *out_rd_wdata) {
 
 void cheriot_sail_cosim_init(const svBitVecVal *boot_addr_p) {
   uint32_t boot_addr = boot_addr_p[0];
-  fprintf(stderr, "[cheriot-sail] init: boot_addr=0x%08x\n", boot_addr);
+  if (trace_enabled()) fprintf(stderr, "[cheriot-sail] init: boot_addr=0x%08x\n", boot_addr);
   if (s_initialized) {
-    fprintf(stderr, "[cheriot-sail] init: re-initializing (calling model_fini first)\n");
+    if (trace_enabled()) fprintf(stderr, "[cheriot-sail] init: re-initializing (calling model_fini first)\n");
     model_fini();
   }
   // CHERIoT-Ibex has no F/D and FS is read-only zero, so crt's
@@ -131,17 +141,17 @@ void cheriot_sail_cosim_init(const svBitVecVal *boot_addr_p) {
   // ibex performs misaligned loads/stores in hardware (split into two bus accesses); the
   // model must not trap on them. The sail-riscv platform default is false.
   rv_enable_misaligned = true;
-  fprintf(stderr, "[cheriot-sail] init: calling model_init\n");
+  if (trace_enabled()) fprintf(stderr, "[cheriot-sail] init: calling model_init\n");
   model_init();
-  fprintf(stderr, "[cheriot-sail] init: calling zinit_model\n");
+  if (trace_enabled()) fprintf(stderr, "[cheriot-sail] init: calling zinit_model\n");
   zinit_model(UNIT);
   // Match ibex_cs_registers.sv MSTATUS_RST_VAL mpie=1 (Sail resets 0; both legal). MPP is left
   // at M on purpose: CHERIoT is M-mode only (misa.U=0 here), so the RTL's reset mpp=U is a
   // finding, not a reset-value choice to paper over. No generated MPIE setter: MPIE=bit 7.
   zmstatus.zbits |= UINT64_C(0x80);
-  fprintf(stderr, "[cheriot-sail] init: calling zext_rvfi_init\n");
+  if (trace_enabled()) fprintf(stderr, "[cheriot-sail] init: calling zext_rvfi_init\n");
   zext_rvfi_init(UNIT);
-  fprintf(stderr, "[cheriot-sail] init: zext_rvfi_init done\n");
+  if (trace_enabled()) fprintf(stderr, "[cheriot-sail] init: zext_rvfi_init done\n");
 
   // CHERIoT-Ibex RVFI-DII mode: no ROM, RAM starts at 0x80000000.
   // These globals are in riscv_platform_impl.c, linked into our .so.
@@ -162,7 +172,7 @@ void cheriot_sail_cosim_init(const svBitVecVal *boot_addr_p) {
   have_exception  = false;
   s_pcc_mtcc_loop = false;
   s_initialized = true;
-  fprintf(stderr, "[cheriot-sail] init: complete, PC=0x%08llx\n", (unsigned long long)zPC);
+  if (trace_enabled()) fprintf(stderr, "[cheriot-sail] init: complete, PC=0x%08llx\n", (unsigned long long)zPC);
 }
 
 // zext_rvfi_init() (called by init above) sets x1-x15 to root_cap_mem, the start state
@@ -192,7 +202,7 @@ int cheriot_sail_cosim_step(const svBitVecVal *insn_p,
   uint32_t cheri_rd = cheri_rd_p[0];
   assert(s_initialized && "cheriot_sail_cosim_init() must be called first");
 
-  if (s_step_no < 5 || (s_step_no % 50 == 0)) {
+  if (trace_enabled()) {
     fprintf(stderr, "[cheriot-sail] step %lld: insn=0x%08x pc=0x%08x\n",
             (long long)s_step_no, insn, pc);
   }
@@ -217,13 +227,12 @@ int cheriot_sail_cosim_step(const svBitVecVal *insn_p,
   // The model runs on its own PC and must be where the DUT is. A difference means
   // the two diverged on an earlier step: report it here, where it becomes
   // visible, rather than letting it surface instructions later as a register
-  // mismatch (the UVM cosim path has no next-pc check of its own). After
-  // reporting, only zPC is moved to the DUT's PC, so one divergence gives one
-  // error instead of a cascade; the test has already failed. PCC.address is never
-  // written: it is not the PC cursor in this model (it stays at the last jump
-  // target), and CHERIoT bounds decode relative to it (getCapBoundsBits), so the
-  // old unconditional `zPCC.zaddress = pc` moved PCC's bounds to wherever the RTL
-  // was and masked PCC bounds violations (TestRIG, 2026-09-28).
+  // mismatch (the UVM cosim path has no next-pc check of its own). The model is
+  // not moved to the DUT's PC: it keeps running from its own state, so the
+  // errors that follow are the real consequence of the divergence rather than a
+  // comparison against state copied from the DUT. (Moving zPC, and before that
+  // PCC.address, to the DUT's PC masked PCC bounds violations, TestRIG
+  // 2026-09-28.)
   bool pc_diverged = false;
   if (zPC != (uint64_t)pc) {
     char buf[160];
@@ -232,7 +241,6 @@ int cheriot_sail_cosim_step(const svBitVecVal *insn_p,
              "the two diverged on an earlier step",
              (unsigned long long)zPC, pc, (long long)s_step_no);
     s_errors.emplace_back(buf);
-    zPC = (uint64_t)pc;
     pc_diverged = true;
   }
   // (C.SLLI/C.SRLI/C.SRAI with shamt[5]=1 are rejected by the model's own decoder:
@@ -249,19 +257,23 @@ int cheriot_sail_cosim_step(const svBitVecVal *insn_p,
   int recovery = setjmp(sail_recovery_buf);
   bool stepped;
   if (recovery != 0) {
-    // sail_match_failure or sail_assert fired inside zstep().  The instruction
-    // encoding is not modelled by CHERIoT-Sail (most likely a riscv-dv illegal
-    // instruction).  Skip comparison for this step: the DUT will take an
-    // illegal-instruction trap which the main Spike cosim handles.
+    // sail_match_failure or sail_assert fired inside zstep(): the model has no
+    // behaviour for this instruction (an encoding its decoder cannot match, or
+    // an internal assertion). Nothing can be compared, and the model's state is
+    // whatever zstep() left. That is an error, not a skip: a silent skip would
+    // pass every instruction the model cannot execute.
     sail_recovery_buf_active = 0;
     // sail_step was CREATE'd above; the longjmp bypassed KILL — free it now.
     KILL(sail_int)(&sail_step);
-    fprintf(stderr,
-            "[cheriot-sail] step %lld: sail_match_failure for insn=0x%08x "
-            "pc=0x%08x — unmodelled encoding, skipping comparison\n",
-            (long long)s_step_no, insn, pc);
+    char buf[200];
+    snprintf(buf, sizeof(buf),
+             "cheriot-sail model cannot execute insn=0x%08x at pc=0x%08x (step %lld, "
+             "Sail %s): not compared",
+             insn, pc, (long long)s_step_no,
+             recovery == 2 ? "assertion" : "match failure");
+    s_errors.emplace_back(buf);
     s_step_no++;
-    return pc_diverged ? -1 : 0;
+    return -1;
   }
 
   // zstep() returns false when a trap was taken before any instruction ran (a
@@ -539,6 +551,16 @@ svBit cheriot_sail_cosim_get_mem_present(void) {
 uint32_t cheriot_sail_cosim_get_mem_addr(void) {
   if (!zrvfi_mem_data_present) return 0;
   return (uint32_t)z_get_RVFI_DII_Execution_Packet_Ext_MemAccess_rvfi_mem_addr(zrvfi_mem_data);
+}
+
+// The RVFI memory record has no tag (rvfi_write records the data bits only), so
+// the tag a capability store left behind is read from the model's tag memory,
+// which holds one tag per 8-byte granule (addr_to_tag_addr: address >> 3).
+svBit cheriot_sail_cosim_get_mem_wtag(void) {
+  if (!zrvfi_mem_data_present) return 0;
+  uint64_t addr =
+      z_get_RVFI_DII_Execution_Packet_Ext_MemAccess_rvfi_mem_addr(zrvfi_mem_data);
+  return read_tag_bool(addr >> 3);
 }
 
 uint32_t cheriot_sail_cosim_get_mem_rmask(void) {

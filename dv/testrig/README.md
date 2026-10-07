@@ -3,7 +3,11 @@
 This directory holds a UVM testbench that runs [TestRIG](https://github.com/CTSRD-CHERI/TestRIG)
 random instruction streams against Ibex. QuickCheckVEngine generates the instructions and sends
 them to the core over TCP using Direct Instruction Injection (DII). An in-bench scoreboard
-checks every instruction the core retires against a Sail reference model:
+checks every instruction the core retires against a Sail reference model, stepped with the word
+that was injected (at any PC, as the model executes it). The core's reported instruction is checked
+against that word, so a substituted, duplicated or lost instruction is a mismatch. Each test ends
+with one probe NOP the bench injects itself, so a trap on the test's last instruction has its target
+checked. A test that hangs (no `dii_ack`, an instruction that never retires) is a `UVM_ERROR`:
 
 | Flavour   | Core mode                  | QuickCheckVEngine architecture | Reference model |
 |-----------|----------------------------|--------------------------------|-----------------|
@@ -66,7 +70,7 @@ Plusargs read by the testbench:
 | `+dii_ack_timeout=`, `+dii_retire_timeout=`, `+dii_drain_timeout=` | see `ibex_dii_agent/` | Handshake timeouts |
 | `+dii_sb_max_errors=<n>` | 100 | Print only the first n mismatches (all are counted) |
 | `+dii_sb_corrupt=<n>` | off | Fault injection: corrupt the RTL side of the n-th retired instruction |
-| `+dii_sb_corrupt_field=<f>` | `rd` | Field to corrupt: `rd`, `pc`, `trap` or `mem` |
+| `+dii_sb_corrupt_field=<f>` | `rd` | Field to corrupt: `rd`, `pc`, `trap`, `mem`, `insn` (the reported instruction), `rdtag` (an integer write keeps its tag) or `wtag` (a capability store's tag); `rdtag`/`wtag` need the CHERIoT flavour |
 | `+dii_intg_corrupt=<n>` | off | Fault injection: flip an integrity bit of the n-th load response; a `NoAlertsTriggered` UVM_ERROR must follow |
 
 ## Core configuration
@@ -128,7 +132,12 @@ Nothing in the main UVM testbench depends on this directory.
 ## Known limitations
 
 - **Interrupts and unstructured streams:** the interrupt and unstructured generators are excluded
-  (`-x 'interrupt|unstructured'`). The DII flow has no interrupt model.
+  (`-x 'interrupt|unstructured'`). The driver raises the DII interrupt lines (`INTR_REQ`,
+  `INTR_BARRIER`), but the scoreboard does not inject interrupts into the model, so an interrupted
+  stream cannot be compared.
+- **Zcmp:** no reference model implements Zcmp. The model executes the core's micro-ops, so their
+  execution is compared but the expansion is not (UVM `zcmp_push_pop_mv` and riscv-dv check it
+  against Spike). Only the `unstructured` generator can produce Zcmp encodings.
 - **Revocation:** `ibex_revbm_responder.sv` never reports a granule revoked, so the revoked arm of
   the load filter is not exercised here.
 - **Verilator builds:** these contain absolute paths. Build on the machine that runs the testbench;

@@ -12,8 +12,10 @@
 // with the RVFI quirk or model limitation that forces it.
 //
 // Fault injection (to prove the checks can fail): the owner reads +<prefix>_corrupt=<n> and
-// +<prefix>_corrupt_field=rd|pc|trap|mem through configure_corruption(); maybe_corrupt() then
-// flips one bit on the RTL side of the n-th retired instruction that exercises that field.
+// +<prefix>_corrupt_field=rd|pc|trap|mem|insn|rdtag|wtag through configure_corruption();
+// maybe_corrupt() then flips one bit on the RTL side of the n-th retired instruction that
+// exercises that field. insn is checked by the TestRIG scoreboard (against the injected word),
+// rdtag/wtag only by CHERIoT runs (an integer write's tag, a capability store's tag).
 class ibex_sail_rvfi_cmp extends uvm_object;
   `uvm_object_utils(ibex_sail_rvfi_cmp)
 
@@ -31,6 +33,9 @@ class ibex_sail_rvfi_cmp extends uvm_object;
     bit [7:0]  mem_wmask;
     bit [63:0] mem_rdata;
     bit [63:0] mem_wdata;
+    // Tag the model's memory holds for the granule a capability store wrote (CHERIoT only; the
+    // RVFI memory record has no tag, so the owner reads it from the model's tag memory).
+    bit        mem_wtag;
   } model_result_t;
 
   localparam bit [31:0] MRET_INSN = 32'h3020_0073;
@@ -60,7 +65,8 @@ class ibex_sail_rvfi_cmp extends uvm_object;
   function string configure_corruption(string prefix);
     void'($value$plusargs({prefix, "_corrupt=%d"}, corrupt_at));
     void'($value$plusargs({prefix, "_corrupt_field=%s"}, corrupt_field));
-    if (corrupt_at != 0 && !(corrupt_field inside {"rd", "pc", "trap", "mem"})) begin
+    if (corrupt_at != 0 &&
+        !(corrupt_field inside {"rd", "pc", "trap", "mem", "insn", "rdtag", "wtag"})) begin
       return $sformatf("Unknown +%s_corrupt_field=%s", prefix, corrupt_field);
     end
     return "";
@@ -82,6 +88,10 @@ class ibex_sail_rvfi_cmp extends uvm_object;
       "rd":    applicable = !item.trap && item.rd_addr != 0 && !is_counter_csr_read(item.insn);
       "mem":   applicable = !item.trap && is_mem_insn(item.insn) && item.mem_wmask != 0;
       "pc":    applicable = !item.trap;
+      // An integer write: the model will report no capability write for it.
+      "rdtag": applicable = !item.trap && item.rd_addr != 0 && !item.rd_wcap[32] &&
+                            !is_counter_csr_read(item.insn);
+      "wtag":  applicable = !item.trap && item.mem_is_cap && item.mem_wmask != 0;
       default: applicable = 1'b1;
     endcase
     if (!applicable || ++corrupt_candidates < corrupt_at) return item;
@@ -92,6 +102,9 @@ class ibex_sail_rvfi_cmp extends uvm_object;
       "pc":   c.pc_wdata[2]  = ~c.pc_wdata[2];
       "trap": c.trap         = ~c.trap;
       "mem":  c.mem_wdata[0] = ~c.mem_wdata[0];
+      "insn": c.insn[7]      = ~c.insn[7];
+      "rdtag": c.rd_wcap[32] = 1'b1;
+      "wtag": c.mem_wcap[32] = ~c.mem_wcap[32];
     endcase
     corrupt_applied = 1'b1;
     info = $sformatf("corrupted %s of pc=0x%08x insn=0x%08x", corrupt_field, item.pc, item.insn);
@@ -160,10 +173,18 @@ class ibex_sail_rvfi_cmp extends uvm_object;
       // HINT executed as a no-op rewrite: nothing architectural to compare.
     end else if (rtl.rd_addr != model.rd_addr) begin
       errs.push_back($sformatf("rd addr: rtl=x%0d model=x%0d", rtl.rd_addr, model.rd_addr));
-    end else if (rtl.rd_addr != 0 && !is_counter_csr_read(rtl.insn) &&
-                 rtl.rd_wdata != model.rd_wdata) begin
-      errs.push_back($sformatf("rd data (x%0d): rtl=0x%08x model=0x%08x", rtl.rd_addr,
-                               rtl.rd_wdata, model.rd_wdata));
+    end else begin
+      if (rtl.rd_addr != 0 && !is_counter_csr_read(rtl.insn) &&
+          rtl.rd_wdata != model.rd_wdata) begin
+        errs.push_back($sformatf("rd data (x%0d): rtl=0x%08x model=0x%08x", rtl.rd_addr,
+                                 rtl.rd_wdata, model.rd_wdata));
+      end
+      // The model wrote an integer, which clears a CHERIoT register's tag. An RTL that kept the
+      // tag passes every data comparison and is only caught here.
+      if (rtl.rd_addr != 0 && rtl.rd_wcap[32]) begin
+        errs.push_back($sformatf("rd tag (x%0d): rtl=1 model=0 (integer write left the tag set)",
+                                 rtl.rd_addr));
+      end
     end
 
     // ibex's RVFI (unchanged from upstream, ibex_core.sv rvfi_stage_mem_rmask) derives the masks
@@ -199,6 +220,10 @@ class ibex_sail_rvfi_cmp extends uvm_object;
     if (rtl_rmask != 0 && rtl_rdata != model_rdata) begin
       errs.push_back($sformatf("mem rdata: rtl=0x%016x model=0x%016x", rtl_rdata, model_rdata));
     end
+    // A capability store's tag. Without this it is checked only if a later load reads it back.
+    if (rtl.mem_is_cap && rtl_wmask != 0 && rtl.mem_wcap[32] != model.mem_wtag) begin
+      errs.push_back($sformatf("mem wtag: rtl=%0b model=%0b", rtl.mem_wcap[32], model.mem_wtag));
+    end
   endfunction
 
   // ---- Helpers ------------------------------------------------------------------------------
@@ -219,9 +244,10 @@ class ibex_sail_rvfi_cmp extends uvm_object;
 
   // Loads and stores, including CHERIoT clc/csc (LOAD/STORE with funct3 011) and the compressed
   // forms: quadrants 0 and 2 with funct3 010 (lw/lwsp), 011 (clc/clcsp), 110 (sw/swsp) and 111
-  // (csc/cscsp).
+  // (csc/cscsp), and Zcb's c.lbu/c.lhu/c.lh/c.sb/c.sh (quadrant 0, funct3 100, insn[12] = 0).
   static function bit is_mem_insn(bit [31:0] insn);
     if (insn[1:0] == 2'b11) return insn[6:0] inside {7'h03, 7'h23};
+    if (insn[1:0] == 2'b00 && insn[15:13] == 3'b100) return !insn[12];
     return insn[1:0] inside {2'b00, 2'b10} && insn[15:13] inside {3'b010, 3'b011, 3'b110, 3'b111};
   endfunction
 

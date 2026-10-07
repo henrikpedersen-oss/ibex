@@ -95,6 +95,9 @@ uint32_t cheriot_sail_cosim_get_mem_rmask(void);
 uint32_t cheriot_sail_cosim_get_mem_wmask(void);
 uint64_t cheriot_sail_cosim_get_mem_rdata(void);
 uint64_t cheriot_sail_cosim_get_mem_wdata(void);
+// Tag of the 8-byte capability granule at the memory record's address, read from the
+// model's tag memory after the step: the RVFI memory record itself carries no tag.
+svBit    cheriot_sail_cosim_get_mem_wtag(void);
 
 #ifdef __cplusplus
 }

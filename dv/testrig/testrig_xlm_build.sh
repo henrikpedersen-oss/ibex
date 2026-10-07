@@ -1,20 +1,28 @@
 #!/usr/bin/env bash
+# Copyright lowRISC contributors.
+# Licensed under the Apache License, Version 2.0, see LICENSE for details.
+# SPDX-License-Identifier: Apache-2.0
 
-# Prototype TestRIG Xcelium BUILD script
+# TestRIG Xcelium BUILD script: elaborates the TestRIG UVM bench into xlm_testrig_out/.
 #
 # Usage:
-#   Call this script from the directory it is stored in.
+#   Can be called from any directory; it works in the directory it is stored in.
 #   Add '-c' for coverage collection.
 #   Add '-C <config>' to pick the core configuration from ibex/ibex_configs.yaml (default:
 #   $IBEX_CONFIG, else opentitan -- the configuration the UVM testbench, compliance and the RTOS SoC
 #   build, so the coverage databases are of the same model and merge).
 
+set -euo pipefail
+cd "$(dirname "$0")"
 
-export PRJ_DIR=$(realpath ../../)
-export LOWRISC_IP_DIR=$(realpath ${PRJ_DIR}/vendor/lowrisc_ip/)
+PRJ_DIR="$(realpath ../../)"
+export PRJ_DIR
+LOWRISC_IP_DIR="$(realpath "${PRJ_DIR}/vendor/lowrisc_ip/")"
+export LOWRISC_IP_DIR
 
 # Needed for tcl files that are used with Cadence tools.
-export dv_root=$(realpath ${LOWRISC_IP_DIR}/dv)
+dv_root="$(realpath "${LOWRISC_IP_DIR}/dv")"
+export dv_root
 export DUT_TOP="ibex_top"
 
 mkdir -p xlm_testrig_out
@@ -30,6 +38,7 @@ while getopts "cC:" opt; do
   -nowarn COVDEF \
   -covfile ${PRJ_DIR}/dv/coverage/ibex_cover.ccf \
   -covdut ibex_top" ;;
+      *) exit 1 ;;
    esac
 done
 

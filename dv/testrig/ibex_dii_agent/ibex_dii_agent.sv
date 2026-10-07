@@ -18,8 +18,8 @@ class ibex_dii_agent extends uvm_agent;
 
   uvm_analysis_imp #(ibex_rvfi_seq_item, ibex_dii_agent) rvfi_imp;
 
-  // Set by the driver while draining at the end of a test: only the first hold_limit
-  // retirements since the last reset are real instructions, the rest are drain NOPs.
+  // Set by the driver at the end of a test: only the first hold_limit retirements since the last
+  // reset answer the instruction source; the rest (the end-of-test probe) are the bench's own.
   protected bit          hold;
   protected int unsigned hold_limit;
   protected int unsigned num_retired;
@@ -55,7 +55,9 @@ class ibex_dii_agent extends uvm_agent;
                               scoreboard.get_type_name()), UVM_LOW)
   endfunction
 
+  // The first call of a test sets the limit; later ones (a drain after an aborted probe) keep it.
   function void hold_rvfi(int unsigned limit);
+    if (hold) return;
     hold       = 1'b1;
     hold_limit = limit;
   endfunction
@@ -67,6 +69,9 @@ class ibex_dii_agent extends uvm_agent;
 
   virtual function void write(ibex_rvfi_seq_item item);
     if (item.irq_only) return;
+    // A Zcmp instruction retires as several micro-ops; the instruction source sent one word and
+    // expects one reply, so only the last micro-op (or one that traps) answers it.
+    if (item.expanded_insn_valid && !item.expanded_insn_last && !item.trap) return;
     num_retired++;
     if (hold && num_retired > hold_limit) return;
     if (sequencer.testrig_conn == null) return;

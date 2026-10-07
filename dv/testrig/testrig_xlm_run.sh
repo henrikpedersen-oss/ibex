@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
+# Copyright lowRISC contributors.
+# Licensed under the Apache License, Version 2.0, see LICENSE for details.
+# SPDX-License-Identifier: Apache-2.0
 
 # TestRIG Xcelium RUN script
 #
 # Usage:
-#   Call this script from the directory it is stored in, after testrig_xlm_build.sh. The
+#   Can be called from any directory (it works in the directory it is stored in), after
+#   testrig_xlm_build.sh. The
 #   simulation listens for a vengine (QuickCheckVEngine --single-implementation) on +dii_port
 #   (default 6000) and checks every retired instruction against the selected Sail model.
 #
@@ -13,6 +17,9 @@
 #   -g            waveform capture with the GUI
 #   -v            high UVM verbosity
 #   Anything after the options (e.g. +dii_port=6001 +dii_sb_corrupt=5) is passed to xrun.
+
+set -euo pipefail
+cd "$(dirname "$0")"
 
 datetime=$(date +%F_%H%M.%S)
 

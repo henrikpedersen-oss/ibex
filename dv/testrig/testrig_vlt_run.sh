@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# Copyright lowRISC contributors.
+# Licensed under the Apache License, Version 2.0, see LICENSE for details.
+# SPDX-License-Identifier: Apache-2.0
+
 # TestRIG Verilator RUN script: the Verilator counterpart of testrig_xlm_run.sh, running the
 # binary built by testrig_vlt_build.sh (inside `nix develop .#vlt_shell`).
 #

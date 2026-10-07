@@ -84,5 +84,6 @@ import "DPI-C" function int unsigned     cheriot_sail_cosim_get_mem_rmask();
 import "DPI-C" function int unsigned     cheriot_sail_cosim_get_mem_wmask();
 import "DPI-C" function longint unsigned cheriot_sail_cosim_get_mem_rdata();
 import "DPI-C" function longint unsigned cheriot_sail_cosim_get_mem_wdata();
+import "DPI-C" function bit              cheriot_sail_cosim_get_mem_wtag();
 
 `endif  // CHERIOT_SAIL_COSIM_DPI_SVH

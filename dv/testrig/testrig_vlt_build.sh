@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright lowRISC contributors.
+# Licensed under the Apache License, Version 2.0, see LICENSE for details.
+# SPDX-License-Identifier: Apache-2.0
 
 # TestRIG Verilator BUILD script: the same UVM testbench as testrig_xlm_build.sh, compiled
 # with Verilator (needs `nix develop .#vlt_shell`, which provides Verilator 5.052 and UVM_HOME).
@@ -18,11 +21,15 @@
 #     UVM_NO_DPI must not be used. The TestRIG path makes no uvm_hdl_* calls.
 #   - The fcov/ covergroup interfaces are left out: Verilator does not collect functional
 #     coverage, and nothing else in the TestRIG top depends on them.
+#   - --assert: without it Verilator drops every assertion, the bench's X-checks and the RTL's
+#     ASSERT macros alike, and a run that violates them still passes.
 
 set -euo pipefail
 
-export PRJ_DIR=$(realpath ../../)
-export LOWRISC_IP_DIR=$(realpath ${PRJ_DIR}/vendor/lowrisc_ip/)
+PRJ_DIR="$(realpath ../../)"
+export PRJ_DIR
+LOWRISC_IP_DIR="$(realpath "${PRJ_DIR}/vendor/lowrisc_ip/")"
+export LOWRISC_IP_DIR
 export DUT_TOP="ibex_top"
 : "${UVM_HOME:?UVM_HOME is not set; run inside nix develop .#vlt_shell}"
 
@@ -57,6 +64,7 @@ grep -q testrig_vlt_prelude.sv ${OUT}/ibex_testrig_dv_vlt.f \
 verilator \
   --binary \
   --timing \
+  --assert \
   -j 0 \
   --build-jobs ${VLT_BUILD_JOBS:-8} \
   --top-module core_ibex_testrig_tb_top \

@@ -125,20 +125,13 @@ module ibex_fetch_fifo #(
   // take the same packet twice in the cycles before the testbench reacts to dii_ack.
   logic        dii_taken_q;
   logic        dii_avail;
-  logic [31:0] dii_insn_muxed;
-  logic        dii_in_range;
 
-  // Outside [DII_BASE, DII_TOP) serve a deterministic NOP rather than a stale instruction,
-  // so out-of-range fetches are reproducible and the stream still drains to reset.
-  localparam logic [31:0] DII_BASE     = 32'h8000_0000;
-  localparam logic [31:0] DII_TOP      = 32'h8001_0000;
-  localparam logic [31:0] DII_OOR_INSN = 32'h0000_0013; // addi x0,x0,0
-
+  // The injected word is served at every PC, as the reference model executes it at every PC
+  // (RVFI-DII): an instruction stream does not depend on where the core fetches from.
   assign dii_pc       = out_addr_o;
-  assign dii_in_range = (out_addr_o >= DII_BASE) && (out_addr_o < DII_TOP);
   assign dii_avail    = dii_valid && !dii_taken_q;
   // Not in a cycle where the fetch stage is being cleared: the packet stays offered and is
-  // consumed from the new PC instead. Out-of-range fetches still ack (the packet was sent).
+  // consumed from the new PC instead.
   assign dii_ack      = out_ready_i && out_valid_o && !clear_i;
 
   always_ff @(posedge clk_i or negedge rst_ni) begin : dii_ff
@@ -150,11 +143,10 @@ module ibex_fetch_fifo #(
       dii_taken_q <= 1'b1;
     end
   end
-  assign dii_insn_muxed = dii_in_range ? dii_insn : DII_OOR_INSN;
 
   assign unaligned_is_compressed = out_addr_o[1] & cheriot_force_uc_i
-                                 | ((dii_insn_muxed[1:0] != 2'b11) & ~err);
-  assign aligned_is_compressed   = ~out_addr_o[1] & (dii_insn_muxed[1:0] != 2'b11) & ~err;
+                                 | ((dii_insn[1:0] != 2'b11) & ~err);
+  assign aligned_is_compressed   = ~out_addr_o[1] & (dii_insn[1:0] != 2'b11) & ~err;
 `else
   assign unaligned_is_compressed = cheriot_force_uc_i | ((rdata[17:16] != 2'b11) & ~err);
   assign aligned_is_compressed   = (rdata[ 1: 0] != 2'b11) & ~err;
@@ -169,7 +161,7 @@ module ibex_fetch_fifo #(
       // unaligned case
 
 `ifdef DII_SIM
-      out_rdata_o     = dii_insn_muxed;
+      out_rdata_o     = dii_insn;
 `else
       out_rdata_o     = rdata_unaligned;
 `endif
@@ -184,7 +176,7 @@ module ibex_fetch_fifo #(
     end else begin
       // aligned case
 `ifdef DII_SIM
-      out_rdata_o     = dii_insn_muxed;
+      out_rdata_o     = dii_insn;
 `else
       out_rdata_o     = rdata;
 `endif

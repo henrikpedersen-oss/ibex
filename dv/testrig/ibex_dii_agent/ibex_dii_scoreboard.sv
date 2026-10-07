@@ -3,8 +3,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Compares every retired instruction of a DII run against a Sail reference model stepped with the
-// same instruction word. The base class holds the flow; a flavour subclass supplies the model and
-// is selected with a factory override, e.g.
+// instruction word the driver injected (injected()), never the word the core reports: the core's
+// rvfi_insn is checked against it instead, so a core that executes something other than what it
+// was given, or retires an instruction twice or not at all, is a mismatch. The base class holds the
+// flow; a flavour subclass supplies the model and is selected with a factory override, e.g.
 //   +uvm_set_type_override=ibex_dii_scoreboard,ibex_dii_cheriot_sail_scoreboard
 //
 // The comparison itself (trap, next PC, integer and capability destination, memory access, and
@@ -13,7 +15,8 @@
 // Plusargs (to prove the checks can fail):
 //   +dii_sb_corrupt=<n>             corrupt the RTL side of the n-th retired instruction (1-based)
 //                                   that exercises the chosen field
-//   +dii_sb_corrupt_field=<field>   rd | pc | trap | mem (default rd)
+//   +dii_sb_corrupt_field=<field>   rd | pc | trap | mem | insn | rdtag | wtag (default rd;
+//                                   rdtag/wtag need the CHERIoT flavour)
 //   +dii_sb_max_errors=<n>          print only the first n mismatches (default 100); all are counted
 class ibex_dii_scoreboard extends uvm_scoreboard;
   `uvm_component_utils(ibex_dii_scoreboard)
@@ -27,6 +30,9 @@ class ibex_dii_scoreboard extends uvm_scoreboard;
 
   int unsigned num_steps;
   int unsigned num_mismatches;
+
+  // Words the core has taken (dii_ack) and not yet retired, oldest first.
+  protected bit [31:0] injected_q[$];
   // Only the first max_errors mismatches are printed; one divergence usually cascades.
   int unsigned max_errors = 100;
 
@@ -48,9 +54,10 @@ class ibex_dii_scoreboard extends uvm_scoreboard;
   virtual function void model_init();
   endfunction
 
-  // Step the model over one retired instruction. Flavour-specific checks append to errs.
-  virtual function void model_step(ibex_rvfi_seq_item item, output model_result_t res,
-                                   ref string errs[$]);
+  // Step the model over one retired instruction, executing insn. Flavour-specific checks append
+  // to errs.
+  virtual function void model_step(ibex_rvfi_seq_item item, bit [31:0] insn,
+                                   output model_result_t res, ref string errs[$]);
     res = '{default: '0};
   endfunction
 
@@ -77,36 +84,86 @@ class ibex_dii_scoreboard extends uvm_scoreboard;
     clk_vif.wait_for_reset();
     forever begin
       @(posedge clk_vif.rst_n);
+      // Every test ends with all its instructions retired (the driver drains before the reset).
+      if (injected_q.size() != 0) begin
+        report_mismatch(32'h0, injected_q[0], $sformatf(
+            "%0d injected instruction(s) never retired before the reset, first 0x%08x",
+            injected_q.size(), injected_q[0]));
+        injected_q.delete();
+      end
       model_init();
       cmp.reset();
     end
   endtask
+
+  // Called by the driver for every word the core takes.
+  function void injected(bit [31:0] insn);
+    injected_q.push_back(insn);
+  endfunction
+
+  // Pairs a retirement with the oldest injected word and returns the word to step the model with.
+  // Returns 0 if nothing was injected (the retirement cannot be compared).
+  //   - A compressed instruction is reported on RVFI zero-extended ({16'b0, insn[15:0]}).
+  //   - Zcmp (cm.push/pop/mv*) retires as several micro-ops. rvfi_insn is the micro-op and
+  //     expanded_insn the injected halfword; the word is consumed by the last micro-op, or by one
+  //     that traps. No reference model implements Zcmp, so the model executes the core's
+  //     micro-ops: their execution is compared, the expansion itself is not (UVM
+  //     zcmp_push_pop_mv and riscv-dv check it against Spike).
+  protected function bit take_injected(ibex_rvfi_seq_item rtl, output bit [31:0] step_insn,
+                                       ref string errs[$]);
+    bit [31:0] inj;
+    if (injected_q.size() == 0) begin
+      errs.push_back("retired an instruction that was never injected");
+      return 1'b0;
+    end
+    inj = injected_q[0];
+    if (rtl.expanded_insn_valid) begin
+      if (rtl.expanded_insn != inj[15:0]) begin
+        errs.push_back($sformatf("insn: micro-op of 0x%04x retired, injected 0x%08x",
+                                 rtl.expanded_insn, inj));
+      end
+      step_insn = rtl.insn;
+      if (rtl.expanded_insn_last || rtl.trap) void'(injected_q.pop_front());
+    end else begin
+      step_insn = (inj[1:0] != 2'b11) ? {16'b0, inj[15:0]} : inj;
+      if (rtl.insn != step_insn) begin
+        errs.push_back($sformatf("insn: rtl retired 0x%08x, injected 0x%08x", rtl.insn, inj));
+      end
+      void'(injected_q.pop_front());
+    end
+    return 1'b1;
+  endfunction
+
+  protected function void report_mismatch(bit [31:0] pc, bit [31:0] insn, string msg);
+    num_mismatches++;
+    if (num_mismatches <= max_errors) begin
+      `uvm_error(`gfn, $sformatf("pc=0x%08x insn=0x%08x: %s", pc, insn, msg))
+      if (num_mismatches == max_errors) begin
+        `uvm_info(`gfn, $sformatf("%0d mismatches: further ones are counted, not printed",
+                                  max_errors), UVM_NONE)
+      end
+    end
+  endfunction
 
   virtual function void write(ibex_rvfi_seq_item item);
     ibex_rvfi_seq_item rtl;
     model_result_t     model;
     string             errs[$];
     string             info;
+    bit [31:0]         step_insn;
 
     if (item.irq_only) return;
 
     rtl = cmp.maybe_corrupt(item, info);
     if (info != "") `uvm_info(`gfn, {"+dii_sb_corrupt: ", info}, UVM_NONE)
-    cmp.check_trap_target(rtl, errs);
-    model_step(rtl, model, errs);
-    cmp.compare(rtl, model, errs);
-    num_steps++;
-
-    foreach (errs[i]) begin
-      num_mismatches++;
-      if (num_mismatches <= max_errors) begin
-        `uvm_error(`gfn, $sformatf("pc=0x%08x insn=0x%08x: %s", rtl.pc, rtl.insn, errs[i]))
-        if (num_mismatches == max_errors) begin
-          `uvm_info(`gfn, $sformatf("%0d mismatches: further ones are counted, not printed",
-                                    max_errors), UVM_NONE)
-        end
-      end
+    if (take_injected(rtl, step_insn, errs)) begin
+      cmp.check_trap_target(rtl, errs);
+      model_step(rtl, step_insn, model, errs);
+      cmp.compare(rtl, model, errs);
+      num_steps++;
     end
+
+    foreach (errs[i]) report_mismatch(rtl.pc, rtl.insn, errs[i]);
   endfunction
 
   virtual function void check_phase(uvm_phase phase);
@@ -142,8 +199,9 @@ class ibex_dii_cheriot_sail_scoreboard extends ibex_dii_scoreboard;
     cheriot_sail_cosim_init(BootAddr);
   endfunction
 
-  virtual function void model_step(ibex_rvfi_seq_item item, output model_result_t res,
-                                   ref string errs[$]);
+  virtual function void model_step(ibex_rvfi_seq_item item, bit [31:0] insn,
+                                   output model_result_t res, ref string errs[$]);
+    res = '{default: '0};
     // The model's counters do not advance on their own; later arithmetic on a mcycle read would
     // otherwise diverge.
     cheriot_sail_cosim_set_mcycle(item.mcycle);
@@ -151,7 +209,7 @@ class ibex_dii_cheriot_sail_scoreboard extends ibex_dii_scoreboard;
     // compare() checks the destination for both flavours, so step()'s own checks are switched
     // off: cheri_rf_we=0 skips its capability check and rtl_trap=1 its rd_wdata check. The model
     // is stepped identically either way; any error left is a failure to step at all.
-    void'(cheriot_sail_cosim_step(item.insn, item.pc, 1'b0, item.rd_addr, item.rd_wcap[32],
+    void'(cheriot_sail_cosim_step(insn, item.pc, 1'b0, item.rd_addr, item.rd_wcap[32],
                                   item.rd_wdata, 1'b1));
     for (int i = 0; i < cheriot_sail_cosim_get_num_errors(); i++) begin
       errs.push_back(cheriot_sail_cosim_get_error(i));
@@ -170,6 +228,7 @@ class ibex_dii_cheriot_sail_scoreboard extends ibex_dii_scoreboard;
     res.mem_wmask = 8'(cheriot_sail_cosim_get_mem_wmask());
     res.mem_rdata = cheriot_sail_cosim_get_mem_rdata();
     res.mem_wdata = cheriot_sail_cosim_get_mem_wdata();
+    res.mem_wtag  = cheriot_sail_cosim_get_mem_wtag();
   endfunction
 endclass : ibex_dii_cheriot_sail_scoreboard
 
@@ -208,12 +267,12 @@ class ibex_dii_riscv_sail_scoreboard extends ibex_dii_scoreboard;
     riscv_sail_cosim_init(BootAddr);
   endfunction
 
-  virtual function void model_step(ibex_rvfi_seq_item item, output model_result_t res,
-                                   ref string errs[$]);
+  virtual function void model_step(ibex_rvfi_seq_item item, bit [31:0] insn,
+                                   output model_result_t res, ref string errs[$]);
     res = '{default: '0};
     riscv_sail_cosim_set_mcycle(item.mcycle);
     riscv_sail_cosim_clear_errors();
-    void'(riscv_sail_cosim_step(item.insn, item.pc));
+    void'(riscv_sail_cosim_step(insn, item.pc));
     for (int i = 0; i < riscv_sail_cosim_get_num_errors(); i++) begin
       errs.push_back(riscv_sail_cosim_get_error(i));
     end
