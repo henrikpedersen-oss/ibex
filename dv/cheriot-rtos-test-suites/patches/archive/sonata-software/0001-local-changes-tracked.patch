@@ -1,0 +1,757 @@
+diff --git a/examples/cheri_c_tests/cheri_c_compartments.h b/examples/cheri_c_tests/cheri_c_compartments.h
+index b2db6c9..8fa0525 100644
+--- a/examples/cheri_c_tests/cheri_c_compartments.h
++++ b/examples/cheri_c_tests/cheri_c_compartments.h
+@@ -44,6 +44,27 @@ __cheri_compartment("cc_union")        int run_test_union(void);
+ /// Union-of-structs with capability fields passed by value.
+ __cheri_compartment("cc_union_struct") int run_test_union_struct(void);
+ 
++/// Structs passed by value are copied: the callee cannot write the caller's object.
++__cheri_compartment("cc_byval_args")   int run_test_byval_args(void);
++
++/// Arithmetic, bitwise and comparison operators on __intcap_t.
++__cheri_compartment("cc_intcapmath")   int run_test_intcapmath(void);
++
++/// Arithmetic, bitwise and comparison operators on __uintcap_t.
++__cheri_compartment("cc_uintcapmath")  int run_test_uintcapmath(void);
++
++/// Ints and tagged capabilities read back through va_arg.
++__cheri_compartment("cc_va_args")      int run_test_va_args(void);
++
++/// va_copy gives a va_list that reads the same arguments.
++__cheri_compartment("cc_va_copy")      int run_test_va_copy(void);
++
++/// Return through the capability return register (cjr cra) from assembly.
++__cheri_compartment("cc_capret")       int run_test_capret(void);
++
++/// On-stack arrays get non-overlapping bounds at least as long as the array.
++__cheri_compartment("cc_stack_cap")    int run_test_stack_cap(void);
++
+ // ── Fault tests (DECLARE_TEST_FAULT) ────────────────────────────────────────
+ // These compartments deliberately trigger CHERI hardware exceptions.
+ // A correct run ForceUnwinds; the orchestrator verifies the return is invalid.
+@@ -60,5 +81,10 @@ __cheri_compartment("cc_input")        void *run_fault_input(void);
+ /// Read through a write-only (store-only) capability → CHERI load fault.
+ __cheri_compartment("cc_output")       void *run_fault_output(void);
+ 
++/// va_list stored in a global loses its tag (local capability) → tag violation on va_arg.
++__cheri_compartment("cc_va_list_global") void *run_fault_va_list_global(void);
++/// Checks that failed before or in that fault: assertions, or a fault that is not a tag violation.
++__cheri_compartment("cc_va_list_global") int run_fault_va_list_global_failures(void);
++
+ // ── Orchestrator ─────────────────────────────────────────────────────────────
+ [[noreturn]] __cheri_compartment("cc_orchestrator") void run_cheri_c_tests(void);
+diff --git a/examples/cheri_c_tests/cheri_c_orchestrator.cc b/examples/cheri_c_tests/cheri_c_orchestrator.cc
+index 698de6c..fbf2c62 100644
+--- a/examples/cheri_c_tests/cheri_c_orchestrator.cc
++++ b/examples/cheri_c_tests/cheri_c_orchestrator.cc
+@@ -13,6 +13,7 @@
+ //   "All tests finished" → PASS
+ //   "Test(s) Failed"     → FAIL
+ 
++#include "../common/sim_exit.hh"
+ #include "cheri_c_compartments.h"
+ #include <cheri.hh>
+ #include <compartment.h>
+@@ -58,6 +59,20 @@ static bool check_fault(const char *name, Capability<void> ret)
+ 	return false;
+ }
+ 
++// A fault test whose compartment also counts the checks it makes before and in the fault
++// (assertions that ran before it, and the handler's check of the fault's cause). Those are
++// lost in the unwind otherwise, so a fault of the wrong kind, or a failed assertion before
++// the right one, would still pass check_fault(). One verdict line either way.
++static bool check_fault_and_checks(const char *name, Capability<void> ret, int failures)
++{
++	if (failures != 0)
++	{
++		Debug::log("FAIL: {} — {} check(s) failed before or in the fault", name, failures);
++		return false;
++	}
++	return check_fault(name, ret);
++}
++
+ // ── thread entry point ───────────────────────────────────────────────────────
+ 
+ [[noreturn]] void __cheri_compartment("cc_orchestrator") run_cheri_c_tests()
+@@ -86,6 +101,21 @@ static bool check_fault(const char *name, Capability<void> ret)
+ 		total++;
+ 	}
+ 
++	// clang_purecap_atomic is excluded: it applies C11 atomics to _Atomic(int*), a
++	// capability-typed object, so clang emits __atomic_store_cap /
++	// __atomic_exchange_cap / __atomic_compare_exchange_cap libcalls. CHERIoT RTOS
++	// ships atomic1/2/4/8 plus atomicn and implements none of the capability-width
++	// variants -- a tree-wide search finds no definition of any of them -- so the
++	// firmware link fails with
++	//   undefined symbol: __library_export_libcalls___atomic_store_cap
++	// This is a missing runtime feature, not a build-configuration error: no
++	// combination of add_deps resolves it. The compiler says as much while building
++	// the test, warning that the 8-byte access "exceeds the max lock-free size
++	// (0 bytes)" and must therefore become a libcall.
++	//
++	// The compartment and its wrapper are deliberately left in place. To re-enable,
++	// drop this #if and restore "cc_atomic" to the firmware deps in xmake.lua.
++#if 0
+ 	Debug::log("-- clang_purecap_atomic: C11 _Atomic types --");
+ 	{
+ 		bool ok = check_normal("clang_purecap_atomic", run_test_atomic());
+@@ -93,6 +123,7 @@ static bool check_fault(const char *name, Capability<void> ret)
+ 		if (ok) passed++;
+ 		total++;
+ 	}
++#endif
+ 
+ 	Debug::log("-- clang_purecap_capretaddr: return address is a capability --");
+ 	{
+@@ -150,6 +181,69 @@ static bool check_fault(const char *name, Capability<void> ret)
+ 		total++;
+ 	}
+ 
++	Debug::log("-- clang_purecap_byval_args: structs passed by value are copied --");
++	{
++		bool ok = check_normal("clang_purecap_byval_args", run_test_byval_args());
++		allPassed &= ok;
++		if (ok) passed++;
++		total++;
++	}
++
++	Debug::log("-- clang_purecap_intcapmath: operators on __intcap_t --");
++	{
++		bool ok = check_normal("clang_purecap_intcapmath", run_test_intcapmath());
++		allPassed &= ok;
++		if (ok) passed++;
++		total++;
++	}
++
++	Debug::log("-- clang_purecap_uintcapmath: operators on __uintcap_t --");
++	{
++		bool ok = check_normal("clang_purecap_uintcapmath", run_test_uintcapmath());
++		allPassed &= ok;
++		if (ok) passed++;
++		total++;
++	}
++
++	Debug::log("-- clang_purecap_va_args: ints and capabilities through va_arg --");
++	{
++		bool ok = check_normal("clang_purecap_va_args", run_test_va_args());
++		allPassed &= ok;
++		if (ok) passed++;
++		total++;
++	}
++
++	Debug::log("-- clang_purecap_va_copy: va_copy reads the same arguments --");
++	{
++		bool ok = check_normal("clang_purecap_va_copy", run_test_va_copy());
++		allPassed &= ok;
++		if (ok) passed++;
++		total++;
++	}
++
++	// clang_purecap_va_die is not ported. It reads a ninth int from eight variadic arguments and
++	// needs that va_arg to fault on the va_list's bounds. The CHERIoT ABI passes variadic
++	// arguments on the stack and va_start is csp plus an offset, with no csetbounds, so the
++	// va_list has the stack capability's bounds and the extra read lands in the caller's frame.
++	// There is no bound for the core to enforce: a correct core does not fault, and the test would
++	// check only what happens to be on the stack. It has no compartment (see xmake.lua).
++
++	Debug::log("-- clang_purecap_capret: return through the capability return register --");
++	{
++		bool ok = check_normal("clang_purecap_capret", run_test_capret());
++		allPassed &= ok;
++		if (ok) passed++;
++		total++;
++	}
++
++	Debug::log("-- clang_purecap_stack_cap: on-stack arrays get disjoint, sufficient bounds --");
++	{
++		bool ok = check_normal("clang_purecap_stack_cap", run_test_stack_cap());
++		allPassed &= ok;
++		if (ok) passed++;
++		total++;
++	}
++
+ 	// ── Fault tests ─────────────────────────────────────────────────────────
+ 
+ 	Debug::log("-- clang_purecap_array: OOB array → CHERI length fault --");
+@@ -184,6 +278,16 @@ static bool check_fault(const char *name, Capability<void> ret)
+ 		total++;
+ 	}
+ 
++	Debug::log("-- clang_purecap_va_list_global: va_list stored in a global → tag fault --");
++	{
++		Capability<void> ret      = run_fault_va_list_global();
++		int              failures = run_fault_va_list_global_failures();
++		bool ok = check_fault_and_checks("clang_purecap_va_list_global", ret, failures);
++		allPassed &= ok;
++		if (ok) passed++;
++		total++;
++	}
++
+ 	// ── Summary ─────────────────────────────────────────────────────────────
+ 
+ 	Debug::log("=== Summary: {} / {} tests passed ===", passed, total);
+@@ -195,6 +299,9 @@ static bool check_fault(const char *name, Capability<void> ret)
+ 	{
+ 		Debug::log("Test(s) Failed");
+ 	}
++	// End the run in simulation (common/sim_exit.hh); without it the loop below idles until
++	// the testbench's MAX_CYCLES.
++	sim_exit();
+ 
+ 	// CHERIoT RTOS threads must not return.
+ 	while (true)
+diff --git a/examples/cheri_c_tests/cheri_c_test_framework.h b/examples/cheri_c_tests/cheri_c_test_framework.h
+index 656538f..54e07e1 100644
+--- a/examples/cheri_c_tests/cheri_c_test_framework.h
++++ b/examples/cheri_c_tests/cheri_c_test_framework.h
+@@ -26,6 +26,9 @@
+ #include <stddef.h>
+ #include <stdint.h>
+ 
++// CHERIoT's permission bits for the __CHERI_CAP_PERMISSION_*__ macros the tests use.
++#include "cheriot_perms.h"
++
+ // BSD compat: __uint64_t used in clang_purecap_intcap.c
+ #ifndef __uint64_t
+ typedef uint64_t __uint64_t;
+@@ -108,3 +111,19 @@ static int test_failures = 0;
+ // here; the extern declaration in cheri_c_test.h refers to this definition.
+ // Using a C-linkage initialiser is fine in a C++ TU compiled from .cc.
+ cheri_handler test_fault_handler = nullptr;
++
++// ── Unexpected faults in normal tests ───────────────────────────────────────
++// A normal test that faults is unwound by the switcher and its compartment call returns -1,
++// which the orchestrator reported only as "-1 assertion(s) failed" -- with no cause and no PC,
++// so a crash could not be told apart from a test bug or located in the dump. This logs the
++// cause, mtval and faulting PCC first ("CRASH: ..."), then unwinds as before. Fault tests
++// (DECLARE_TEST_FAULT wrappers) define their own handler and set CHERI_C_OWN_ERROR_HANDLER.
++#ifndef CHERI_C_OWN_ERROR_HANDLER
++#include <compartment.h>
++extern "C" ErrorRecoveryBehaviour
++compartment_error_handler(ErrorState *frame, size_t mcause, size_t mtval)
++{
++	Debug::log("CRASH: unexpected fault: mcause={} mtval={} pcc={}", mcause, mtval, frame->pcc);
++	return ErrorRecoveryBehaviour::ForceUnwind;
++}
++#endif
+diff --git a/examples/cheri_c_tests/test_clang_purecap_array.cc b/examples/cheri_c_tests/test_clang_purecap_array.cc
+index 679fd41..51f7ad3 100644
+--- a/examples/cheri_c_tests/test_clang_purecap_array.cc
++++ b/examples/cheri_c_tests/test_clang_purecap_array.cc
+@@ -14,6 +14,8 @@
+ // model); we only verify that at least one fault fires.
+ 
+ #define TEST_CUSTOM_FRAMEWORK
++// This wrapper defines its own compartment_error_handler (cheri_c_test_framework.h).
++#define CHERI_C_OWN_ERROR_HANDLER
+ #include <compartment.h>
+ #include <debug.hh>
+ 
+@@ -25,13 +27,18 @@ using Debug = ConditionalDebug<true, "cc-array">;
+ extern "C" ErrorRecoveryBehaviour
+ compartment_error_handler(ErrorState *frame, size_t mcause, size_t mtval)
+ {
+-	(void)frame;
+-	(void)mcause;
+-	(void)mtval;
+-	Debug::log("CHERI fault caught (mcause=0x{:x}): ForceUnwind", mcause);
++	Debug::log("CHERI fault caught: mcause={} mtval={} pcc={}: ForceUnwind", mcause, mtval, frame->pcc);
+ 	return ErrorRecoveryBehaviour::ForceUnwind;
+ }
+ 
++// _Alignas is a C11 keyword with no C++ spelling; this wrapper compiles the upstream
++// C file as C++, where it parses as a call and yields "error: expected expression"
++// plus cascading "undeclared identifier" errors for the variable it qualifies.
++// alignas is the C++ equivalent and accepts the same integral argument.
++#ifndef _Alignas
++#define _Alignas(x) alignas(x)
++#endif
++
+ #include "../../../cheri-c-tests/clang-purecap/clang_purecap_array.c"
+ 
+ void *__cheri_compartment("cc_array") run_fault_array(void)
+diff --git a/examples/cheri_c_tests/test_clang_purecap_atomic.cc b/examples/cheri_c_tests/test_clang_purecap_atomic.cc
+index 8aad19c..48ba076 100644
+--- a/examples/cheri_c_tests/test_clang_purecap_atomic.cc
++++ b/examples/cheri_c_tests/test_clang_purecap_atomic.cc
+@@ -15,6 +15,26 @@
+ 
+ using Debug = ConditionalDebug<true, "cc-atomic">;
+ 
++// clang_purecap_atomic.c stores into `_Atomic(int*) p` through a (void*) cast at
++// lines 80, 82 and 85. C converts void* to int* implicitly; C++ does not, and this
++// wrapper compiles the file as C++:
++//
++//   error: cannot initialize a parameter of type 'int *' with an rvalue of type 'void *'
++//
++// The cast is applied here rather than in cheri-c-tests, which is a clean CTSRD
++// submodule -- an edit there would be reverted by the next submodule update with no
++// sign it had gone, the same way the crt_cheriot.S local patch is exposed.
++//
++// A function-like macro is not re-expanded within its own expansion, so naming the
++// builtin on both sides is well defined. In this file all three builtins are applied
++// only to &p, so casting unconditionally to int* cannot disturb the char/short/int/
++// long long atomics alongside it.
++#define __c11_atomic_compare_exchange_strong(obj, exp, des, succ, fail)                \
++	__c11_atomic_compare_exchange_strong(obj, exp, (int *)(des), succ, fail)
++#define __c11_atomic_exchange(obj, des, ord)                                           \
++	__c11_atomic_exchange(obj, (int *)(des), ord)
++#define __c11_atomic_store(obj, des, ord) __c11_atomic_store(obj, (int *)(des), ord)
++
+ #include "../../../cheri-c-tests/clang-purecap/clang_purecap_atomic.c"
+ 
+ int __cheri_compartment("cc_atomic") run_test_atomic(void)
+diff --git a/examples/cheri_c_tests/test_clang_purecap_badcall.cc b/examples/cheri_c_tests/test_clang_purecap_badcall.cc
+index 87f7448..d8a5ced 100644
+--- a/examples/cheri_c_tests/test_clang_purecap_badcall.cc
++++ b/examples/cheri_c_tests/test_clang_purecap_badcall.cc
+@@ -10,6 +10,8 @@
+ // orchestrator verifies the returned capability is invalid (address == -1).
+ 
+ #define TEST_CUSTOM_FRAMEWORK
++// This wrapper defines its own compartment_error_handler (cheri_c_test_framework.h).
++#define CHERI_C_OWN_ERROR_HANDLER
+ #include <compartment.h>
+ #include <debug.hh>
+ 
+@@ -18,10 +20,7 @@ using Debug = ConditionalDebug<true, "cc-badcall">;
+ extern "C" ErrorRecoveryBehaviour
+ compartment_error_handler(ErrorState *frame, size_t mcause, size_t mtval)
+ {
+-	(void)frame;
+-	(void)mcause;
+-	(void)mtval;
+-	Debug::log("CHERI fault caught (mcause=0x{:x}): ForceUnwind", mcause);
++	Debug::log("CHERI fault caught: mcause={} mtval={} pcc={}: ForceUnwind", mcause, mtval, frame->pcc);
+ 	return ErrorRecoveryBehaviour::ForceUnwind;
+ }
+ 
+diff --git a/examples/cheri_c_tests/test_clang_purecap_input.cc b/examples/cheri_c_tests/test_clang_purecap_input.cc
+index 73fc367..b4be9dc 100644
+--- a/examples/cheri_c_tests/test_clang_purecap_input.cc
++++ b/examples/cheri_c_tests/test_clang_purecap_input.cc
+@@ -14,19 +14,19 @@
+ // compartment_error_handler returns ForceUnwind.  The orchestrator verifies
+ // the returned capability is invalid (address == -1).
+ 
++// This wrapper defines its own compartment_error_handler (cheri_c_test_framework.h).
++#define CHERI_C_OWN_ERROR_HANDLER
+ #include <compartment.h>
+ #include <debug.hh>
+ #include <stdint.h>
++#include "cheriot_perms.h"
+ 
+ using Debug = ConditionalDebug<true, "cc-input">;
+ 
+ extern "C" ErrorRecoveryBehaviour
+ compartment_error_handler(ErrorState *frame, size_t mcause, size_t mtval)
+ {
+-	(void)frame;
+-	(void)mcause;
+-	(void)mtval;
+-	Debug::log("CHERI fault caught (mcause=0x{:x}): ForceUnwind", mcause);
++	Debug::log("CHERI fault caught: mcause={} mtval={} pcc={}: ForceUnwind", mcause, mtval, frame->pcc);
+ 	return ErrorRecoveryBehaviour::ForceUnwind;
+ }
+ 
+@@ -40,11 +40,15 @@ __attribute__((noinline)) static void attempt_store_through_readonly(int *p)
+ 	    __CHERI_CAP_PERMISSION_PERMIT_LOAD__ |
+ 	    __CHERI_CAP_PERMISSION_PERMIT_LOAD_CAPABILITY__);
+ 
+-	// Verify the permissions were actually removed before attempting the store.
+-	__builtin_expect(
+-	    (__builtin_cheri_perms_get(ro) &
+-	     __CHERI_CAP_PERMISSION_PERMIT_STORE__) == 0,
+-	    1);
++	// Check the permission really was removed. This used to be a __builtin_expect, which is a
++	// compiler hint and checks nothing. If CAndPerm left Store in place, the store below would
++	// succeed and the test would report "no fault" -- a CAndPerm bug reported as a missing
++	// store-permission check. Report it as what it is and skip the store.
++	if ((__builtin_cheri_perms_get(ro) & __CHERI_CAP_PERMISSION_PERMIT_STORE__) != 0)
++	{
++		Debug::log("FAIL: cc_input: CAndPerm left Store in place: perms {}", __builtin_cheri_perms_get(ro));
++		return;
++	}
+ 
+ 	// This store must trigger a CHERI store-permission fault.
+ 	*(volatile int *)ro = 42;
+diff --git a/examples/cheri_c_tests/test_clang_purecap_intcap.cc b/examples/cheri_c_tests/test_clang_purecap_intcap.cc
+index 302bc46..048f6b3 100644
+--- a/examples/cheri_c_tests/test_clang_purecap_intcap.cc
++++ b/examples/cheri_c_tests/test_clang_purecap_intcap.cc
+@@ -15,7 +15,8 @@
+ 
+ using Debug = ConditionalDebug<true, "cc-intcap">;
+ 
+-#include "../../../cheri-c-tests/clang-purecap/clang_purecap_intcap.c"
++// CHERIoT port of the upstream test: local round trip, 64-bit capability layout (see its header).
++#include "cheriot_clang_purecap_intcap.c"
+ 
+ int __cheri_compartment("cc_intcap") run_test_intcap(void)
+ {
+diff --git a/examples/cheri_c_tests/test_clang_purecap_null.cc b/examples/cheri_c_tests/test_clang_purecap_null.cc
+index 84f4d13..41265d5 100644
+--- a/examples/cheri_c_tests/test_clang_purecap_null.cc
++++ b/examples/cheri_c_tests/test_clang_purecap_null.cc
+@@ -12,7 +12,8 @@
+ 
+ using Debug = ConditionalDebug<true, "cc-null">;
+ 
+-#include "../../../cheri-c-tests/clang-purecap/clang_purecap_null.c"
++// CHERIoT port of the upstream test: NULL has length 0 here (see the file header).
++#include "cheriot_clang_purecap_null.c"
+ 
+ int __cheri_compartment("cc_null") run_test_null(void)
+ {
+diff --git a/examples/cheri_c_tests/test_clang_purecap_output.cc b/examples/cheri_c_tests/test_clang_purecap_output.cc
+index 256621a..4820922 100644
+--- a/examples/cheri_c_tests/test_clang_purecap_output.cc
++++ b/examples/cheri_c_tests/test_clang_purecap_output.cc
+@@ -13,19 +13,19 @@
+ // compartment_error_handler returns ForceUnwind.  The orchestrator verifies
+ // the returned capability is invalid (address == -1).
+ 
++// This wrapper defines its own compartment_error_handler (cheri_c_test_framework.h).
++#define CHERI_C_OWN_ERROR_HANDLER
+ #include <compartment.h>
+ #include <debug.hh>
+ #include <stdint.h>
++#include "cheriot_perms.h"
+ 
+ using Debug = ConditionalDebug<true, "cc-output">;
+ 
+ extern "C" ErrorRecoveryBehaviour
+ compartment_error_handler(ErrorState *frame, size_t mcause, size_t mtval)
+ {
+-	(void)frame;
+-	(void)mcause;
+-	(void)mtval;
+-	Debug::log("CHERI fault caught (mcause=0x{:x}): ForceUnwind", mcause);
++	Debug::log("CHERI fault caught: mcause={} mtval={} pcc={}: ForceUnwind", mcause, mtval, frame->pcc);
+ 	return ErrorRecoveryBehaviour::ForceUnwind;
+ }
+ 
+@@ -40,11 +40,13 @@ attempt_load_through_writeonly(int *p)
+ 	    __CHERI_CAP_PERMISSION_PERMIT_STORE__ |
+ 	    __CHERI_CAP_PERMISSION_PERMIT_STORE_CAPABILITY__);
+ 
+-	// Verify the LOAD permission was removed before the load attempt.
+-	__builtin_expect(
+-	    (__builtin_cheri_perms_get(wo) &
+-	     __CHERI_CAP_PERMISSION_PERMIT_LOAD__) == 0,
+-	    1);
++	// Check the permission really was removed (was a no-op __builtin_expect; see
++	// test_clang_purecap_input.cc). If CAndPerm left Load in place, report that and skip the load.
++	if ((__builtin_cheri_perms_get(wo) & __CHERI_CAP_PERMISSION_PERMIT_LOAD__) != 0)
++	{
++		Debug::log("FAIL: cc_output: CAndPerm left Load in place: perms {}", __builtin_cheri_perms_get(wo));
++		return 0;
++	}
+ 
+ 	// This load must trigger a CHERI load-permission fault.
+ 	return *(volatile int *)wo;
+diff --git a/examples/cheri_c_tests/test_clang_purecap_smallint.cc b/examples/cheri_c_tests/test_clang_purecap_smallint.cc
+index bdbd6fa..6b152c2 100644
+--- a/examples/cheri_c_tests/test_clang_purecap_smallint.cc
++++ b/examples/cheri_c_tests/test_clang_purecap_smallint.cc
+@@ -12,6 +12,14 @@
+ 
+ using Debug = ConditionalDebug<true, "cc-smallint">;
+ 
++// _Alignas is a C11 keyword with no C++ spelling; this wrapper compiles the upstream
++// C file as C++, where it parses as a call and yields "error: expected expression"
++// plus cascading "undeclared identifier" errors for the variable it qualifies.
++// alignas is the C++ equivalent and accepts the same integral argument.
++#ifndef _Alignas
++#define _Alignas(x) alignas(x)
++#endif
++
+ #include "../../../cheri-c-tests/clang-purecap/clang_purecap_smallint.c"
+ 
+ int __cheri_compartment("cc_smallint") run_test_smallint(void)
+diff --git a/examples/cheri_c_tests/test_clang_purecap_union.cc b/examples/cheri_c_tests/test_clang_purecap_union.cc
+index 3d76026..8e70102 100644
+--- a/examples/cheri_c_tests/test_clang_purecap_union.cc
++++ b/examples/cheri_c_tests/test_clang_purecap_union.cc
+@@ -12,7 +12,8 @@
+ 
+ using Debug = ConditionalDebug<true, "cc-union">;
+ 
+-#include "../../../cheri-c-tests/clang-purecap/clang_purecap_union.c"
++// CHERIoT port of the upstream test: exact-length check not applicable (see the file header).
++#include "cheriot_clang_purecap_union.c"
+ 
+ int __cheri_compartment("cc_union") run_test_union(void)
+ {
+diff --git a/examples/cheri_c_tests/xmake.lua b/examples/cheri_c_tests/xmake.lua
+index b759245..ba8da59 100644
+--- a/examples/cheri_c_tests/xmake.lua
++++ b/examples/cheri_c_tests/xmake.lua
+@@ -34,6 +34,11 @@ compartment("cc_atomic")
+ compartment("cc_capretaddr")
+     add_files("test_clang_purecap_capretaddr.cc")
+     add_cheri_c_incdirs()
++    -- The test checks that foo()'s return address lies inside testfn(), which assumes testfn
++    -- really calls foo. Optimised, testfn is a tail call (`j foo`), foo returns to testfn's
++    -- caller -- placed before testfn -- and both offset checks fail against a correct return
++    -- capability (2026-09-29). Keep the call a call.
++    add_cxflags("-fno-optimize-sibling-calls", {force = true})
+ 
+ compartment("cc_funptr")
+     add_files("test_clang_purecap_funptr.cc")
+@@ -59,6 +64,34 @@ compartment("cc_union_struct")
+     add_files("test_clang_purecap_union_struct.cc")
+     add_cheri_c_incdirs()
+ 
++compartment("cc_byval_args")
++    add_files("test_clang_purecap_byval_args.cc")
++    add_cheri_c_incdirs()
++
++compartment("cc_intcapmath")
++    add_files("test_clang_purecap_intcapmath.cc")
++    add_cheri_c_incdirs()
++
++compartment("cc_uintcapmath")
++    add_files("test_clang_purecap_uintcapmath.cc")
++    add_cheri_c_incdirs()
++
++compartment("cc_va_args")
++    add_files("test_clang_purecap_va_args.cc")
++    add_cheri_c_incdirs()
++
++compartment("cc_va_copy")
++    add_files("test_clang_purecap_va_copy.cc")
++    add_cheri_c_incdirs()
++
++compartment("cc_capret")
++    add_files("test_clang_purecap_capret.cc")
++    add_cheri_c_incdirs()
++
++compartment("cc_stack_cap")
++    add_files("test_clang_purecap_stack_cap.cc")
++    add_cheri_c_incdirs()
++
+ -- ── Fault test compartments (DECLARE_TEST_FAULT) ─────────────────────────────
+ 
+ compartment("cc_array")
+@@ -69,6 +102,10 @@ compartment("cc_badcall")
+     add_files("test_clang_purecap_badcall.cc")
+     add_cheri_c_incdirs()
+ 
++compartment("cc_va_list_global")
++    add_files("test_clang_purecap_va_list_global.cc")
++    add_cheri_c_incdirs()
++
+ -- input/output use standalone .cc (no original .c include — FreeBSD qualifiers)
+ compartment("cc_input")
+     add_files("test_clang_purecap_input.cc")
+@@ -84,10 +121,28 @@ compartment("cc_orchestrator")
+ -- ── Firmware image ───────────────────────────────────────────────────────────
+ 
+ firmware("cheri_c_tests")
++    -- freestanding alone is not enough; these resolve
++    -- __library_export_libcalls_* undefined symbols at the final firmware link:
++    --   debug  -> debug_log_message_write, pulled in by every wrapper's
++    --             ConditionalDebug<true, ...> (referenced from 15 compartments)
++    --   string -> strcmp from cc_funptr
++    -- Same shape as the known-good firmware in cheriot-rtos/tests/xmake.lua, which
++    -- lists freestanding/string/atomic_fixed/debug. atomic is kept although the one
++    -- compartment that named __atomic_* directly (cc_atomic) is now excluded below:
++    -- it costs nothing and guards against an indirect user via locks. The aggregate
++    -- target pulls atomic_fixed -> atomic1/2/4/8, so the individual widths need not
++    -- be named.
+     add_deps("freestanding",
++             "debug",
++             "atomic",
++             "string",
+              "cc_init",
+              "cc_capcmp",
+-             "cc_atomic",
++             -- "cc_atomic" is omitted: it needs __atomic_{store,exchange,
++             -- compare_exchange}_cap, which CHERIoT RTOS does not implement at any
++             -- width. See the matching #if 0 in cheri_c_orchestrator.cc; re-enable
++             -- both together. The compartment target below is kept so that is a
++             -- two-line change.
+              "cc_capretaddr",
+              "cc_funptr",
+              "cc_intcap",
+@@ -95,8 +150,19 @@ firmware("cheri_c_tests")
+              "cc_smallint",
+              "cc_union",
+              "cc_union_struct",
++             "cc_byval_args",
++             "cc_intcapmath",
++             "cc_uintcapmath",
++             "cc_va_args",
++             "cc_va_copy",
++             "cc_capret",
++             "cc_stack_cap",
++             -- clang_purecap_va_die is not ported: it needs va_arg past the last argument
++             -- to fault, and a CHERIoT va_list is not bounded to the arguments. See
++             -- the matching comment in cheri_c_orchestrator.cc.
+              "cc_array",
+              "cc_badcall",
++             "cc_va_list_global",
+              "cc_input",
+              "cc_output",
+              "cc_orchestrator")
+@@ -107,7 +173,12 @@ firmware("cheri_c_tests")
+                 compartment          = "cc_orchestrator",
+                 priority             = 1,
+                 entry_point          = "run_cheri_c_tests",
+-                stack_size           = 0x1000,
++                -- cc_stack_cap puts about 5.7 KiB of arrays and frame on this stack, which
++                -- every compartment call from the thread runs on; the other tests fit in
++                -- 0x1000. The RTOS build rejects stacks over 8176 bytes
++                -- (cheriot-rtos/sdk/xmake.lua stack_size_limit), and lld rejects 8176
++                -- itself ("Thread 0has invalid stack"); 0x1c00 links.
++                stack_size           = 0x1c00,
+                 trusted_stack_frames = 20
+             }
+         }, {expand = false})
+diff --git a/examples/juliet_cwe/cwe121_bof.cc b/examples/juliet_cwe/cwe121_bof.cc
+index 75800ca..91c33e6 100644
+--- a/examples/juliet_cwe/cwe121_bof.cc
++++ b/examples/juliet_cwe/cwe121_bof.cc
+@@ -8,14 +8,15 @@
+ // raises a CHERI exception.  The compartment_error_handler catches it and
+ // returns ForceUnwind, so the caller receives an invalid return capability.
+ //
+-// CHERIoT protection: stack capabilities have precise bounds set at function
+-// entry.  ptr[32] (byte offset 128) is outside the 64-byte bounds of buf →
+-// CHERI bounds exception (mcause = 0x1c, CHERI MTVAL = bounds violation).
++// CHERIoT protection: a stack object whose address escapes gets a capability
++// narrowed to its own bounds.  Writing at byte offset 128 of a 64-byte buffer is
++// outside those bounds → CHERI exception (mcause = 0x1c, MTVAL = bounds
++// violation).  See write_past_end() below for why the store lives in a separate
++// function; putting it inline with the array lets the optimiser delete the test.
+ 
+ #include "juliet_cwe.h"
+ #include <compartment.h>
+ #include <debug.hh>
+-#include <new>
+ 
+ using Debug = ConditionalDebug<true, "CWE-121 Stack BOF">;
+ 
+@@ -27,16 +28,38 @@ compartment_error_handler(ErrorState *frame, size_t mcause, size_t mtval)
+ 	return ErrorRecoveryBehaviour::ForceUnwind;
+ }
+ 
++// Writes past the end of a caller-supplied buffer. Deliberately a separate,
++// non-inlinable function -- that separation is what makes this test work at -O2.
++//
++// The store used to live directly in test_cwe121_bof() alongside the array. There
++// the optimiser could see that buf never escapes and that nothing ever reads the
++// stored value, so it removed the whole body: the function compiled to three
++// instructions (cmove ca0, cnull / li a1, 0 / cret). No capability was ever
++// dereferenced, so no exception could fire, and the test returned its
++// "unreachable" nullptr -- indistinguishable in the log from CHERIoT failing to
++// catch a stack overflow.
++//
++// std::launder and __c11_atomic_signal_fence did not prevent that, and were
++// removed as misleading: neither makes the object escape, and a signal fence only
++// orders accesses that are emitted in the first place.
++//
++// Passing the array to a noinline callee addresses both halves:
++//   - the address escapes, so CHERIoT clang must materialise a real capability
++//     for buf, narrowed to the 64-byte object rather than left as a csp offset.
++//     Without that narrowing the access would still be inside the stack bounds
++//     and would not fault.
++//   - p is opaque here, so the store cannot be proven dead.
++// volatile is belt-and-braces against dead-store elimination.
++__attribute__((noinline)) static void
++write_past_end(int *p)
++{
++	// Byte offset 128, outside the 64-byte bounds of the caller's buffer.
++	static_cast<volatile int *>(p)[32] = 0;
++}
++
+ void *test_cwe121_bof(int)
+ {
+-	int buf[16];
+-	// std::launder prevents the compiler from treating the out-of-bounds
+-	// access as undefined behaviour it can eliminate.  The atomic fences
+-	// prevent the store from being hoisted or sunk out of the load barrier
+-	// check window.
+-	int *ptr = std::launder(buf);
+-	__c11_atomic_signal_fence(__ATOMIC_SEQ_CST);
+-	ptr[32] = 0; // bounds violation: buf has 16 ints (64 bytes); index 32 is OOB
+-	__c11_atomic_signal_fence(__ATOMIC_SEQ_CST);
+-	return nullptr; // unreachable: CHERI exception fires at ptr[32]
++	int buf[16]; // 64 bytes
++	write_past_end(buf);
++	return nullptr; // unreachable: the bounds exception fires in write_past_end
+ }
+diff --git a/examples/juliet_cwe/cwe190_int_overflow.cc b/examples/juliet_cwe/cwe190_int_overflow.cc
+index cc78e10..2641410 100644
+--- a/examples/juliet_cwe/cwe190_int_overflow.cc
++++ b/examples/juliet_cwe/cwe190_int_overflow.cc
+@@ -42,7 +42,14 @@ void *test_cwe190_int_overflow(int)
+ 	__c11_atomic_signal_fence(__ATOMIC_SEQ_CST);
+ 	// On 32-bit RISC-V: ptr + idx * sizeof(int) = ptr + 0xFFFFFFFC
+ 	// The resulting address is outside buf's 32-byte CHERI bounds.
+-	ptr[idx] = 0; // CHERI bounds exception: index 0xFFFFFFFF is OOB for buf[8]
++	// The store must be volatile. As a plain store it was deleted: writing outside buf is
++	// undefined behaviour, buf is otherwise dead, and std::launder does not stop dead-store
++	// elimination -- the 2026-09-29 image kept only the load of idx, so no out-of-bounds access
++	// was ever made and the test "failed" with a correct core. On CHERIoT, ptr - 4 is also below
++	// the representable window of a small (E = 0) capability, so the cursor move itself may clear
++	// the tag: the trap is then a tag violation rather than a bounds violation. Either is the
++	// architecture stopping the access.
++	((volatile int *)ptr)[idx] = 0; // CHERI exception: index 0xFFFFFFFF is OOB for buf[8]
+ 	__c11_atomic_signal_fence(__ATOMIC_SEQ_CST);
+ 	return nullptr; // unreachable
+ }
+diff --git a/examples/juliet_cwe/juliet_orchestrator.cc b/examples/juliet_cwe/juliet_orchestrator.cc
+index 9e874a2..4bf67d5 100644
+--- a/examples/juliet_cwe/juliet_orchestrator.cc
++++ b/examples/juliet_cwe/juliet_orchestrator.cc
+@@ -16,6 +16,7 @@
+ //   "All tests finished" → PASS
+ //   "Test(s) Failed"     → FAIL
+ 
++#include "../common/sim_exit.hh"
+ #include "juliet_cwe.h"
+ #include <cheri.hh>
+ #include <compartment.h>
+@@ -103,6 +104,9 @@ check_compartment_faulted(const char *name, Capability<void> ret)
+ 		// test_runner.py matches this substring to declare failure.
+ 		Debug::log("Test(s) Failed");
+ 	}
++	// End the run in simulation (common/sim_exit.hh); without it the loop below idles until
++	// the testbench's MAX_CYCLES.
++	sim_exit();
+ 
+ 	// CHERIoT RTOS threads must not return; spin until the simulation ends.
+ 	while (true)
+diff --git a/examples/juliet_cwe/xmake.lua b/examples/juliet_cwe/xmake.lua
+index d731d48..1fd4b3a 100644
+--- a/examples/juliet_cwe/xmake.lua
++++ b/examples/juliet_cwe/xmake.lua
+@@ -39,7 +39,11 @@ compartment("juliet_orchestrator")
+ -- ── Firmware image ───────────────────────────────────────────────────────────
+ 
+ firmware("juliet_cwe_tests")
++    -- debug resolves __library_export_libcalls_..debug_log_message_write.., which
++    -- every compartment here pulls in via ConditionalDebug<true, ...>. Without it
++    -- the compartments link individually and only the final firmware link fails.
+     add_deps("freestanding",
++             "debug",
+              "cwe121_inner",
+              "cwe122_inner",
+              "cwe416_inner",
+diff --git a/examples/xmake.lua b/examples/xmake.lua
+index 7291b81..f312549 100644
+--- a/examples/xmake.lua
++++ b/examples/xmake.lua
+@@ -13,7 +13,8 @@ includes("../common.lua")
+ option("board")
+     set_default("sonata-1.1")
+ 
+-includes("all", "snake", "automotive", "heartbleed", "juliet_cwe", "cheri_c_tests")
++includes("all", "snake", "automotive", "heartbleed", "juliet_cwe", "cheri_c_tests",
++         "revocation_test")
+ 
+ -- A simple demo using only devices on the Sonata board
+ firmware("sonata_simple_demo")

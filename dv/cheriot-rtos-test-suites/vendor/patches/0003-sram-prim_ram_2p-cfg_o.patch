@@ -1,0 +1,28 @@
+sram: connect prim_ram_2p's cfg_o (ibex/vendor/lowrisc_ip's RAM configuration API)
+
+Sonata's prim_ram_2p takes one ram_2p_cfg_t cfg_i. The RTOS test SoC builds with this ibex
+repository's vendor/lowrisc_ip, whose prim_ram_2p splits it into cfg_i (ram_2p_cfg_req_t) and
+cfg_o (ram_2p_cfg_rsp_t). cfg_i is still tied to '0; cfg_o, a status output the generic model
+drives to its default, is left open. The memory model itself (prim_generic) is line-for-line
+the same apart from those ports, so behaviour is unchanged.
+
+--- a/rtl/system/sram.sv
++++ b/rtl/system/sram.sv
+@@ -163,7 +163,8 @@
+     .b_wmask_i (DataWidth'(0)),
+     .b_rdata_o (mem_b_rdata),
+ 
+-    .cfg_i     ('0)
++    .cfg_i     ('0),
++    .cfg_o     ()
+   );
+ 
+   // Tag memory
+@@ -174,6 +175,7 @@
+     .clk_a_i   (clk_i),
+     .clk_b_i   (clk_i),
+     .cfg_i     ('0),
++    .cfg_o     (),
+     .a_req_i   (mem_a_req),
+     .a_write_i (&mem_a_we),
+     .a_addr_i  (mem_a_addr[SramAw-1:TOff]),

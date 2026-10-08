@@ -1,0 +1,26 @@
+// Copyright lowRISC contributors.
+// Licensed under the Apache License, Version 2.0, see LICENSE for details.
+// SPDX-License-Identifier: Apache-2.0
+
+// Code coverage for the CHERIoT RTOS test SoC: the core (ibex_top) and the CHERIoT memory
+// subsystem (cheriot_mem_subsys: tag filter, RMW filter, TRBE, rev_ctl shim, meta SRAM), and
+// nothing else. The crossbar, memories, UART, timer, PLIC and rev_ctl are scaffolding.
+//
+// The build passes -covdut cheriot_rtos_soc. ibex_top is configured by the shared
+// dv/coverage/ibex_cover.ccf, exactly as in every other suite; this file only ADDS
+// cheriot_mem_subsys on top of it (statement/block/branch/expression/FSM below it, toggle on its
+// ports only). Nothing of the shared selection is changed here.
+//
+// Order matters: the additions come before the include so the shared file's black-boxing of the
+// pre-verified prims (deselect ... prim_*...) also applies to prims inside cheriot_mem_subsys.
+
+// Nothing of the SoC by default; the two roots are selected below and in the shared file.
+deselect_coverage -betfs -module cheriot_rtos_soc...
+
+// Suite-specific addition: the CHERIoT memory subsystem.
+select_coverage -befts -module cheriot_mem_subsys...
+deselect_coverage -toggle -module cheriot_mem_subsys...
+select_coverage -toggle -module cheriot_mem_subsys
+
+// ibex_top: the same selection as every other suite.
+include_ccf ${IBEX_ROOT_DIR}/dv/coverage/ibex_cover.ccf

@@ -1,0 +1,22 @@
+uartdpi: no stderr message per failed PTY write when a log file is set
+
+Local, uncommitted change in the sonata-system checkout this was vendored from. With a log file
+(+UARTDPI_LOG_uart0), the PTY usually has no reader and every byte the firmware prints fails
+with EAGAIN; the message flooded the simulation log on long runs. The log file is the output.
+
+diff --git a/vendor/lowrisc_ip/dv/dpi/uartdpi/uartdpi.c b/vendor/lowrisc_ip/dv/dpi/uartdpi/uartdpi.c
+index 24b5d93..630e93f 100644
+--- a/vendor/lowrisc_ip/dv/dpi/uartdpi/uartdpi.c
++++ b/vendor/lowrisc_ip/dv/dpi/uartdpi/uartdpi.c
+@@ -151,7 +151,10 @@ int uartdpi_write(void *ctx_void, char c) {
+ 
+   rv = write(ctx->host, &c, 1);
+ 
+-  if (rv != 1) {
++  // PTY write failures are non-fatal in batch mode: the log file is the primary
++  // output path.  EAGAIN (buffer full, no reader) is the common case; suppress
++  // all PTY errors to avoid flooding stderr during long simulations.
++  if (rv != 1 && !ctx->log_file) {
+     fprintf(stderr, "UART: Write to pseudo-terminal failed: %s\n", strerror(errno));
+   }
+ 

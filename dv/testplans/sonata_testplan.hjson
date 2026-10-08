@@ -1,0 +1,395 @@
+// Copyright lowRISC contributors.
+// Licensed under the Apache License, Version 2.0, see LICENSE for details.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Testplan for Sonata firmware on the CHERIoT RTOS test SoC (ibex/dv/cheriot-rtos-test-suites/,
+// Xcelium): CHERIoT-Ibex running CHERIoT RTOS software built for Sonata, on a minimal SoC with the
+// OpenTitan CHERIoT memory subsystem (lowRISC/opentitan#31470) -- tags and revocation bitmap in
+// its meta SRAM, TRBE sweep engine behind rev_ctl -- plus SRAM, code RAM, UART0, timer and PLIC on
+// Sonata's memory map. Other Sonata peripherals are not in the SoC (see its README.md).
+//
+// dvsim testplan format (ibex/vendor/lowrisc_ip/util/dvsim/Testplan.py). The flow itself is run
+// by the root Makefile, not by dvsim; this file is the mapping from obligation to test and
+// covergroup. Obligations are stated in ibex_cheriot_verification_spec.md.
+//
+// Test names: one per check the firmware reports on UART0, which the flow captures to
+// ibex/dv/cheriot-rtos-test-suites/xlm_rtos_out/uart0.log.
+//   rtos_<fn>        cheriot-rtos/tests/test-runner.cc run_timed(<fn>): passes on
+//                    "Test runner: <name> finished in N cycles", fails on "<name> failed"
+//   juliet_<cwe>     examples/juliet_cwe/<cwe>.cc
+//   cheri_c_<test>   examples/cheri_c_tests/test_clang_purecap_<test>.cc
+//   revocation_*     examples/revocation_test/revocation_test.cc "PASS ..." / "FAIL ..." lines
+//
+// Build: there is one, tagged "cheriot_mem" (the kept logs are <target>.cheriot_mem.uart.log).
+// Every testpoint with tests carries the tag.
+{
+  name: "sonata"
+
+  testpoints: [
+    // ─── CHERIoT RTOS test suite ────────────────────────────────────────────────────────────
+    {
+      name: rtos_boot_and_runtime
+      desc: '''**Goal**: CHERIoT RTOS boots on the SoC and its core runtime services work.
+
+            **Stimulus**: the upstream cheriot-rtos test suite (make sonata-rtos-tests-xlm, built
+            for the sonata-simulator board so the run ends on the uartdpi exit string).
+
+            **Check**: each named test reports "finished"; the runner reports "All tests
+            finished"; no "Invariant failure". A run that ends without "All tests finished" is a
+            failure, not a partial pass.'''
+      stage: V1
+      tags: ["cheriot_mem"]
+      tests: ["rtos_test_debug_cxx", "rtos_test_debug_c", "rtos_test_mmio",
+              "rtos_test_stdio", "rtos_test_global_constructors"]
+    }
+    {
+      name: rtos_compartmentalisation
+      desc: '''**Goal**: compartment isolation and cross-compartment control flow hold on the
+            hardware.
+
+            **Stimulus**: RTOS suite tests for compartment calls, static sealing, pointer
+            checks, error-handler unwinding, crash recovery and switcher stack exhaustion.
+
+            **Check**: every test reports "finished". Crash recovery must observe and recover
+            from the faults it provokes -- its "Detected error in instruction" lines are
+            expected output, not failures.'''
+      stage: V2
+      tags: ["cheriot_mem"]
+      tests: ["rtos_test_compartment_call", "rtos_test_static_sealing",
+              "rtos_test_check_pointer", "rtos_test_unwind_cleanup",
+              "rtos_test_crash_recovery", "rtos_test_stack"]
+    }
+    {
+      name: rtos_scheduling_and_sync
+      desc: '''**Goal**: scheduler, timer interrupt and synchronisation primitives work.
+
+            **Stimulus**: RTOS suite tests for futexes, locks, queues, event groups, the
+            multiwaiter, the thread pool, lists and miscellaneous APIs.
+
+            **Check**: every test reports "finished".'''
+      stage: V2
+      tags: ["cheriot_mem"]
+      tests: ["rtos_test_futex", "rtos_test_locks", "rtos_test_queue",
+              "rtos_test_eventgroup", "rtos_test_multiwaiter", "rtos_test_thread_pool",
+              "rtos_test_list", "rtos_test_misc"]
+    }
+    {
+      name: rtos_allocator_with_revocation
+      desc: '''**Goal**: the heap allocator's temporal safety works end to end: freed memory is
+            painted in the revocation bitmap, swept by the revocation engine, and reused.
+
+            **Stimulus**: the RTOS suite's allocator test, which frees and reallocates
+            repeatedly and so needs completed sweeps to make progress.
+
+            **Check**: "Allocator finished". This exercises the TRBE through rev_ctl on every
+            quarantine drain. A barrier that revokes nothing is rejected by the allocator's
+            preflight ("Freed pointer still live; load barrier or revoker out of service?"), and
+            a barrier without a sweep engine cannot drain the quarantine, so neither can pass.'''
+      stage: V2
+      tags: ["cheriot_mem"]
+      tests: ["rtos_test_allocator"]
+    }
+
+    // ─── Directed revocation test ───────────────────────────────────────────────────────────
+    {
+      name: load_barrier_both_directions
+      desc: '''**Goal**: the core's load barrier (ibex_trvk) revokes exactly the capabilities whose
+            shadow bit is set, in both directions, and does not latch.
+
+            **Stimulus**: examples/revocation_test drives one object's shadow bit over MMIO and
+            reloads a capability to it from memory (make sonata-revocation-xlm; the bitmap is the
+            memory subsystem's, written through its window). All three phases run back to back with no
+            calls while the bit is set: any load of the capability in that window -- including a
+            callee restoring the register that holds it -- is itself revoked.
+
+            **Check**:
+            - phase 1: bit clear, the reloaded capability keeps its tag (catches a barrier that
+              revokes everything)
+            - phase 2: bit set, the reloaded capability loses its tag (catches a barrier stubbed
+              to "nothing revoked")
+            - phase 3: bit cleared again, the tag survives (catches a latched barrier)'''
+      stage: V2
+      tags: ["cheriot_mem"]
+      tests: ["revocation_barrier_phase1", "revocation_barrier_phase2",
+              "revocation_barrier_phase3"]
+    }
+    {
+      name: revocation_sweep
+      desc: '''**Goal**: a hardware revocation sweep clears the tag of a revoked capability in
+            memory and of nothing else.
+
+            **Stimulus**: store capabilities to two objects inside the sweep range, set one
+            object's shadow bit, start one sweep through rev_ctl (control 0 then 1, from an even
+            epoch), wait for the epoch to advance by 2, clear the bit, reload both.
+
+            **Check**: the revoked copy has lost its tag, the unrevoked one kept it, and the
+            epoch advanced by exactly one sweep. Waits use ThreadSleepNoEarlyWake so the poll
+            elapses real time. Without a sweep engine the epoch never moves and the test reports
+            SKIP; here SKIP is a failure (make sonata-revocation-xlm requires "PASS sweep").'''
+      stage: V2
+      tags: ["cheriot_mem"]
+      tests: ["revocation_sweep"]
+    }
+
+    // ─── Scheduler and IRQ regressions ──────────────────────────────────────────────────────
+    {
+      name: scheduler_regression_drs
+      desc: '''**Goal**: a compartment can import the same shared object twice with different
+            permissions, and both imports reach the same object.
+
+            **Stimulus**: regress-double_ref_shared (make sonata-rtos-regress-drs-xlm, built for
+            board sonata-simulator): one compartment whose two compilation units import the shared
+            object foo, one read-write and one read-only, so the loader must create two import
+            entries. top1 writes 1 through the read-write import; top2 reads it through the
+            read-only one.
+
+            **Check**: the UART log has the line "top2: ref2: 1" and "Simulation exit code: 0" (the
+            scheduler's exit when the only thread returns; local cheriot-rtos patch 0002), and the
+            run ends on the RTOS exit string with no failure marker (no xmsim *E/*F, ASSERT FAILED,
+            FIRMWARE FAILURE, TIMEOUT or UART IDLE). The program prints no "All tests finished".'''
+      stage: V2
+      tags: ["cheriot_mem"]
+      tests: ["regress_drs"]
+    }
+    {
+      name: scheduler_regression_tei
+      desc: '''**Goal**: the scheduler handles thread exit during an IRQ without deadlock or crash.
+
+            **Stimulus**: regress-thread_exit_IRQ (make sonata-rtos-regress-tei-xlm, built for
+            board sonata-simulator): the thread's entry function returns through a cret to a
+            return address taken in an interrupts-enabled function, so the thread exits from its
+            initial activation with interrupts enabled. Before cheriot-rtos PR 346 this entered
+            the scheduler's exception entry point, which must run with interrupts deferred, with
+            them enabled.
+
+            **Check**: the UART log has "Simulation exit code: 0" and no other exit code (a
+            scheduler panic exits with 1), and the run ends on the RTOS exit string with no
+            failure marker (as scheduler_regression_drs).'''
+      stage: V2
+      tags: ["cheriot_mem"]
+      tests: ["regress_tei"]
+    }
+    {
+      name: hwrev_irq
+      desc: '''**Goal**: rev_ctl's hardware revoker completion interrupt fires correctly through
+            the PLIC.
+
+            **Stimulus**: hardware_revoker_IRQs (make sonata-rtos-hwrev-irq-xlm): kicks the
+            background revoker and waits for its completion interrupt 10 times in succession,
+            each with a 50-tick timeout.
+
+            **Check**: ten "After wait: ... result true" lines (wait_for_completion returned true
+            within the timeout every time; a timeout fails a Debug::Assert, whose error handler
+            exits with code 1), "Simulation exit code: 0", and the run ends on the RTOS exit
+            string with no failure marker. Built for board sonata-simulator. Tests the rev_ctl-to-PLIC
+            interrupt path that the revocation_sweep testpoint does not exercise (it polls the
+            epoch register rather than waiting on the IRQ).'''
+      stage: V2
+      tags: ["cheriot_mem"]
+      tests: ["hwrev_irq"]
+    }
+
+    // ─── Security demonstrators ─────────────────────────────────────────────────────────────
+    {
+      name: juliet_memory_safety
+      desc: '''**Goal**: CHERIoT traps the memory-safety weaknesses of the Juliet CWE subset.
+
+            **Stimulus**: examples/juliet_cwe (make sonata-juliet-xlm): stack and heap buffer
+            overflow, integer overflow into an out-of-bounds access, double free, use after
+            free. Each runs in its own compartment, called from the orchestrator.
+
+            **Check**: every case raises a CHERI exception and the switcher force-unwinds the
+            call, returning -1 to the orchestrator ("PASS: CWE-nnn raised CHERI exception").
+            A call that returns a valid capability is a failure. There are no non-faulting
+            cases, so a core that traps on everything would pass; the RTOS suite covers
+            normal execution. CWE-415/416 only check that a stale capability is revoked, so they
+            cannot distinguish a working barrier from one that revokes everything;
+            load_barrier_both_directions covers the other direction. They depend on temporal
+            safety, which needs both the load barrier and a sweep engine for the allocator to
+            drain its quarantine.'''
+      stage: V2
+      tags: ["cheriot_mem"]
+      tests: ["juliet_cwe121_bof", "juliet_cwe122_heap_bof", "juliet_cwe190_int_overflow",
+              "juliet_cwe415_double_free", "juliet_cwe416_uaf"]
+    }
+    {
+      name: cheri_c_semantics
+      desc: '''**Goal**: purecap C semantics from the Cambridge CHERI-C test suite hold on
+            CHERIoT RTOS.
+
+            **Stimulus**: examples/cheri_c_tests (make sonata-cheri-c-xlm).
+
+            **Check**: every test passes, with CHERIoT semantics where upstream assumes 128-bit
+            CHERI:
+            - permission masks use CHERIoT's bit layout (cheri_c_tests/cheriot_perms.h): clang's
+              __CHERI_CAP_PERMISSION_*__ values name other CHERIoT permissions
+            - NULL has length 0, not (size_t)-1 (cheriot_clang_purecap_null.c)
+            - the exact-length check on a global pointer is not applicable
+              (cheriot_clang_purecap_union.c); the tag-clearing checks are kept
+            - capretaddr is built without sibling calls, so its return address lies in testfn
+            - intcap round-trips its stack-derived pointer through a local, not a global: CHERIoT
+              clears the tag of a local capability stored without StoreLocal, as Sail specifies
+              (cheriot_clang_purecap_intcap.c), and reads the capability as one 64-bit word
+            - a CHERIoT va_list is the callee's incoming csp plus an offset, with no csetbounds
+              or candperm: it has the stack's bounds and permissions. va_args drops upstream's
+              length and no-Store checks on it (cheriot_clang_purecap_va_args.c)
+            - va_list_global stores that local capability in a global, so its tag is cleared;
+              the test expects the reloaded va_list untagged and a CHERI tag violation on the
+              first va_arg, not upstream's length violation on the third
+              (cheriot_clang_purecap_va_list_global.c)
+            - where the optimiser would evaluate a test at compile time, the port keeps the
+              operations under test: intcapmath / uintcapmath read their operands through
+              volatile (cheriot_clang_purecap_uintcapmath.c), byval_args puts a compiler
+              barrier after the callee's memset (cheriot_clang_purecap_byval_args.c)
+            - capret returns with `cjr cra` in place of upstream's CHERI-MIPS `cjr $c17`
+              (cheriot_clang_purecap_capret.c)
+            - stack_cap allocates 513, 1025 and 4097 bytes, not 128 KiB to 1 MiB: an RTOS thread
+              stack is at most 8176 bytes. Each size is one past a power of two, so its bounds
+              need padding, as upstream's overlap check requires
+              (cheriot_clang_purecap_stack_cap.c)
+            A normal test that faults logs "CRASH:" with mcause, mtval and PCC before unwinding.
+            Fault tests must fault on the access under test and on nothing earlier;
+            va_list_global also fails if the fault is not a tag violation, or an assertion
+            before it failed.
+
+            cc_atomic (test_clang_purecap_atomic) is out of scope: it needs capability-width
+            atomics the RTOS does not implement, and is excluded from the firmware.'''
+      stage: V2
+      tags: ["cheriot_mem"]
+      tests: ["cheri_c_array", "cheri_c_badcall", "cheri_c_byval_args", "cheri_c_capcmp",
+              "cheri_c_capret", "cheri_c_capretaddr", "cheri_c_funptr", "cheri_c_init",
+              "cheri_c_input", "cheri_c_intcap", "cheri_c_intcapmath",
+              "cheri_c_null",
+              "cheri_c_output", "cheri_c_smallint", "cheri_c_stack_cap", "cheri_c_uintcapmath",
+              "cheri_c_union", "cheri_c_union_struct", "cheri_c_va_args", "cheri_c_va_copy",
+              "cheri_c_va_list_global"]
+    }
+    {
+      name: cheri_c_va_die_not_applicable
+      desc: '''**Goal**: record why clang_purecap_va_die has no CHERIoT form.
+
+            va_die reads a ninth int from eight variadic arguments and needs that va_arg to fault
+            on the va_list's bounds. A CHERIoT va_list is not bounded to the arguments: it is the
+            incoming csp plus an offset, with no csetbounds, so the read lands in the caller's
+            frame and a correct core does not fault. Out-of-bounds stack access is covered by
+            cheri_c_array and Juliet CWE-121.'''
+      stage: N.A.
+      tests: []
+    }
+    // ─── Bus masters other than the core ─────────────────────────────────────────────────────
+    {
+      name: non_core_bus_masters
+      desc: '''**Goal**: no bus master other than the core can create or keep a capability in memory
+            that the capability rules would not allow.
+
+            A bus master that is not the core writes memory without the core's capability checks.
+            Each one must either have its writes clear the tag of every word they touch, or be
+            unreachable whenever it could be misused. With the CHERIoT memory subsystem:
+            - the debug host (dbg_host, the debug module's system-bus access) writes SRAM
+              through the xbar, bypassing the tag filter, so its writes do not clear tags
+              (cheriot_mem_subsys.sv, "as SBA does in OpenTitan"). It can therefore turn data into
+              a tagged capability, and must be unreachable while debug access is disabled
+            - the TRBE writes only invalidations (tag clears) through the tag path
+            - any DMA controller in the SoC (OpenTitan's hw/ip/dma, for instance) must route its
+              writes through the tag filter so they clear tags, and may
+              only reach memory the requesting software holds a capability for -- checked in
+              software by the driver compartment, or by the DMA itself
+
+            **Stimulus**: per bus master, a write over a word holding a tagged capability, then a
+            core load of it; for the debug host, the same with debug access disabled.
+
+            **Check**: the reloaded capability's tag is clear after any non-core write; the debug
+            host cannot write SRAM while debug access is disabled. Each test drives the bus
+            master directly from the testbench and checks the tag with a core load.
+
+            The RTOS test SoC has no debug module, so it has no debug host:
+            bus_master_dbg_host_tag_clear and bus_master_dbg_host_locked cannot be run on it and
+            need a SoC that has one (Sonata's sonata_system, or a debug module added to this SoC).
+            bus_master_trbe_invalidate_only applies to it. Its stimulus is the
+            revocation_test sweep (make sonata-revocation-xlm): after one TRBE sweep, compared
+            bit for bit with CSEQX, the revoked capability differs from its stored value only in
+            the cleared tag, the unrevoked one is unchanged, and untagged copies of both, stored
+            beside them in the sweep range, are unchanged (the TRBE never sets a tag). Reported as
+            "PASS/FAIL TRBE invalidate-only".'''
+      stage: V2
+      tags: ["cheriot_mem"]
+      tests: ["bus_master_dbg_host_tag_clear", "bus_master_dbg_host_locked",
+              "bus_master_trbe_invalidate_only"]
+    }
+
+    // ─── Memory subsystem coverage closure ──────────────────────────────────────────────────
+    {
+      name: mem_subsys_coverage_closure
+      desc: '''**Goal**: the memory-subsystem covergroups below are closed under RTOS workloads,
+            with every unreachable bin waived with a reason.
+
+            **Stimulus**: the tests above with COVERAGE=1, plus directed
+            tests for bins the workloads cannot reach -- in particular a core store racing a
+            TRBE invalidation of the same capability (cheriot_top_cg cp_trbe_core_store_race),
+            and the error and integrity bins, which need fault injection.
+
+            **Check**: every bin of every covergroup listed here hit or waived.'''
+      stage: V3
+      tags: ["cheriot_mem"]
+      tests: []
+    }
+  ]
+
+  // Functional coverage, bound from outside the RTL
+  // (ibex/dv/cheriot-rtos-test-suites/fcov/cheriot_mem_subsys_fcov_bind.sv)
+  // so the vendored OpenTitan and Sonata sources stay unmodified. Sampling needs
+  // +enable_ibex_fcov=1, which the flow passes under COVERAGE=1.
+  covergroups: [
+    {
+      name: tag_filter_req_cg
+      desc: '''Core data requests entering the tag filter: operation (read, full write, partial
+            write) x region (main SRAM, HyperRAM, untagged) x whether a tag lookup is needed x
+            CHERIoT on/off; read shape (aligned, capability hint, lookup); stored tag per
+            region; meta SRAM back-pressure.'''
+    }
+    {
+      name: tag_filter_rsp_cg
+      desc: '''Responses returned to the core: tag value x whether the access was a full
+            capability word; bus errors; meta SRAM errors on lookups.'''
+    }
+    {
+      name: rmw_cg
+      desc: '''Tag read-modify-write filter: FSM states, old x new tag on every fill, bit select
+            within the tag word, fill errors, and device, response-integrity and data-integrity
+            errors.'''
+    }
+    {
+      name: trbe_mover_cg
+      desc: '''TRBE sweep engine: sweep length, running and draining (busy after the last read
+            is issued), per-capability outcome (read error, tags of both words, invalidation
+            issued), words in flight, and read/write bus and integrity errors.'''
+    }
+    {
+      name: access_check_cg
+      desc: '''Meta SRAM access checkers: forwarded or refused x CHERIoT on/off x in range x
+            permitted opcode x full-word access.'''
+    }
+    {
+      name: cheriot_top_cg
+      desc: '''Subsystem top level: TRBE start accepted or dropped (zero length, out of range,
+            CHERIoT off), start while busy, sweep length clamped to the SRAM top, contention
+            between the core's and the TRBE's tag traffic, meta SRAM requesters, a core store
+            racing a pending TRBE invalidation of the same capability, fatal alert.'''
+    }
+    {
+      name: rev_ctl_trbe_cg
+      desc: '''rev_ctl to TRBE shim (ibex/dv/cheriot-rtos-test-suites/rtl/cheriot_rev_ctl_trbe.sv):
+            go while idle and while running (ignored), empty range, a complete sweep, bus error.'''
+    }
+    {
+      name: trvk_cg
+      desc: '''Load-barrier revocation check (ibex/dv/uvm/core_ibex/fcov/core_ibex_trvk_fcov_if.sv),
+            bound twice: on the core's ibex_trvk, and on the TRBE's own cheriot_trvk_core, which
+            shares its decision logic. Revoked / not revoked, revoked by the bitmap, out of
+            range, bit select within the bitmap word (low, middle, high), whether a bitmap read
+            is required, the bitmap request handshake (quiet, back-pressured, accepted) and
+            outstanding reads, bitmap errors and integrity errors, sealing capabilities,
+            misaligned capabilities, and the tag returned upstream.'''
+    }
+  ]
+}
