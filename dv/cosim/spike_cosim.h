@@ -142,7 +142,7 @@ class SpikeCosim : public simif_t, public Cosim {
   void handle_cpuctrl_exception_entry(bool was_debug_mode);
 
   void initial_proc_setup(uint32_t start_pc, uint32_t start_mtvec,
-                          uint32_t mhpm_counter_num);
+                          uint32_t mhpm_counter_num, bool rv32b_enabled);
 
   void early_interrupt_handle();
   // Takes the interrupt set_mip() deferred (pending_irq_early_handle), if it is still enabled.

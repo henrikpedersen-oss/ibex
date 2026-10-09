@@ -28,11 +28,12 @@
 #     them with cheriot_enable_i On (Zcmp is rejected in CHERIoT mode, cdec:615-620,
 #     Zcb is not). Operands are ca5 (an integer, so an executed load/store takes a tag
 #     fault rather than touching memory).
-#   Draft bit-manipulation instructions of RV32BOTEarlGrey that are not in the ratified
-#     Zba/Zbb/Zbc/Zbs/Zbkb/Zbkx Sail implements: sloi, shfli, crc32[c].b/h/w, fsri,
-#     sroi, grevi, gorci, unshfli (immediates other than the zip/unzip/rev8/brev8/orc.b
-#     aliases), cmix, cmov, fsl, fsr, packu, bfp, grev, gorc, shfl, unshfl, xperm.h,
-#     slo, sro (ibex_decoder.sv:503-577, 592-593, 622-641). rd = t0.
+#   Draft bit-manipulation instructions outside the ratified Zba/Zbb/Zbc/Zbs/Zbkb/Zbkx that
+#     Sail implements: sloi, shfli, crc32[c].b/h/w, fsri, sroi, grevi, gorci, unshfli
+#     (immediates other than the zip/unzip/rev8/brev8/orc.b aliases), cmix, cmov, fsl, fsr,
+#     packu, bfp, grev, gorc, shfl, unshfl, xperm.h, slo, sro. Since lowRISC/ibex#2459 the RTL
+#     implements only the ratified set (RV32BOTEarlGrey is gone), so these are illegal there
+#     too and pass; they stay in the table so that none comes back. rd = t0.
 #   CSRs that exist in the RTL but not in the CHERIoT-Sail platform: mconfigptr,
 #     mcounteren, menvcfg, menvcfgh, mhpmevent3, mhpmcounter3, mhpmcounter3h,
 #     hpmcounter3, hpmcounter3h, tdata1-3, mcontext, mscontext, scontext, cpuctrlsts,

@@ -140,10 +140,10 @@
 
 - test: ibex_decode_holes
   desc: >
-    packu and packh (draft 0.93 XZbp; riscv-dv emits neither, see vendor patch 0007) give
-    {rs2[31:16], rs1[31:16]} and {16'b0, rs2[7:0], rs1[7:0]}; the OP-IMM unary group with
-    rs2 = 15 and srli/srai with shamt[5] = 1 raise an illegal-instruction exception with
-    mtval = the instruction and leave rd unwritten; every mhpmcounter3..31 low half is
+    packh (Zbkb; riscv-dv never emits it) gives {16'b0, rs2[7:0], rs1[7:0]}; packu (draft
+    0.93 Zbp only, which Ibex no longer implements), the OP-IMM unary group with rs2 = 15 and
+    srli/srai with shamt[5] = 1 raise an illegal-instruction exception with mtval = the
+    instruction and leave rd unwritten; every mhpmcounter3..31 low half is
     written, and mhpmcounter13..31 (unavailable with MHPMCounterNum = 10) read 0 after a
     write of all-ones. Returns 0 on success; codes in the test header.
   iterations: 1

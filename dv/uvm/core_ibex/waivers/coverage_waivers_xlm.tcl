@@ -337,20 +337,20 @@ set _core ibex_top/u_ibex_core
 # never be that event. These rows carry no design intent.
 #
 # Written by the block itself (it changes only because the block ran):
-ibex_waive_expr $_core/id_stage_i/decoder_i ibex_decoder 268 "instr\[6:0\] or opcode or ..." \
+ibex_waive_expr $_core/id_stage_i/decoder_i ibex_decoder 230 "instr\[6:0\] or opcode or ..." \
   [list event:opcode] "event-or: opcode is assigned in this always_comb (opcode_e'(instr\[6:0\]))"
-ibex_waive_expr $_core/id_stage_i/decoder_i ibex_decoder 944 \
+ibex_waive_expr $_core/id_stage_i/decoder_i ibex_decoder 880 \
   "instr_alu\[6:0\] or opcode_alu or ..." [list event:opcode_alu] \
   "event-or: opcode_alu is assigned in this always_comb (opcode_e'(instr_alu\[6:0\]))"
-ibex_waive_expr $_core/ex_block_i/alu_i ibex_alu 329 "shift_left or operand_a_rev or ..." \
+ibex_waive_expr $_core/ex_block_i/alu_i ibex_alu 253 "shift_left or operand_a_rev or ..." \
   [list event:shift_result_rev] "event-or: shift_result_rev is assigned in this always_comb"
 ibex_waive_expr $_core/if_stage_i/compressed_decoder_i ibex_compressed_decoder 213 \
   "instr_i or cm_rlist_q or ..." [list event:cm_rlist_d event:cm_sp_offset_d] \
   "event-or: cm_rlist_d and cm_sp_offset_d are assigned in this always_comb"
-ibex_waive_expr $_core/g_cheriot_ex/u_ibex_cheriot_ex ibex_cheriot_ex 623 \
+ibex_waive_expr $_core/g_cheriot_ex/u_ibex_cheriot_ex ibex_cheriot_ex 614 \
   "cheriot_setaddr_sel_i or pcc_cap_i or ..." [list event:tfcap1] \
   "event-or: tfcap1 is assigned in this always_comb (set_address_comb)"
-ibex_waive_expr $_core/cs_registers_i/gen_scr ibex_cs_registers.gen_scr_T 2067 \
+ibex_waive_expr $_core/cs_registers_i/gen_scr ibex_cs_registers.gen_scr_T 2065 \
   "csr_save_cause_i or mtvec_cap or ..." [list event:tr_cap event:tf_cap] \
   "event-or: tr_cap and tf_cap are assigned in this always_comb" \
   [ibex_both_cores cs_registers_i/gen_scr]
@@ -359,19 +359,6 @@ ibex_waive_expr $_core/if_stage_i/gen_icache/icache_i ibex_icache 507 \
   "tag_match_ic1 or ic_data_rdata_i or data_tweak_lw_ic1" [list event:data_tweak_lw_ic1] \
   "event-or: ICacheTweakInfection = 0 (core_ibex_tb_top.sv), so gen_no_tweak_infection ties\
    data_tweak_lw_ic1 to 0"
-ibex_waive_expr $_core/ex_block_i/alu_i/g_alu_rvb ibex_alu.g_alu_rvb_T 1205 \
-  "operator_i or operand_b_i or ..." \
-  [list event:butterfly_result event:invbutterfly_result event:bitcnt_partial_lsb_d \
-        event:bitcnt_partial_msb_d] \
-  "event-or: RV32B = RV32BOTEarlGrey, so gen_alu_rvb_not_full ties butterfly_result,\
-   invbutterfly_result, bitcnt_partial_lsb_d and bitcnt_partial_msb_d to 0" \
-  [ibex_both_cores ex_block_i/alu_i/g_alu_rvb]
-ibex_waive_expr $_core/ex_block_i/alu_i/g_alu_rvb/gen_alu_rvb_otearlgrey_full \
-  ibex_alu.g_alu_rvb_T.gen_alu_rvb_otearlgrey_full_T 674 "operand_a_i or shuffle_flip or ..." \
-  [list "event:SHUFFLE_MASK_NOT\[0\]" "event:SHUFFLE_MASK_NOT\[1\]" "event:SHUFFLE_MASK_NOT\[2\]" \
-        "event:SHUFFLE_MASK_NOT\[3\]"] \
-  "event-or: SHUFFLE_MASK_NOT is ~(SHUFFLE_MASK_L | SHUFFLE_MASK_R) of localparams, a constant" \
-  [ibex_both_cores ex_block_i/alu_i/g_alu_rvb/gen_alu_rvb_otearlgrey_full]
 
 # ---- ibex_decoder: ~illegal_c_insn_i in the JAL, AUIPC, AUICGP and CSC arms (CHERIoT on).
 # illegal_c_insn_i = 1 needs an expanded instruction the compressed decoder flags illegal. Its
@@ -383,12 +370,12 @@ ibex_waive_expr $_core/ex_block_i/alu_i/g_alu_rvb/gen_alu_rvb_otearlgrey_full \
 set _dec $_core/id_stage_i/decoder_i
 set _cinsn "no compressed instruction flagged illegal expands to this opcode\
   (ibex_compressed_decoder.sv)"
-foreach l {{317 318} {477 478} {899 900}} {
+foreach l {{279 280} {439 440} {835 836}} {
   ibex_waive_expr $_dec ibex_decoder $l \
     "((BaseIsa == BaseIsaRV32IorCHERIoT) & (cheriot_enable_i == IbexMuBiOn))\
      & (~ illegal_c_insn_i)" [list "0 | 1 1 1"] $_cinsn
 }
-foreach l {406 407 408} {
+foreach l {368 369 370} {
   ibex_waive_expr $_dec ibex_decoder $l "~ illegal_c_insn_i" [list "1"] $_cinsn
 }
 
@@ -423,7 +410,7 @@ ibex_waive_expr $_ctrl/g_wb_exceptions ibex_controller.g_wb_exceptions_T 328 \
 # rf_we_dec is 1 for every MUL/DIV: the decoder sets rf_we for OP-format MUL/DIV, and mult_en_o /
 # div_en_o are cleared by illegal_insn_o, which includes illegal_reg_16 -- the only thing that
 # clears rf_we_o without clearing them.
-ibex_waive_expr $_core/id_stage_i ibex_id_stage 956 "rf_we_dec & ex_valid_i" [list "0 -"] \
+ibex_waive_expr $_core/id_stage_i ibex_id_stage 945 "rf_we_dec & ex_valid_i" [list "0 -"] \
   "rf_we_dec is 1 whenever multdiv_en_dec is 1"
 # MULTI_CYCLE `multicycle_done & ready_wb_i` with ready_wb_i = 0. ~ready_wb_i is exactly
 # outstanding_memory_access (ibex_wb_stage.sv wb_done / outstanding_*_wb_o). id_fsm_q only takes
@@ -432,7 +419,7 @@ ibex_waive_expr $_core/id_stage_i ibex_id_stage 956 "rf_we_dec & ex_valid_i" [li
 # (For a load/store multicycle_done is ~stall_mem, 0 while an access is outstanding.) A killed
 # multi-cycle instruction leaves id_fsm_q at MULTI_CYCLE only until the next instruction
 # executes; its killers (wb_exception, fetch error, decode exception) leave nothing outstanding.
-ibex_waive_expr $_core/id_stage_i ibex_id_stage 959 "multicycle_done & ready_wb_i" [list "1 0"] \
+ibex_waive_expr $_core/id_stage_i ibex_id_stage 948 "multicycle_done & ready_wb_i" [list "1 0"] \
   "writeback has no outstanding access while ID/EX is in MULTI_CYCLE"
 # multdiv_ready_id_i = ready_wb_i, which is 0 only while writeback waits for a load/store
 # response (outstanding_memory_access). A MUL/DIV is enabled only with instr_executing, which
@@ -470,7 +457,7 @@ ibex_waive_expr $_ic ibex_icache 1008 "fill_ram_req_data | fill_data_q\[i\]" [li
 # mtvec initialisation value 0 with CHERIoT on: needs boot_addr_i[31:8] = 0 at BOOT_SET. The bench
 # drives boot_addr_i = BootAddr = 0x80000000 whenever rst_n is high (core_ibex_tb_top.sv; its
 # complement 0x7FFFFF00 only during reset, when csr_mtvec_init_i is 0): a constant tie-off.
-ibex_waive_expr $_core/cs_registers_i ibex_cs_registers 740 \
+ibex_waive_expr $_core/cs_registers_i ibex_cs_registers 738 \
   "csr_mtvec_init_i ? {boot_addr_i\[31:8\], 6'b000000, 1'b0, (~ ((BaseIsa ==\
    BaseIsaRV32IorCHERIoT) & (cheriot_enable_i == IbexMuBiOn)))} : {csr_wdata_int\[31:8\],\
    6'b000000, 1'b0, (~ ((BaseIsa == BaseIsaRV32IorCHERIoT) & (cheriot_enable_i ==\
@@ -481,9 +468,9 @@ ibex_waive_expr $_core/cs_registers_i ibex_cs_registers 740 \
 # whenever csr_restore_dret_i is.
 set _dret "csr_restore_dret_i only with debug_mode_i: a dret outside debug mode is an illegal\
   instruction"
-ibex_waive_expr $_core/cs_registers_i/gen_scr ibex_cs_registers.gen_scr_T 2075 \
+ibex_waive_expr $_core/cs_registers_i/gen_scr ibex_cs_registers.gen_scr_T 2073 \
   "csr_restore_dret_i & debug_mode_i" [list "1 0"] $_dret [ibex_both_cores cs_registers_i/gen_scr]
-ibex_waive_expr $_core/cs_registers_i/gen_scr ibex_cs_registers.gen_scr_T 2086 \
+ibex_waive_expr $_core/cs_registers_i/gen_scr ibex_cs_registers.gen_scr_T 2084 \
   "(csr_save_cause_i | csr_restore_mret_i) | (csr_restore_dret_i & debug_mode_i)" \
   [list "0 | 0 0 1 0"] $_dret [ibex_both_cores cs_registers_i/gen_scr]
 
@@ -492,7 +479,7 @@ ibex_waive_expr $_core/cs_registers_i/gen_scr ibex_cs_registers.gen_scr_T 2086 \
 # in ID: rvfi_irq_valid is set only for the cycle after IRQ_TAKEN with handle_irq and ID empty.
 # IRQ_TAKEN raises pc_set, so nothing enters ID at that edge and instr_valid_id_q is 0 in the next
 # cycle, where instr_valid_id_d is therefore instr_new_id_d (ibex_if_stage.sv).
-ibex_waive_expr $_core ibex_core 2076 \
+ibex_waive_expr $_core ibex_core 2073 \
   "(if_stage_i.instr_valid_id_d & if_stage_i.instr_new_id_d) | rvfi_irq_valid" [list "1 | 1 0 1"] \
   "rvfi_irq_valid follows IRQ_TAKEN (pc_set): ID is empty, instr_valid_id_d = instr_new_id_d"
 

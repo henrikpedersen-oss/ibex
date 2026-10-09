@@ -877,10 +877,9 @@ module ibex_core import ibex_pkg::*; import ibex_cheriot_pkg::*; #(
     .rst_ni(rst_ni),
 
     // ALU signal from ID stage
-    .alu_operator_i         (alu_operator_ex),
-    .alu_operand_a_i        (alu_operand_a_ex),
-    .alu_operand_b_i        (alu_operand_b_ex),
-    .alu_instr_first_cycle_i(instr_first_cycle_id),
+    .alu_operator_i (alu_operator_ex),
+    .alu_operand_a_i(alu_operand_a_ex),
+    .alu_operand_b_i(alu_operand_b_ex),
 
     // Branch target ALU signal from ID stage
     .bt_a_operand_i(bt_a_operand),
@@ -1000,8 +999,6 @@ module ibex_core import ibex_pkg::*; import ibex_cheriot_pkg::*; #(
       .csr_mshwmb_i            (csr_mshwmb),
       .csr_mshwm_set_o         (csr_mshwm_set),
       .csr_mshwm_new_o         (csr_mshwm_new),
-      .ztop_rdata_i            (32'h0),
-      .ztop_rcap_i             (NULL_CAP),
       .csr_dbg_tclr_fault_i    (csr_dbg_tclr_fault)
     );
 
@@ -2522,6 +2519,8 @@ module ibex_core import ibex_pkg::*; import ibex_cheriot_pkg::*; #(
 
   // Certain parameter combinations are not supported
   `ASSERT_INIT(IllegalParamSecure, !(SecureIbex && (RV32M == RV32MNone)))
+  `ASSERT_INIT(IllegalParamCHERIoTNoWriteback,
+               !((BaseIsa == BaseIsaRV32IorCHERIoT) && !WritebackStage))
 
   // If the ID stage signals its ready the mult/div FSMs must be idle in the following cycle
   // `ASSERT(MultDivFSMIdleOnIdReady, id_in_ready |=> ex_block_i.sva_multdiv_fsm_idle)

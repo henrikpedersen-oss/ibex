@@ -143,10 +143,11 @@
 - test: cheriot_illegal_sweep_sail_only
   desc: >
     The encodings CHERIoT-Sail rejects but the RTL executes in CHERIoT mode, written to the
-    model (the GAP-CS-3 items): the eleven Zcb instructions, the draft bit-manipulation
-    instructions of RV32BOTEarlGrey outside Zba/Zbb/Zbc/Zbs/Zbkb/Zbkx, and CSRs the RTL
-    implements and the Sail platform does not (mconfigptr, mcounteren, menvcfg[h], HPM,
-    tdata1-3, m/s/mscontext, cpuctrlsts, secureseed). Same mechanism as
+    model (the GAP-CS-3 items): the eleven Zcb instructions (to be added to CHERIoT-Sail),
+    and CSRs the RTL implements and the Sail platform does not (mconfigptr, mcounteren,
+    menvcfg[h], HPM, tdata1-3, m/s/mscontext, cpuctrlsts, secureseed). The draft
+    bit-manipulation encodings in the table are illegal in the RTL too since lowRISC/ibex#2459
+    and pass. Same mechanism as
     cheriot_illegal_sweep. Fails on the current RTL by design: each failure code
     (2000 + 4 * slot + kind) identifies a disagreement for triage; 1999 = liveness.
   iterations: 1

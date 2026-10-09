@@ -219,8 +219,8 @@ FAMILIES = [
     ("cheriot_illegal_instructions", "V2", ["directed", "cheriot"],
      "Illegal instructions with the expected cause, mtval and MEPCC: in CHERIoT mode a sweep of "
      "every reserved encoding class on which CHERIoT-Sail and the RTL agree (mcause 2, mtval 0), "
-     "a second sweep of the encodings Sail rejects and the RTL executes (Zcb, draft "
-     "bit-manipulation, CSRs absent from the Sail platform; GAP-CS-3, expected to fail until each "
+     "a second sweep of the encodings Sail rejects and the RTL executes (Zcb, CSRs absent from "
+     "the Sail platform; GAP-CS-3, expected to fail until each "
      "disagreement is resolved), one unwaived test per encoding the specification makes illegal "
      "and the RTL accepted (CGetOffset: cheriot_cgetoffset_illegal; every CSR instruction form "
      "on cdbg_ctrl: cheriot_cdbg_ctrl_illegal), and with the pin Off every CHERIoT-only "
@@ -330,11 +330,12 @@ FAMILIES = [
      "measures the ports (boot_addr_i[7:0] waived: 256-byte aligned).",
      directed(lambda t: t["name"] in ("ibex_mhartid", "ibex_mhartid_ones", "ibex_boot_addr"))),
     ("rv32_decode_corners", "V2", ["directed"],
-     "Decode corners the random tests do not reach: packu and packh results (draft 0.93 Zbp); "
-     "reserved OP-IMM encodings (unary group rs2 = 15, srli/srai with shamt[5] = 1) raise an "
+     "Decode corners the random tests do not reach: the packh result (Zbkb); packu (draft Zbp "
+     "only, gone since lowRISC/ibex#2459) and "
+     "the reserved OP-IMM encodings (unary group rs2 = 15, srli/srai with shamt[5] = 1) raise an "
      "illegal-instruction exception with mtval = the instruction and leave rd unwritten; every "
      "mhpmcounter low half is writable and the unavailable ones read 0. rori and bexti with "
-     "shamt[5] = 1 likewise, without stalling ID as a multi-cycle ALU operation "
+     "shamt[5] = 1 likewise "
      "(cov_expr_rv_misc).",
      directed(lambda t: t["name"] in ("ibex_decode_holes", "cov_expr_rv_misc"))),
     ("trap_timing_hazards", "V2", ["directed", "cheriot"],
@@ -419,7 +420,7 @@ TITLES = {
                       "trigger CSRs and single step",
     "cheriot_cpuctrl_hardening": "Dummy instructions and data-independent timing in CHERIoT mode",
     "port_toggle": "ibex_top port toggle coverage for hart_id_i and boot_addr_i",
-    "rv32_decode_corners": "packu/packh, reserved OP-IMM encodings and HPM counter writes",
+    "rv32_decode_corners": "packh, reserved OP-IMM encodings and HPM counter writes",
     "trap_timing_hazards": "Debug requests, NMIs and fetch drops timed to a data access's grant",
     "integrity_directed": "Directed bus integrity errors: internal NMI and fetch faults",
     "debug_module": "The real debug module driven over DMI, RISC-V and CHERIoT mode",

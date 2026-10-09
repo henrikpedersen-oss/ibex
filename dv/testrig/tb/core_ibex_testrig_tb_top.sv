@@ -30,7 +30,7 @@ module core_ibex_testrig_tb_top;
   `define IBEX_CFG_RV32M ibex_pkg::RV32MSingleCycle
 `endif
 `ifndef IBEX_CFG_RV32B
-  `define IBEX_CFG_RV32B ibex_pkg::RV32BOTEarlGrey
+  `define IBEX_CFG_RV32B ibex_pkg::RV32BFull
 `endif
 `ifndef IBEX_CFG_RV32ZC
   `define IBEX_CFG_RV32ZC ibex_pkg::RV32ZcaZcbZcmp

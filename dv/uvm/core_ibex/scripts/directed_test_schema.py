@@ -52,6 +52,7 @@ class DConfig(pydantic.BaseModel):  # noqa
     rtl_test: str
     rtl_params: dict
     timeout_s: pydantic.conint(gt=0)
+    sim_opts: Optional[str] = None  # extra plusargs for the simulator
 
     # Directed Test Build Options
     gcc_opts: str  # any options that don't specify a path eg. "-O3 -g -static"
