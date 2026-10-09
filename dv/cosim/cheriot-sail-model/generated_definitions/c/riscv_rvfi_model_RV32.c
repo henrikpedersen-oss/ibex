@@ -47034,6 +47034,9 @@ bool zis_CSR_defined(uint64_t zcsr, enum zPrivilege zp)
   // Under review (TODO.md): an architecture call, not upstream behaviour.
   if (zcsr == UINT64_C(0xC00) || zcsr == UINT64_C(0xC02) ||
       zcsr == UINT64_C(0xC80) || zcsr == UINT64_C(0xC82)) return true;
+  // Local patch (GAP-CS-3), mirrors riscv_sys_control.sail is_CSR_defined: CHERIoT-Ibex's
+  // implementation-defined CSRs (c_emulator/ibex_platform_csrs.c) exist in machine mode.
+  if (zp == zMachine && ibex_csr_defined(zcsr)) return true;
 
   bool z6zE538;
   bool z3zE1759;
@@ -48119,6 +48122,9 @@ void startup_zcheck_Counteren(void)
 bool zcheck_Counteren(uint64_t zcsr, enum zPrivilege zp)
 {
   __label__ case_2850, case_2849, case_2848, case_2847, case_2846, case_2845, case_2844, finish_match_2843, end_function_2851, end_block_exception_2852;
+  // Local patch (GAP-CS-3), mirrors riscv_sys_control.sail check_Counteren: Ibex's
+  // hpmcounter3-31 are readable in machine mode (mcounteren gates only lower modes).
+  if (zp == zMachine && ibex_csr_defined(zcsr)) return true;
 
   bool z6zE541;
   struct ztuple_z8z5bv12zCz0z5enumz0zzPrivilegez9 z3zE1864;
@@ -49565,6 +49571,9 @@ void startup_ztrap_handler(void)
 uint64_t ztrap_handler(enum zPrivilege zdel_priv, bool zintr, uint64_t zc, uint64_t zpc, struct zoptionzIbzK zinfo, struct zoptionzIuzK zext)
 {
   __label__ case_2912, case_2907, case_2906, finish_match_2905, end_function_2913, end_block_exception_2914;
+  // Local patch (GAP-CS-3), mirrors riscv_sys_control.sail trap_handler: a synchronous
+  // exception sets cpuctrlsts.sync_exc_seen/double_fault_seen (ibex_cs_registers.sv:936-946).
+  if (!zintr) ibex_csr_sync_exception(UNIT);
 
   uint64_t z6zE551;
   unit z3zE1935;
@@ -50403,6 +50412,9 @@ void startup_zexception_handler(void)
 uint64_t zexception_handler(enum zPrivilege zcur_priv, struct zctl_result zctl, uint64_t zpc)
 {
   __label__ case_2920, case_2919, case_2918, case_2917, finish_match_2916, end_function_2921, end_block_exception_2922;
+  // Local patch (GAP-CS-3), mirrors riscv_sys_control.sail exception_handler CTL_MRET: MRET
+  // clears cpuctrlsts.sync_exc_seen (ibex_cs_registers.sv:963-966).
+  if (zctl.kind == Kind_zCTL_MRET) ibex_csr_mret(UNIT);
 
   uint64_t z6zE552;
   struct ztuple_z8z5enumz0zzPrivilegezCz0z5unionz0zzctl_resultz9 z3zE1989;
@@ -51396,6 +51408,8 @@ void startup_zinit_sys(void)
 unit zinit_sys(unit z3zE2029)
 {
   __label__ end_function_2930, end_block_exception_2931;
+  // Local patch (GAP-CS-3), mirrors riscv_sys_control.sail init_sys: Ibex's platform CSRs reset.
+  ibex_csr_reset(UNIT);
 
   unit z6zE555;
   zcur_privilege = zMachine;
@@ -53115,6 +53129,9 @@ end_block_exception_3000: ;
 bool zext_check_CSR(uint64_t zcsrno, enum zPrivilege zp, bool zisWrite)
 {
   __label__ end_function_3014, end_block_exception_3015;
+  // Local patch (GAP-CS-3), mirrors cheri_addr_checks.sail ext_check_CSR: reads of Ibex's
+  // hpmcounter3-31(h) need no ASR (CHERIoT ISA CSR allowlist; ibex_decoder.sv:780-798).
+  if (ibex_csr_read_without_asr(zcsrno) && !zisWrite) return true;
 
   bool z6zE573;
   bool z2zE1750;
@@ -68109,6 +68126,8 @@ void startup_zreadCSR(void)
 uint64_t zreadCSR(uint64_t zcsr)
 {
   __label__ end_function_3960, end_block_exception_3961;
+  // Local patch (GAP-CS-3), mirrors riscv_insts_zicsr.sail readCSR: Ibex's platform CSRs.
+  if (ibex_csr_defined(zcsr)) return ibex_csr_read(zcsr);
 
   uint64_t z6zE726;
   uint64_t zres;
@@ -69339,6 +69358,12 @@ void startup_zwriteCSR(void)
 unit zwriteCSR(uint64_t zcsr, uint64_t zvalue)
 {
   __label__ case_4014, case_4013, finish_match_4012, end_function_4015, end_block_exception_4016;
+  // Local patch (GAP-CS-3), mirrors riscv_insts_zicsr.sail writeCSR: Ibex's platform CSRs. The
+  // model's own mcountinhibit (bits 0 and 2, gating its minstret) follows the same write.
+  if (ibex_csr_defined(zcsr)) {
+    if (zcsr == UINT64_C(0x320)) zmcountinhibit = zlegalizze_mcountinhibit(zmcountinhibit, zvalue);
+    return ibex_csr_write(zcsr, zvalue);
+  }
 
   unit z6zE727;
   struct zoptionzIbzK zres;

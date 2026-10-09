@@ -307,7 +307,6 @@ module ibex_cheriot_ex import ibex_cheriot_pkg::*; import ibex_pkg::*; #(
             CFIELD_TAG:  result_data_o = {31'h0, rf_fullcap_a.valid};
             CFIELD_ADDR:   result_data_o = rf_rdata_a;
             CFIELD_HIGH:   result_data_o = 32'(cheriot_cap_to_mem(rf_rcap_a));
-            CFIELD_OFFSET: result_data_o = rf_rdata_a - rf_fullcap_a.base32;
             default:     result_data_o = 32'h0;
           endcase
         end
@@ -980,16 +979,20 @@ module ibex_cheriot_ex import ibex_cheriot_pkg::*; import ibex_pkg::*; #(
   //
 
   // Notes,
-  //  - this should also take care of unaligned access (which increases addr only)
-  //    (although stack access should not have any)
+  //  - a misaligned store (which stack accesses should not have) is handled by the
+  //    ~addr_incr_req_i term, see the last bullet; its second request does not count.
   //  - it's also ok if the prev instr gets faulted in WB, since stall_mem/data_req_allowed
   //    logic ensures
   //    that lsu_req won't be issued till memory response/error comes back
   //  - what if the instruction gets faulted later in WB stage? Also fine since worst case
   //    even if HM is
   //    too aggressive we will just have to spend more time zeroing out more stack area.
+  //  - only the start address of a store counts (CHERIoT ISA, stack high-water mark; Sail
+  //    ext_check_phys_mem_write): the request for the second half of a misaligned store
+  //    (addr_incr_req_i) must not update mshwm. The second word of a CSC is skipped as well;
+  //    it is in the same 16-byte granule as the first, so the result is the same.
 
-  assign csr_mshwm_set_o = lsu_req_o & ~lsu_cheriot_err_o & lsu_we_o
+  assign csr_mshwm_set_o = lsu_req_o & ~lsu_cheriot_err_o & lsu_we_o & ~addr_incr_req_i
                            & (lsu_addr_o[31:4] >= csr_mshwmb_i[31:4])
                            & (lsu_addr_o[31:4] < csr_mshwm_i[31:4]);
   assign csr_mshwm_new_o = {lsu_addr_o[31:4], 4'h0};

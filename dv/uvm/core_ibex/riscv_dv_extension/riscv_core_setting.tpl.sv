@@ -101,6 +101,17 @@ int num_of_kernel_data_pages = 0;
 int kernel_data_page_size = 4096;
 
 // Kernel Stack section word length
+//
+// DEAD SETTING -- changing this has no effect. It is package scope (this file is `include`d
+// into riscv_instr_pkg) and nothing reads it: riscv_asm_program_gen::gen_kernel_stack_section()
+// sizes the section from cfg.kernel_stack_len, a field of riscv_instr_gen_config whose vendored
+// default is 4000. Set the real value in ibex_asm_program_gen::gen_program(); see the note there
+// for why it matters (kernel stack overflow silently overwrites .text).
+//
+// Verified on nyx 2026-09-22: with gen_program() setting 65536, the generated .kernel_stack
+// section reads `.rept 65535` while this variable still says 5000. Note when checking this that
+// a test.S contains two `.rept` directives -- the *first* belongs to .user_stack (cfg.stack_len,
+// a different knob, default 5000 -> `.rept 4999`). Match on kernel_stack_start, not on `.rept`.
 int kernel_stack_len = 5000;
 
 // Number of instructions for each kernel program

@@ -6,7 +6,9 @@
 
 TB-COMPILE-STAMP = $(METADATA-DIR)/tb.compile.stamp
 rtl_tb_compile: $(METADATA-DIR)/tb.compile.stamp
-rtl-tb-compile-var-deps := SIMULATOR COV WAVES # Rebuild if these change
+# Rebuild if these change. DM=1 builds with the real debug module (compile_tb.py), a different
+# snapshot in the same out/build directory, so switching DM must rebuild in both directions.
+rtl-tb-compile-var-deps := SIMULATOR COV WAVES DM
 
 rtl_sim_run: $(rtl-sim-logs)
 

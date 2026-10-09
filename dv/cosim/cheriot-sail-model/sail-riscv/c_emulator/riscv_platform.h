@@ -43,3 +43,8 @@ unit plat_term_write(mach_bits);
 mach_bits plat_htif_tohost(unit);
 
 unit memea(mach_bits, sail_int);
+
+// Local (ibex_cheriot_verification, GAP-CS-3): CHERIoT-Ibex's implementation-defined CSRs, the
+// ibex_csr_* externs of riscv_sys_control.sail. The generated C reaches them through this header
+// (-c_include riscv_platform.h).
+#include "ibex_platform_csrs.h"

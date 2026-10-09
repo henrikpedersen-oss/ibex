@@ -31,12 +31,11 @@
 #   csetaddr a0, a0, t0     = .word 0x2055055B  (rs2=x5=t0; set cursor)
 #   cspecialrw x0, a0, mtcc  = .word 0x03C5005B  (scr=28; write MTCC, rd=x0)
 #   cspecialrw x0, a0, mepcc = .word 0x03F5005B  (scr=31; write MEPCC, rd=x0)
-# Note: CAUIPCC is used instead of cspecialr+mtcc/mepcc because csrw mtvec/mepc
-# in CHERIoT-Sail updates MTCC/MEPCC with an integer-derived cap (tag may be 0).
-# Reading that back via cspecialr then propagating tag=0 through csetaddr and
-# writing to MTCC/MEPCC leaves ibex with a null-cap SCR, causing "failed to step"
-# in CHERIoT-Sail cosim.  PCC (from CAUIPCC) always has tag=1 and is identical
-# in both ibex and CHERIoT-Sail, so no cosim divergence occurs.
+# Note: MTCC/MEPCC are written only through cspecialrw, from a capability derived
+# from PCC (CAUIPCC, always tag=1). csrw mtvec/mepc is not an alternative: in
+# upstream CHERIoT-Sail both writes are internal_error("unsupported"); the cosim's
+# model ignores an mtvec write and still has no mepc write; and the RTL raises an
+# illegal instruction on any mtvec/mepc access in CHERIoT mode (REQ_SCR_07).
 # =============================================================================
 
 .globl main

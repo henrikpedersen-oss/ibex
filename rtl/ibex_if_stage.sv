@@ -516,6 +516,8 @@ module ibex_if_stage import ibex_pkg::*; import ibex_cheriot_pkg::*; #(
       .dummy_instr_mask_i   (dummy_instr_mask_i),
       .dummy_instr_seed_en_i(dummy_instr_seed_en_i),
       .dummy_instr_seed_i   (dummy_instr_seed_i),
+      .reg16_only_i         ((BaseIsa == BaseIsaRV32IorCHERIoT) &
+                             (cheriot_enable_i == IbexMuBiOn)),
       .fetch_valid_i        (fetch_valid),
       .id_in_ready_i        (id_in_ready_i),
       .insert_dummy_instr_o (insert_dummy_instr),

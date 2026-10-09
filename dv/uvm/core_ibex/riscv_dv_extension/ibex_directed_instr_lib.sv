@@ -411,3 +411,90 @@ class ibex_make_pmp_region_exec_stream extends riscv_directed_instr_stream;
     super.post_randomize();
   endfunction
 endclass
+
+// Reads the counter CSRs that CHERIoT permits without the ASR permission.
+//
+// ext_check_CSR() in the CHERIoT Sail model (cheri_addr_checks.sail) admits reads of
+// mcycle/minstret/mcycleh/minstreth and the unprivileged cycle/time/instret shadows
+// while PCC lacks ASR, and requires ASR for any write. An ibex_decoder safe-list
+// covering only 0xC00-0xC9F -- omitting the four 0xB counters -- made CHERIoT RTOS
+// hang on "csrr s1, mcycle" in an infinite ASR-violation loop.
+//
+// NOTE: reads only for now -- this does not yet clear ASR, so it exercises the CSR
+// decode path rather than the permission check. Two things must be settled first:
+//   1. riscv-dv cannot encode capability instructions at all. riscv_instr_name_t has
+//      no CHERIoT entries and src/isa/custom/ is an unfilled stub whose convert2asm()
+//      returns "nop", so candperm/auipcc need a convert2asm() override to emit them.
+//   2. candperm is monotonic: once ASR leaves PCC nothing later in the program can
+//      restore it, so this cannot be mixed with CSR-writing streams and likely needs
+//      its own testlist entry.
+// TestRIG's clearASR helper is the obvious precedent, but its trailing jalr traps on
+// every execution (21/21 in a sail-vs-sail run), so it is not a sequence to copy
+// without first establishing why.
+class ibex_cheriot_asr_stream extends riscv_directed_instr_stream;
+
+  int unsigned num_of_avail_regs = 4;
+
+  // S0:A5 is x8-x15, chosen for two independent reasons.
+  //
+  // CHERIoT: ibex_decoder.sv's illegal_reg_16 makes ANY access to x16-x31 an illegal
+  // instruction once cheriot_enable_i is asserted -- it checks rf_ren_a/rf_ren_b/rs3
+  // and rd, so plain loads and stores trip it too, not just capability opcodes. In the
+  // riscv_reg_t enum A5 is x15 and A6 is x16, so this range sits exactly on the legal
+  // side of that boundary. Do not widen it past A5.
+  //
+  // riscv-dv hygiene: it also matches riscv_instr_stream::randomize_avail_regs().
+  // Excluding cfg.reserved_regs alone would not be enough, because cfg.sp/cfg.tp are
+  // themselves rand -- reserved_regs holds whichever registers riscv-dv picked for
+  // those roles, not the literal SP/TP. Without the range bound this stream duly
+  // emitted "csrrs tp".
+  constraint avail_regs_c {
+    unique {avail_regs};
+    foreach (avail_regs[i]) {
+      avail_regs[i] inside {[S0 : A5]};
+      !(avail_regs[i] inside {cfg.reserved_regs});
+      avail_regs[i] != ZERO;
+    }
+  }
+
+  `uvm_object_utils(ibex_cheriot_asr_stream)
+
+  function new(string name = "");
+    super.new(name);
+  endfunction
+
+  function void pre_randomize();
+    avail_regs = new[num_of_avail_regs];
+    super.pre_randomize();
+  endfunction
+
+  function void post_randomize();
+    riscv_instr      csrr_instr;
+    privileged_reg_t counter_csrs[$];
+    int unsigned     idx;
+
+    counter_csrs = {MCYCLE, MINSTRET, MCYCLEH, MINSTRETH,
+                    CYCLE,  TIME,     INSTRET,
+                    CYCLEH, TIMEH,    INSTRETH};
+
+    initialize_instr_list(1);
+
+    idx = $urandom_range(counter_csrs.size() - 1, 0);
+
+    // csrr rd, <csr> is CSRRS with rs1=zero: the read-only encoding, and the only
+    // form the Sail allow-list admits without ASR.
+    csrr_instr        = riscv_instr::get_instr(CSRRS);
+    csrr_instr.atomic = 1'b0;
+    csrr_instr.csr    = counter_csrs[idx];
+    csrr_instr.rs1    = ZERO;
+    // avail_regs, not cfg.gpr: the latter is "reserved for various hardcoded
+    // routines", so writing it from a stream can corrupt riscv-dv's own state.
+    // An earlier version of this used cfg.gpr and duly picked tp.
+    csrr_instr.rd     = avail_regs[idx % num_of_avail_regs];
+
+    instr_list = {csrr_instr};
+
+    super.post_randomize();
+  endfunction
+
+endclass

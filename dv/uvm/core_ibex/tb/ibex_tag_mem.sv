@@ -94,18 +94,28 @@ module ibex_tag_mem (
   logic keeps_tag;
   assign keeps_tag = wtag_i && (be_i == 4'b1111);
 
+  // One process owns pending_q: pushed on an accepted request, popped on a real response. The pop
+  // comes first and sees the queue as it was before this edge, so a response retires a request
+  // accepted on an earlier cycle, never one accepted on this edge. (Push and pop used to be two
+  // always_ff blocks: VCS rejects a variable driven by two always_ff processes, and with an empty
+  // queue a same-cycle request + response depended on which block ran first.)
   always_ff @(posedge clk_i or negedge rst_ni) begin
     if (!rst_ni) begin
       tag_mem.delete();
       pending_q.delete();
-    end else if (req_i && gnt_i) begin
-      if (we_i) begin
-        tag_mem[granule] = keeps_tag;
-        // Queued so the response stream stays in lockstep; the tag is unused.
-        pending_q.push_back('{is_read: 1'b0, tag: 1'b0});
-      end else begin
-        pending_q.push_back('{is_read: 1'b1,
-                              tag    : tag_mem.exists(granule) ? tag_mem[granule] : 1'b0});
+    end else begin
+      if (real_rvalid && (pending_q.size() > 0)) begin
+        void'(pending_q.pop_front());
+      end
+      if (req_i && gnt_i) begin
+        if (we_i) begin
+          tag_mem[granule] = keeps_tag;
+          // Queued so the response stream stays in lockstep; the tag is unused.
+          pending_q.push_back('{is_read: 1'b0, tag: 1'b0});
+        end else begin
+          pending_q.push_back('{is_read: 1'b1,
+                                tag    : tag_mem.exists(granule) ? tag_mem[granule] : 1'b0});
+        end
       end
     end
   end
@@ -114,30 +124,37 @@ module ibex_tag_mem (
   // is presented combinationally from the head of the queue and only retired at
   // the clock edge. Registering it on rvalid would deliver it a cycle late.
   // Guarded so a stray rvalid cannot underflow the queue -- returning 0 then
-  // matches the old tie-off.
-  assign rtag_o = (real_rvalid && (pending_q.size() > 0) && pending_q[0].is_read) ?
-                  pending_q[0].tag : 1'b0;
+  // matches the old tie-off. Procedural, not a continuous assign: a queue may not
+  // appear in a non-procedural context (IEEE 1800-2017 7.10); VCS rejects the
+  // assign form (Error-[DTINPCIL]), which Xcelium tolerated.
+  always_comb begin
+    rtag_o = 1'b0;
+    if (real_rvalid && (pending_q.size() > 0) && pending_q[0].is_read) begin
+      rtag_o = pending_q[0].tag;
+    end
+  end
 
-  // TEMPORARY instrumentation -- remove once the capability round-trip is
-  // understood. data_tag_o is driven by TRVK's downstream_tag_o, not straight
-  // from the LSU, so it is not obvious that wtag_i is phase-aligned with
-  // req/gnt the way this module assumes.
+  // Debug instrumentation for the capability round-trip: data_tag_o is driven by
+  // TRVK's downstream_tag_o, not straight from the LSU, so it is not obvious
+  // that wtag_i is phase-aligned with req/gnt the way this module assumes.
+  //
+  // Off unless +tagmem_probe=1. The RSP branch below fires on every rvalid, so
+  // on a long random test this is most cycles -- together with the TRVK probe in
+  // core_ibex_tb_top.sv these dominated the 135 MB rtl_sim.log files in the
+  // 2026-09-23 regression.
+  bit tagmem_probe_en;
+  initial tagmem_probe_en = $test$plusargs("tagmem_probe");
+
   always_ff @(posedge clk_i) begin
-    if (rst_ni && req_i && gnt_i && (addr_i[31:12] == 20'h80080)) begin
+    if (tagmem_probe_en && rst_ni && req_i && gnt_i && (addr_i[31:12] == 20'h80080)) begin
       $display("[TAGMEM] %0t %s addr=%08h be=%b wtag=%b -> granule_tag=%b",
                $time, we_i ? "WR" : "RD", addr_i, be_i, wtag_i,
                we_i ? keeps_tag : (tag_mem.exists(granule) ? tag_mem[granule] : 1'b0));
     end
-    if (rst_ni && rvalid_i) begin // NOTE: prints spurious too, deliberately
+    if (tagmem_probe_en && rst_ni && rvalid_i) begin // NOTE: prints spurious too, deliberately
       $display("[TAGMEM] %0t RSP is_read=%b rtag=%b depth=%0d", $time,
                (pending_q.size() > 0) ? pending_q[0].is_read : 1'b0,
                rtag_o, pending_q.size());
-    end
-  end
-
-  always_ff @(posedge clk_i) begin
-    if (rst_ni && real_rvalid && (pending_q.size() > 0)) begin
-      void'(pending_q.pop_front());
     end
   end
 

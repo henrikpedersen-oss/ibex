@@ -42,8 +42,11 @@
 //   +revbm_revoke_list=<b>:<s>,..  range: further [base, base+size) ranges, comma separated.
 //   +revbm_err_pct=<0..100>        any active mode: each bitmap word answered with an error.
 //   +revbm_err_list=<b>:<s>,..     any active mode: words covering these address ranges err.
-//   +revbm_err_kind=dev|intg|mixed default dev: trvk_revbm_err_i; intg: a flipped ECC bit
-//                                  (needs MemECC); mixed: per word.
+//   +revbm_err_kind=dev|intg|both|mixed
+//                                  default dev: trvk_revbm_err_i; intg: a flipped ECC bit
+//                                  (needs MemECC); both: the two together on the same
+//                                  response (a bus may return both; TRVK ORs them); mixed:
+//                                  dev or intg, per word.
 //   +revbm_heap_base=<hex>         trvk_heap_base_addr_i, 8-byte aligned. Default: drawn per
 //                                  seed (see draw_heap_base) so both the in-range and the
 //                                  out-of-range TRVK paths are reached across a regression.
@@ -72,7 +75,9 @@ package ibex_revbm_pkg;
   parameter int unsigned SailShadowBase     = 32'h8300_0000;
 
   typedef enum int unsigned {RevbmOff, RevbmRandom, RevbmRange} revbm_mode_e;
-  typedef enum int unsigned {RevbmErrDev, RevbmErrIntg, RevbmErrMixed} revbm_err_kind_e;
+  typedef enum int unsigned {
+    RevbmErrDev, RevbmErrIntg, RevbmErrBoth, RevbmErrMixed
+  } revbm_err_kind_e;
 
   ///////////
   // State //
@@ -91,7 +96,8 @@ package ibex_revbm_pkg;
 
   bit [31:0]       revoked_words [NumWords];  // bit g[4:0] of word g>>5: granule g revoked
   bit              err_words     [NumWords];  // word answered with an error
-  bit              err_is_intg   [NumWords];  // ...and the error is an integrity error
+  bit              err_is_dev    [NumWords];  // ...and the error includes a device error
+  bit              err_is_intg   [NumWords];  // ...and the error includes an integrity error
 
   int unsigned     num_revoked;
   int unsigned     num_err_words;
@@ -272,8 +278,9 @@ package ibex_revbm_pkg;
       case (k)
         "dev":   err_kind = RevbmErrDev;
         "intg":  err_kind = RevbmErrIntg;
+        "both":  err_kind = RevbmErrBoth;
         "mixed": err_kind = RevbmErrMixed;
-        default: $fatal(1, "[REVBM] +revbm_err_kind=%s: expected dev, intg or mixed", k);
+        default: $fatal(1, "[REVBM] +revbm_err_kind=%s: expected dev, intg, both or mixed", k);
       endcase
     end
 
@@ -301,6 +308,7 @@ package ibex_revbm_pkg;
     foreach (revoked_words[w]) begin
       revoked_words[w] = '0;
       err_words[w]     = 1'b0;
+      err_is_dev[w]    = 1'b0;
       err_is_intg[w]   = 1'b0;
     end
     num_unmodelable = 0;
@@ -345,8 +353,10 @@ package ibex_revbm_pkg;
         case (err_kind)
           RevbmErrDev:  err_is_intg[w] = 1'b0;
           RevbmErrIntg: err_is_intg[w] = 1'b1;
+          RevbmErrBoth: err_is_intg[w] = 1'b1;
           default:      err_is_intg[w] = mix32(seed ^ 32'h1A76_0003 ^ w) % 2 == 1;
         endcase
+        err_is_dev[w] = (err_kind == RevbmErrBoth) || !err_is_intg[w];
       end
     end
 
@@ -389,9 +399,17 @@ package ibex_revbm_pkg;
     return err_words[w];
   endfunction
 
+  // Bitmap word w is answered with an integrity error (a flipped ECC bit).
   function automatic bit word_err_is_intg(int unsigned w);
     init();
     return err_words[w] && err_is_intg[w];
+  endfunction
+
+  // Bitmap word w is answered with trvk_revbm_err_i (alone, or with an integrity error when
+  // +revbm_err_kind=both).
+  function automatic bit word_dev_err(int unsigned w);
+    init();
+    return err_words[w] && err_is_dev[w];
   endfunction
 
   // TRVK's verdict for TRVK granule g: an error revokes the whole word (ibex_trvk.sv

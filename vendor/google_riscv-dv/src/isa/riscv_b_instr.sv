@@ -344,7 +344,8 @@ class riscv_b_instr extends riscv_instr;
                SHFL, SHFLW, UNSHFL, UNSHFLW, SHFLI, UNSHFLI,
                XPERM_N, XPERM_B, XPERM_H, XPERM_W,
                SLO, SLOW, SLOI, SLOIW,
-               SRO, SROW, SROI, SROIW
+               SRO, SROW, SROI, SROIW,
+               PACK, PACKW, PACKU, PACKUW, PACKH
                }) ||
            (ZBE inside {cfg.enable_bitmanip_groups} && instr_name inside {
                BCOMPRESS, BCOMPRESSW,

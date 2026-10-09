@@ -75,6 +75,13 @@ def _get_x_opts(config_name: str, simulator: str, stage: str) -> str:
     output_type = (f'{simulator}_{stage}_opts'
                    if specify_which_opts else f'{simulator}_opts')
 
+    # Xcelium: the configuration goes in as IBEX_CFG_<param> defines, not as
+    # -defparam core_ibex_tb_top.<param>: a -defparam on the top-level module
+    # makes the Jasper UNR App (xrun -unr, make formal-cov-unr) discard every
+    # coverage item of the snapshot (see xlm_define_opts in ibex_config.py).
+    if simulator == 'xlm':
+        output_type = 'xlm_define_opts'
+
     return _run_ibex_config(config_name, output_type)
 
 

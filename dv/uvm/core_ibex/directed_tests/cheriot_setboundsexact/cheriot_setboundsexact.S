@@ -16,13 +16,18 @@
 #   - len=256 (2^8): exactly representable at exponent 0 -> no rounding
 #     needed -> tag stays 1 (same vector cheriot_setbounds already uses to
 #     confirm the non-exact CSetBounds path succeeds here too).
-#   - len=300: not a power of two, needs rounding to fit the compressed
-#     mantissa -> topoff/baseoff fire -> tag must be CLEARED (0), unlike
-#     plain CSetBounds which would silently round up and keep tag=1.
+#   - len=1001: requires E=1 (1001 > 511, the largest 9-bit mantissa) and is odd,
+#     so it is not a multiple of the 2-byte granule at that exponent -> topoff/
+#     baseoff fire -> tag must be CLEARED (0), unlike plain CSetBounds which
+#     silently rounds up to 1002 and keeps tag=1.
+#
+#     This vector previously requested 300. That is exact at E=0 (every length
+#     up to 511 is), so CSetBoundsExact legitimately returned tag=1 and the test
+#     failed against the RTL rather than finding a defect in it.
 #
 #   Test 1 (CSetBoundsExact(MTDC,256): tag=1, no rounding needed)
 #   Test 2 (CGetLen after exact case = 256)
-#   Test 3 (CSetBoundsExact(MTDC,300): tag=0, rounding was required)
+#   Test 3 (CSetBoundsExact(MTDC,1001): tag=0, rounding was required)
 #   Tests 4-6 (interrupt state — no interrupt expected)
 #
 # Verification: cosim (per-instruction Spike/RTL register compare) plus the
@@ -35,7 +40,7 @@
 # Tests:
 #   1. Tag = 1 after CSetBoundsExact(MTDC, 256) (exactly representable).
 #   2. CGetLen after that = 256.
-#   3. Tag = 0 after CSetBoundsExact(MTDC, 300) (not exactly representable).
+#   3. Tag = 0 after CSetBoundsExact(MTDC, 1001) (not exactly representable).
 #   4. mstatus.MIE = 1.
 #   5. mcause = 0.
 #   6. mip = 0.
@@ -60,9 +65,9 @@ main:
     li      a2, 256
     bne     a0, a2, .Lfail_test2
 
-    # ── Vector 2: len=300, NOT exactly representable ─────────────────────────
+    # ── Vector 2: len=1001, NOT exactly representable ────────────────────────
     .word   0x03D0055B              # cspecialr ca0, mtdc
-    li      a1, 300
+    li      a1, 1001
     .word   0x12B5055B              # csetboundsexact ca0, ca0, a1
 
     # ── Test 3: tag = 0 (rounding was required, req_exact rejects it) ────────

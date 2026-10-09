@@ -4,11 +4,14 @@
 
 #include "spike_cosim.h"
 
+#include <algorithm>
 #include <cassert>
 #include <iostream>
 #include <sstream>
+#include <vector>
 
 #include "riscv/config.h"
+#include "riscv/debug_rom_defines.h"
 #include "riscv/decode.h"
 #include "riscv/devices.h"
 #include "riscv/log_file.h"
@@ -41,6 +44,9 @@ SpikeCosim::SpikeCosim(const std::string &isa_string, uint32_t start_pc,
                        uint32_t dm_end_addr)
     : nmi_mode(false),
       pending_iside_error(false),
+      pending_irq_early_handle(false),
+      pending_irq_pre_mip(0),
+      deferred_dut_writes_pc(0),
       insn_cnt(0),
       mhpm_counter_num(mhpm_counter_num) {
   FILE *log_file = nullptr;
@@ -102,8 +108,31 @@ bool SpikeCosim::mmio_load(reg_t addr, size_t len, uint8_t *bytes) {
     dut_error = true;
   } else {
     // Spike may attempt to access up to 8-bytes from the PC when fetching, so
-    // only check as a dside access when it falls outside that range
-    bool in_iside_range = (addr >= pc && addr < pc + 8);
+    // only check as a dside access when it falls outside that range.
+    //
+    // This is a heuristic and it misfires when a *data* load happens to target
+    // an address within 8 bytes of the PC -- which is exactly what happens once
+    // a test runs off into garbage and starts executing data. In
+    // riscv_assorted_traps_interrupts_debug_test.21576 a `c.lbu s0, 0(s0)` at pc
+    // 0x46 loaded from 0x4a, so the load was silently treated as an ifetch, the
+    // DUT's matching bus access was never popped from pending_dside_accesses,
+    // and it then collided with the next genuine access -- surfacing as a
+    // spurious "store at address 3d463f3c was expected but there are no pending
+    // accesses" plus a manufactured trap.
+    //
+    // Narrow it using instruction width: RISC-V instructions are 2 or 4 bytes,
+    // so no instruction fetch is ever a single byte. That is exactly what the
+    // .21576 case was -- a `c.lbu`, len 1 -- and byte loads are the common way
+    // a runaway program reads its own code region.
+    //
+    // Narrower still: Spike fetches one 16-bit parcel per mmio_load
+    // (mmu_t::fetch_slow_path reads sizeof(uint16_t fetch_temp)), so every
+    // fetch has len 2 and a word access is always data. pmp_fault_hazard's
+    // `lw t1, 0(t0)` at pc 0x800022d0 reads 0x800022d4 = pc + 4 on purpose;
+    // taken for a fetch, its DUT access stayed queued and failed the next
+    // access on every seed (2026-10-08). Still ambiguous: a halfword load from
+    // [pc, pc + 8), which needs a fetch/data flag from Spike to close.
+    bool in_iside_range = (addr >= pc) && (addr < pc + 8) && (len == 2);
 
     if (!in_iside_range) {
       dut_error = (check_mem_access(false, addr, len, bytes) != kCheckMemOk);
@@ -173,21 +202,77 @@ bool SpikeCosim::backdoor_read_mem(uint32_t addr, size_t len,
 //   processor, and when we call step() again we start executing in the new
 //   context of the trap (trap handler, new MSTATUS, debug rom, etc. etc.)
 bool SpikeCosim::step(uint32_t write_reg, uint32_t write_reg_data, uint32_t pc,
-                      bool sync_trap, bool suppress_reg_write) {
+                      bool intr, bool sync_trap, bool suppress_reg_write, bool more_ops) {
   assert(write_reg < 32);
+
+  // Consume any deferred interrupt handle.  set_mip() sets this flag when the
+  // enabled-IRQ bits transition 0->nonzero rather than calling
+  // early_interrupt_handle() directly, because a level-sensitive IRQ can be
+  // withdrawn while the DUT's controller sits in IRQ_TAKEN (handle_irq=0),
+  // and calling early_interrupt_handle() for an interrupt the DUT abandoned
+  // causes a PC mismatch.
+  //
+  // rvfi_intr is the definitive signal: the DUT sets it on the first
+  // instruction of any trap handler.  If it is set with no sync_trap, the DUT
+  // entered an async (interrupt) handler and Spike must take it too.  If it is
+  // clear, the DUT resumed normal execution and the IRQ was abandoned.
+  //
+  // Normally Spike takes a pending interrupt itself inside step(1). Not when the DUT also took a
+  // debug request before the handler's first instruction (rvfi_intr on the debug ROM's first
+  // instruction): by now set_debug_req() has reached Spike, which ranks halt_request above
+  // interrupts. So take the interrupt here, with the halt masked, whenever set_mip() deferred one
+  // OR a halt is pending; the step below then enters debug from the handler, as the DUT did.
+  // set_mip()'s 0->1 test misses an interrupt that was already pending, e.g. in a handler that
+  // mret'ed (riscv_assorted_traps_interrupts_debug_test 28613, 2026-10-09). Use the mip the DUT
+  // reported when it took the trap, not this item's: a later debug capture samples mip again after
+  // a short pulse dropped (riscv_mem_error_traps_test 28610). rvfi_intr is only set for
+  // EXC_PC_IRQ, never for a plain debug entry, and an NMI already set nmi_mode.
+  if (!more_ops) {
+    if (intr && !sync_trap && !processor->get_state()->debug_mode && !nmi_mode &&
+        (pending_irq_early_handle || processor->halt_request != processor_t::HR_NONE)) {
+      const reg_t item_pre_mip = processor->get_state()->mip->read_pre_val();
+      if (pending_irq_early_handle) {
+        processor->get_state()->mip->write_pre_val(pending_irq_pre_mip);
+      }
+      const bool taken = take_irq_before_halt();
+      processor->get_state()->mip->write_pre_val(item_pre_mip);
+      pending_irq_early_handle = false;
+      if (!taken) {
+        return false;
+      }
+    }
+    pending_irq_early_handle = false;
+  }
 
   // The DUT has just produced an RVFI item
   // (parameters of this func is the data in the RVFI item).
 
-  // First check to see if this is an ebreak that should enter debug mode. These
-  // need specific handling. When spike steps over them it'll immediately step
-  // the next instruction (i.e. the first instruction of the debug handler) too.
-  // In effect it treats it as a transition to debug mode that doesn't retire
-  // any instruction so needs to execute the next instruction to step a single
-  // time. To deal with this if it's a debug ebreak we skip the rest of this
-  // function checking a few invariants on the debug ebreak first.
-  if (pc_is_debug_ebreak(pc)) {
-    return check_debug_ebreak(write_reg, pc, sync_trap);
+  // Non-final operation of an expanded instruction: record the DUT's register
+  // write and return WITHOUT stepping the ISS. See deferred_dut_writes in
+  // spike_cosim.h for why the step has to wait for the final operation.
+  if (more_ops) {
+    if (!deferred_dut_writes.empty() && pc != deferred_dut_writes_pc) {
+      std::stringstream err_str;
+      err_str << "DUT retired pc " << std::hex << pc
+              << " as part of an expanded instruction while " << std::dec
+              << deferred_dut_writes.size()
+              << " operation(s) from pc " << std::hex << deferred_dut_writes_pc
+              << " were still outstanding";
+      errors.emplace_back(err_str.str());
+      deferred_dut_writes.clear();
+      return false;
+    }
+    deferred_dut_writes.push_back({write_reg, write_reg_data});
+    deferred_dut_writes_pc = pc;
+    insn_cnt++;
+    return true;
+  }
+
+  // A trap part-way through an expanded instruction ends it. Spike commits each
+  // cm.pop load as it goes and does not roll back, so the operations already
+  // retired leave the same registers on both sides; nothing is left to match.
+  if (sync_trap) {
+    deferred_dut_writes.clear();
   }
 
   uint32_t initial_spike_pc;
@@ -217,7 +302,52 @@ bool SpikeCosim::step(uint32_t write_reg, uint32_t write_reg_data, uint32_t pc,
   // (If the current step causes a synchronous trap, it will be
   //  recorded against the current pc)
   initial_spike_pc = (processor->get_state()->pc & 0xffffffff);
-  processor->step(1);
+  // Spike enters debug inside step(1) when a single-stepped instruction traps, so whether the
+  // trap was taken outside debug mode must be sampled before the step.
+  const bool pre_step_debug_mode = processor->get_state()->debug_mode;
+  // The other way round: step() enters debug mode *before* it fetches anything when a halt
+  // request is pending, or when the previous step retired a single-stepped instruction
+  // (processor_t::step(), riscv/execute.cc), and then runs the debug ROM's first instruction in
+  // the same step. If that fetch faults (an iside error injected at the halt address), Spike traps
+  // at DEBUG_ROM_ENTRY, in debug mode, not at the pc it held before the step
+  // (riscv_mem_error_traps_test 7492/7499, 2026-10-09: "PC mismatch at synchronous trap, DUT at
+  // pc: 80000000 while ISS pc is at : 80003006"; both sides had entered debug and faulted there).
+  const bool debug_entry_before_fetch =
+      !pre_step_debug_mode &&
+      ((processor->halt_request != processor_t::HR_NONE) ||
+       (!processor->get_state()->serialized &&
+        processor->get_state()->single_step == state_t::STEP_STEPPED));
+  // Ibex gives an exception from the instruction in ID priority over a pending
+  // interrupt (ibex_controller.sv: handle_irq is only considered when
+  // !special_req); Spike takes the interrupt at the earliest boundary. Both are
+  // legal, so if the DUT reported a synchronous trap and no interrupt, hide
+  // pending interrupts from Spike for this one step.
+  //
+  // Deliberately NOT widened to every step without rvfi_intr (tried 2026-09-28):
+  // the DUT's pending bit is often visible to Spike only before the DUT's
+  // handler-entry step, so hiding it then left Spike never taking the interrupt
+  // (riscv_single_interrupt_test, 11 seeds). Following the DUT's interrupt timing
+  // in general needs Spike to be told when the DUT takes one, not a hidden mip.
+  //
+  // Likewise while the hart single-steps: Ibex hardwires dcsr.stepie to 0 (ibex_cs_registers.sv)
+  // and takes no interrupt while dcsr.step is set outside debug mode (ibex_controller.sv
+  // handle_irq: ~debug_single_step_i), including at the end of the step, where it enters debug
+  // mode (cause 4) with dpc at the next instruction. This Spike has no stepie:
+  // processor_t::step() calls take_pending_interrupt() before it enters debug mode for a
+  // completed step, so when the stepped instruction enabled a pending interrupt it took the
+  // interrupt and then entered debug with dpc at the handler (cov_expr_step_irq 28607/28608,
+  // 2026-10-09: "Synchronous trap was expected at ISS PC: 80000000" at the step's debug entry).
+  // The condition is Spike's own state, not the DUT's.
+  const bool single_stepping =
+      !pre_step_debug_mode && processor->get_state()->dcsr->step;
+  if ((sync_trap && !intr) || single_stepping) {
+    const reg_t saved_pre_mip = processor->get_state()->mip->read_pre_val();
+    processor->get_state()->mip->write_pre_val(0);
+    processor->step(1);
+    processor->get_state()->mip->write_pre_val(saved_pre_mip);
+  } else {
+    processor->step(1);
+  }
 
   // ISS
   // - If encountered an async trap,
@@ -273,11 +403,17 @@ bool SpikeCosim::step(uint32_t write_reg, uint32_t write_reg_data, uint32_t pc,
         return false;
       }
 
+      if (debug_entry_before_fetch) {
+        initial_spike_pc = DEBUG_ROM_ENTRY;
+      }
+
       if (!check_sync_trap(write_reg, pc, initial_spike_pc)) {
         return false;
       }
 
-      handle_cpuctrl_exception_entry();
+      // An exception taken in debug mode leaves cpuctrlsts alone (ibex_cs_registers.sv), and
+      // after debug_entry_before_fetch the trap was taken in debug mode.
+      handle_cpuctrl_exception_entry(pre_step_debug_mode || debug_entry_before_fetch);
 
       // This is all the checking possible when consider a
       // synchronously-trapping instruction that never retired.
@@ -344,7 +480,14 @@ bool SpikeCosim::check_retired_instr(uint32_t write_reg,
 
   bool gpr_write_seen = false;
 
-  for (auto reg_change : reg_changes) {
+  // Collect the GPR writes before checking any of them. A single Spike
+  // instruction can write two GPRs -- the Zcmp double-register moves
+  // cm.mvsa01 and cm.mva01s -- which Ibex expands into two RVFI retirements at
+  // the same PC. We therefore cannot assume the first GPR write in the log is
+  // the one this retirement carries, and must match by register number.
+  std::vector<const commit_log_reg_t::value_type *> gpr_writes;
+
+  for (auto &reg_change : reg_changes) {
     // reg_change.first provides register type in bottom 4 bits, then register
     // index above that
 
@@ -354,21 +497,85 @@ bool SpikeCosim::check_retired_instr(uint32_t write_reg,
 
     if ((reg_change.first & 0xf) == 0) {
       // register is GPR
-      // should never see more than one GPR write per step
-      assert(!gpr_write_seen);
-
-      if (!suppress_reg_write &&
-          !check_gpr_write(reg_change, write_reg, write_reg_data)) {
-        return false;
-      }
-
-      gpr_write_seen = true;
+      gpr_writes.push_back(&reg_change);
     } else if ((reg_change.first & 0xf) == 4) {
       // register is CSR
       on_csr_write(reg_change);
     } else {
       // should never see other types
       assert(false);
+    }
+  }
+
+  if (!suppress_reg_write && gpr_writes.size() > 1) {
+    // Expanded instruction (Zcmp): the ISS wrote several GPRs in this single
+    // step, and the DUT reported them across several retirements at the same
+    // PC. The earlier ones were recorded by step() via `more_ops`; this call
+    // carries the final one. Match the whole set.
+    //
+    // Matching is by register number -- the ISS does not use Ibex's operation
+    // order, so position cannot be relied on.
+    std::vector<PendingGprWrite> dut_writes = deferred_dut_writes;
+    dut_writes.push_back({write_reg, write_reg_data});
+    deferred_dut_writes.clear();
+    // The ISS side skips x0 above; do the same here. cm.popret(z) ends in
+    // `jalr x0, 0(ra)`, which the DUT reports as a write to x0.
+    dut_writes.erase(std::remove_if(dut_writes.begin(), dut_writes.end(),
+                                    [](const PendingGprWrite &w) { return w.reg == 0; }),
+                     dut_writes.end());
+
+    if (dut_writes.size() != gpr_writes.size()) {
+      std::stringstream err_str;
+      err_str << "Expanded instruction at pc " << std::hex << dut_pc
+              << ": the DUT reported " << std::dec << dut_writes.size()
+              << " register write(s) but the ISS made " << gpr_writes.size();
+      errors.emplace_back(err_str.str());
+      return false;
+    }
+
+    for (const auto &dut_write : dut_writes) {
+      size_t match_idx = gpr_writes.size();
+      for (size_t i = 0; i < gpr_writes.size(); i++) {
+        if (gpr_writes[i] != nullptr &&
+            ((gpr_writes[i]->first >> 4) & 0x1f) == dut_write.reg) {
+          match_idx = i;
+          break;
+        }
+      }
+
+      if (match_idx == gpr_writes.size()) {
+        std::stringstream err_str;
+        err_str << "DUT wrote register x" << std::dec << dut_write.reg
+                << " at pc " << std::hex << dut_pc
+                << " but the ISS made no such write among the "
+                << std::dec << gpr_writes.size()
+                << " writes of this expanded instruction";
+        errors.emplace_back(err_str.str());
+        return false;
+      }
+
+      if (!check_gpr_write(*gpr_writes[match_idx], dut_write.reg,
+                           dut_write.data)) {
+        return false;
+      }
+
+      // Consume it so a second DUT write to the same register cannot match the
+      // same ISS write twice.
+      gpr_writes[match_idx] = nullptr;
+    }
+
+    gpr_write_seen = true;
+  } else {
+    for (auto *gpr_write : gpr_writes) {
+      // should never see more than one GPR write per step
+      assert(!gpr_write_seen);
+
+      if (!suppress_reg_write &&
+          !check_gpr_write(*gpr_write, write_reg, write_reg_data)) {
+        return false;
+      }
+
+      gpr_write_seen = true;
     }
   }
 
@@ -533,8 +740,8 @@ void SpikeCosim::leave_nmi_mode() {
 #endif
 }
 
-void SpikeCosim::handle_cpuctrl_exception_entry() {
-  if (!processor->get_state()->debug_mode) {
+void SpikeCosim::handle_cpuctrl_exception_entry(bool was_debug_mode) {
+  if (!was_debug_mode) {
     bool old_sync_exc_seen = change_cpuctrlsts_sync_exc_seen(true);
     if (old_sync_exc_seen) {
       set_cpuctrlsts_double_fault_seen();
@@ -569,6 +776,12 @@ void SpikeCosim::initial_proc_setup(uint32_t start_pc, uint32_t start_mtvec,
   processor->get_state()->pc = start_pc;
   processor->get_state()->mtvec->write(start_mtvec);
 
+  // Ibex resets mstatus to 0x0000_0080, MPIE = 1 (doc/03_reference/cs_registers.rst); Spike's
+  // mstatus starts at 0. A program that reads mstatus before its first trap or MRET saw the
+  // difference (debug_dm_pmp: DUT 0x1880, Spike 0x1800 after setting MPP).
+  processor->get_state()->mstatus->write(processor->get_state()->mstatus->read() |
+                                         MSTATUS_MPIE);
+
   processor->get_state()->csrmap[CSR_MARCHID] =
       std::make_shared<const_csr_t>(processor.get(), CSR_MARCHID, IBEX_MARCHID);
 
@@ -583,6 +796,24 @@ void SpikeCosim::initial_proc_setup(uint32_t start_pc, uint32_t start_mtvec,
     processor->get_state()->csrmap[CSR_MHPMEVENT3 + i] =
         std::make_shared<const_csr_t>(processor.get(), CSR_MHPMEVENT3 + i,
                                       1 << i);
+  }
+
+  // Ibex implements mhpmcounter3 .. 3+MHPMCounterNum-1; the others read 0 and ignore writes.
+  // Spike makes all 29 writable counters whatever set_mhpm_counter_num says (only their events
+  // are constant), so a write to an unimplemented one stuck in the model: ibex_decode_holes
+  // wrote 0xffffffff to mhpmcounter13 with MHPMCounterNum = 10 and the DUT read back 0, Spike
+  // 0xffffffff (2026-10-08). Hardwire them to zero here, with their high halves. Not the user-level
+  // aliases (hpmcounterN/hpmcounterNh): they are proxies that check mcounteren before reading, and
+  // a const_csr_t in their place dropped that check, so a U-mode read Ibex traps on (mcounteren bit
+  // N is 0 for an unimplemented counter) read 0 in Spike (mcounteren_test, csr_access_sweep,
+  // 2026-10-09). The proxies read the original counter, which stays 0 as nothing can write it now.
+  auto &csrmap = processor->get_state()->csrmap;
+  for (int i = mhpm_counter_num; i < 29; i++) {
+    for (reg_t csr : {(reg_t)CSR_MHPMCOUNTER3 + i, (reg_t)CSR_MHPMCOUNTER3H + i}) {
+      if (csrmap.count(csr)) {
+        csrmap[csr] = std::make_shared<const_csr_t>(processor.get(), csr, 0);
+      }
+    }
   }
 }
 
@@ -604,13 +835,60 @@ void SpikeCosim::set_mip(uint32_t pre_mip, uint32_t post_mip) {
 
   uint32_t old_enabled_irq = old_mip & processor->get_state()->mie->read();
   uint32_t new_enabled_irq = new_mip & processor->get_state()->mie->read();
-
-  // Check to see if new MIP will trigger an interrupt (which occurs when new
-  // MIP produces an enabled interrupt for the first time).
   if ((old_enabled_irq == 0) && (new_enabled_irq != 0)) {
-    // Early interrupt handle if the interrupt is triggered.
-    early_interrupt_handle();
+    // Defer the early_interrupt_handle() call until step() can confirm via
+    // rvfi_intr that the DUT actually entered the handler.  A level-sensitive
+    // IRQ that is withdrawn while the controller sits in IRQ_TAKEN (handle_irq
+    // goes false) is legally abandoned; calling early_interrupt_handle() here
+    // would cause Spike to take an interrupt the DUT did not take.
+    pending_irq_early_handle = true;
+    pending_irq_pre_mip = pre_mip;
   }
+}
+
+// An NMI (set_nmi / set_nmi_int) can reach the model while an interrupt set_mip() deferred is
+// still pending: the DUT entered the interrupt (IRQ_TAKEN committed: mepc, mcause, MPIE written)
+// and the NMI arrived before the handler's first instruction retired, nesting on top of it. The
+// deferred interrupt must then be taken first, so that the NMI's mstack holds the interrupt's
+// mepc/mcause/MPIE as on the DUT; left to step(), it was taken a second time inside the NMI
+// handler (riscv_pmp_traps_test 24861 and riscv_mem_error_traps_test 24857, 2026-10-06).
+// Not covered: an NMI that pre-empts the interrupt in the IRQ_TAKEN cycle itself, so the DUT never
+// takes the interrupt -- that shows up as a later mepc/mstack mismatch, it is not hidden.
+void SpikeCosim::take_deferred_irq() {
+  if (!pending_irq_early_handle) {
+    return;
+  }
+  pending_irq_early_handle = false;
+  state_t *s = processor->get_state();
+  const bool irq_enabled =
+      get_field(processor->get_csr(CSR_MSTATUS), MSTATUS_MIE) || s->prv < PRV_M;
+  if (!irq_enabled || !(pending_irq_pre_mip & s->mie->read())) {
+    return;
+  }
+  const reg_t saved_pre_mip = s->mip->read_pre_val();
+  s->mip->write_pre_val(pending_irq_pre_mip);
+  take_irq_before_halt();
+  s->mip->write_pre_val(saved_pre_mip);
+}
+
+bool SpikeCosim::take_irq_before_halt() {
+  state_t *s = processor->get_state();
+  const bool irq_enabled =
+      get_field(processor->get_csr(CSR_MSTATUS), MSTATUS_MIE) || s->prv < PRV_M;
+  if (!irq_enabled || !(s->mip->read_pre_val() & s->mie->read())) {
+    std::stringstream err_str;
+    err_str << "DUT entered an interrupt handler (rvfi_intr) but the ISS has no enabled "
+            << "interrupt pending: mip 0x" << std::hex << s->mip->read_pre_val() << " mie 0x"
+            << s->mie->read() << " mstatus 0x" << processor->get_csr(CSR_MSTATUS);
+    errors.emplace_back(err_str.str());
+    return false;
+  }
+  // As in step(): a debug request already passed to the model must not pre-empt the interrupt.
+  const auto saved_halt = processor->halt_request;
+  processor->halt_request = processor_t::HR_NONE;
+  early_interrupt_handle();
+  processor->halt_request = saved_halt;
+  return true;
 }
 
 void SpikeCosim::early_interrupt_handle() {
@@ -679,15 +957,91 @@ void SpikeCosim::misaligned_pmp_fixup() {
                   << top_pending_access_info.addr << std::endl;
         std::cout << std::dec;
 
+        // A store's second half is not just an access to skip: Ibex wrote those bytes (the
+        // privileged spec lets the part of a misaligned store that passes PMP become visible),
+        // while Spike aborted at the first failing byte and wrote nothing. Dropping it left the
+        // bench's memory and Spike's different, and the next load of those bytes mismatched
+        // (riscv_pmp_full_random_test.3977: sh 0xfaff6170 to 0x3e99f1ff, first half denied,
+        // 0x61 written at 0x3e99f200; much later an lhu read it back as 0x61 vs Spike's 0).
+        if (top_pending_access_info.store) {
+          misaligned_store_second_half(top_pending_access_info);
+        }
+
         pending_dside_accesses.erase(pending_dside_accesses.begin());
       }
     }
   }
 }
 
+// Apply the second half of a misaligned store whose first half faulted to Spike's memory. The
+// bytes come from Spike's own state, not from the DUT: Spike has just taken the store access
+// fault, so MEPC is the store and MTVAL its start address (Spike faults on the first byte); the
+// store is decoded from Spike's memory and its rs2 read from Spike's register file. The DUT's
+// write is then checked against them, byte enables included, so the DUT cannot slip a wrong
+// value into the model this way.
+void SpikeCosim::misaligned_store_second_half(const DSideAccessInfo &dut) {
+  state_t *s = processor->get_state();
+  uint32_t pc = s->mepc->read();
+  uint32_t start = s->mtval->read();
+  uint32_t insn = 0;
+  uint8_t ib[4];
+  if (!backdoor_read_mem(pc, 4, ib)) {
+    errors.emplace_back("Misaligned store fixup: cannot read the store instruction at mepc");
+    return;
+  }
+  insn = ib[0] | (ib[1] << 8) | (ib[2] << 16) | (ib[3] << 24);
+
+  unsigned rs2 = 0, size = 0;
+  if ((insn & 0x3) != 0x3) {
+    uint32_t c = insn & 0xffff;
+    if ((c & 0xe003) == 0xc000) {          // c.sw   rs2' = bits[4:2] + 8
+      rs2 = ((c >> 2) & 0x7) + 8;
+      size = 4;
+    } else if ((c & 0xe003) == 0xc002) {   // c.swsp rs2  = bits[6:2]
+      rs2 = (c >> 2) & 0x1f;
+      size = 4;
+    }
+  } else if ((insn & 0x7f) == 0x23) {      // STORE: funct3 1 = sh, 2 = sw
+    uint32_t f3 = (insn >> 12) & 0x7;
+    rs2 = (insn >> 20) & 0x1f;
+    size = (f3 == 1) ? 2 : (f3 == 2) ? 4 : 0;
+  }
+  if (size == 0) {
+    std::stringstream err_str;
+    err_str << "Misaligned store fixup: instruction 0x" << std::hex << insn << " at 0x" << pc
+            << " is not a store the fixup can model";
+    errors.emplace_back(err_str.str());
+    return;
+  }
+
+  uint32_t value = s->XPR[rs2];
+  uint32_t exp_be = 0, exp_data = 0;
+  for (unsigned i = 0; i < size; ++i) {
+    uint32_t a = start + i;
+    if ((a & ~0x3u) != dut.addr) continue;  // only the bytes in the second word
+    uint8_t b = (value >> (8 * i)) & 0xff;
+    exp_be |= 1u << (a & 0x3);
+    exp_data |= uint32_t(b) << (8 * (a & 0x3));
+    backdoor_write_mem(a, 1, &b);
+  }
+
+  uint32_t mask = 0;
+  for (unsigned i = 0; i < 4; ++i)
+    if (exp_be & (1u << i)) mask |= 0xffu << (8 * i);
+  if (exp_be != dut.be || (dut.data & mask) != exp_data) {
+    std::stringstream err_str;
+    err_str << "Second half of misaligned store at 0x" << std::hex << start << " (first half "
+            << "faulted): DUT wrote data 0x" << (dut.data & mask) << " BE 0x" << dut.be
+            << " to 0x" << dut.addr << " but data 0x" << exp_data << " BE 0x" << exp_be
+            << " was expected";
+    errors.emplace_back(err_str.str());
+  }
+}
+
 void SpikeCosim::set_nmi(bool nmi) {
   if (nmi && !nmi_mode && !processor->get_state()->debug_mode &&
       processor->halt_request != processor_t::HR_REGULAR) {
+    take_deferred_irq();  // before the mstack save below
     processor->get_state()->nmi = true;
     nmi_mode = true;
 
@@ -702,9 +1056,10 @@ void SpikeCosim::set_nmi(bool nmi) {
   }
 }
 
-void SpikeCosim::set_nmi_int(bool nmi_int) {
+void SpikeCosim::set_nmi_int(bool nmi_int, uint32_t mtval) {
   if (nmi_int && !nmi_mode && !processor->get_state()->debug_mode &&
       processor->halt_request != processor_t::HR_REGULAR) {
+    take_deferred_irq();  // before the mstack save below
     processor->get_state()->nmi_int = true;
     nmi_mode = true;
 
@@ -716,6 +1071,22 @@ void SpikeCosim::set_nmi_int(bool nmi_int) {
     mstack.cause = processor->get_csr(CSR_MCAUSE);
 
     early_interrupt_handle();
+
+    // Spike has now taken the trap and zeroed mtval, as a standard RISC-V model
+    // does for any interrupt. Ibex instead writes the address of the
+    // transaction that returned bad integrity, so overwrite Spike's value with
+    // the DUT's. Done AFTER early_interrupt_handle() for that reason -- setting
+    // it before would simply be overwritten by the trap.
+    //
+    // Without this, a `csrr rd, mtval` in the NMI handler diverges and the run
+    // dies with "Register write data mismatch ... DUT: 8001xxxx expected: 0".
+    // That was riscv_mem_intg_error_test seeds 21577/21580/21582 in the
+    // 2026-09-23 regression -- the DUT was correct in all three.
+#ifdef OLD_SPIKE
+    processor->set_csr(CSR_MTVAL, mtval);
+#else
+    processor->put_csr(CSR_MTVAL, mtval);
+#endif
   }
 }
 
@@ -748,6 +1119,10 @@ void SpikeCosim::set_mcycle(uint64_t mcycle) {
 
   // TODO: Do a neater job of this, a more recent spike release should allow us
   // to write all 64 bits at once at least.
+}
+
+uint32_t SpikeCosim::get_csr(const int csr_num) {
+  return (uint32_t)processor->get_csr(csr_num);
 }
 
 void SpikeCosim::set_csr(const int csr_num, const uint32_t new_val) {

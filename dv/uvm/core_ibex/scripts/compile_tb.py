@@ -108,6 +108,34 @@ def _main() -> int:
             {k: _get_iss_pkgconfig_flags(v, spike_iss_pc, md.simulator)
              for k, v in iss_pkgconfig_dict.items()}
 
+        # DM=1 (make variable, exported by the core_ibex Makefile; scripts/ibex_sim.mk lists it in
+        # rtl-tb-compile-var-deps, so switching it rebuilds the testbench rather than reusing the
+        # other kind of snapshot): build with the real RISC-V debug module (ibex_dv_dm.f,
+        # +define+IBEX_DM_REAL). The core's debug entry points then move from the riscv-dv
+        # program's own debug section at BOOT_ADDR to the debug ROM inside the DM window
+        # (DM_ADDR + dm::HaltAddress 0x800 / dm::ExceptionAddress 0x810). Only the directed tests
+        # marked requires_dm run on such a build (core_ibex_dm_test); the riscv-dv debug tests
+        # need the normal build.
+        dm_build = os.environ.get('DM', '').strip() == '1'
+        if dm_build:
+            debug_mode_opts = (r" +define+DEBUG_MODE_HALT_ADDR=1A11_0800 " +
+                               r" +define+DEBUG_MODE_EXCEPTION_ADDR=1A11_0810 " +
+                               r" +define+IBEX_DM_REAL " +
+                               f" -f {md.ibex_dv_root}/ibex_dv_dm.f ")
+            logger.info("DM=1: building the testbench with the real debug module (IBEX_DM_REAL)")
+        else:
+            # Spike sets the following parameters via the preprocessor defines
+            # DEBUG_ROM_ENTRY and DEBUG_ROM_TVEC.
+            # As they cannot be moved without recompiling the ISS, treat them as
+            # hardcoded here too, for now. These addresses are placed right at
+            # BOOT_ADDR location, which is the location of the start of the
+            # default vector table. (The reset vector is BOOT_ADDR/256b + 0x80)
+            # The generated RISCV-DV assembly programs move the default vector
+            # table (via MTVEC), and place jump instructions at these two
+            # addresses to the generated debug test sections.
+            debug_mode_opts = (r" +define+DEBUG_MODE_HALT_ADDR=8000_0000 " +
+                               r" +define+DEBUG_MODE_EXCEPTION_ADDR=8000_0008 ")
+
         # Populate the entire set of variables to substitute in the templated
         # compilation command, including the compiler flags for the ISS.
         subst_vars_dict = {
@@ -122,19 +150,16 @@ def _main() -> int:
                 r" +define+DM_ADDR=1A11_0000 " + \
                 r" +define+DM_ADDR_MASK=0000_0FFF" + \
                 r" +define+BOOT_ADDR=8000_0000 " + \
-                # Spike sets the following parameters via the preprocessor defines
-                # DEBUG_ROM_ENTRY and DEBUG_ROM_TVEC.
-                # As they cannot be moved without recompiling the ISS, treat them as
-                # hardcoded here too, for now. These addresses are placed right at
-                # BOOT_ADDR location, which is the location of the start of the
-                # default vector table. (The reset vector is BOOT_ADDR/256b + 0x80)
-                # The generated RISCV-DV assembly programs move the default vector
-                # table (via MTVEC), and place jump instructions at these two
-                # addresses to the generated debug test sections.
-                r" +define+DEBUG_MODE_HALT_ADDR=8000_0000 " + \
-                r" +define+DEBUG_MODE_EXCEPTION_ADDR=8000_0008 ",
+                # DEBUG_MODE_HALT_ADDR / DEBUG_MODE_EXCEPTION_ADDR (and, for DM=1, the
+                # debug module itself): see debug_mode_opts above.
+                debug_mode_opts + \
+                # Extra compile options for this build, e.g.
+                # IBEX_EXTRA_CMP_OPTS="+define+CHERIOT_FCOV_LARGE_CROSSES" (root Makefile
+                # FCOV_LARGE_CROSSES=1). The TB build stamp does not see it: rebuild after changing.
+                " " + os.environ.get('IBEX_EXTRA_CMP_OPTS', '').strip() + " ",
             'dir_shared_cov': (md.dir_shared_cov if md.cov else ''),
-            'xlm_cov_cfg_file': f"{md.ot_xcelium_cov_scripts}/cover.ccf",
+            # The ccf every Xcelium suite shares, so all their databases model the same items.
+            'xlm_cov_cfg_file': f"{md.ibex_root}/dv/coverage/ibex_cover.ccf",
             'dut_cov_rtl_path': md.dut_cov_rtl_path
         }
         subst_vars_dict.update(iss_cc_subst_vars_dict)

@@ -42,6 +42,12 @@ class ibex_mem_intf_response_agent_cfg extends uvm_object;
   int unsigned spurious_response_delay_min = 0;
   int unsigned spurious_response_delay_max = 100;
 
+  // Percentage of cycles without a request on which the driver holds grant high anyway, as an
+  // always-ready slave may (legal on OBI: only req && gnt is a transfer, which is all the monitor
+  // counts). 0, the default, never grants without a request. Set from +dmem_gnt_when_idle_pct
+  // for the data side (ibex_mem_intf_response_seq).
+  int unsigned gnt_when_idle_pct = 0;
+
   constraint zero_delays_c {
     zero_delays dist {1 :/ zero_delay_pct,
                       0 :/ 100 - zero_delay_pct};
@@ -57,6 +63,7 @@ class ibex_mem_intf_response_agent_cfg extends uvm_object;
     `uvm_field_int(zero_delay_pct,              UVM_DEFAULT)
     `uvm_field_int(spurious_response_delay_min, UVM_DEFAULT)
     `uvm_field_int(spurious_response_delay_max, UVM_DEFAULT)
+    `uvm_field_int(gnt_when_idle_pct,           UVM_DEFAULT)
 
   `uvm_object_utils_end
 

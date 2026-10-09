@@ -13,6 +13,7 @@ import "DPI-C" function void riscv_sail_cosim_init(bit [31:0] boot_addr);
 import "DPI-C" function void riscv_sail_cosim_cleanup();
 import "DPI-C" function void riscv_sail_cosim_write_mem_byte(bit [31:0] addr, bit [7:0] data);
 import "DPI-C" function int  riscv_sail_cosim_take_interrupt(bit [31:0] mip);
+import "DPI-C" function int  riscv_sail_cosim_irq_would_take(bit [31:0] mip);
 import "DPI-C" function int unsigned riscv_sail_cosim_get_mcause();
 import "DPI-C" function int unsigned riscv_sail_cosim_get_mtval();
 import "DPI-C" function int  riscv_sail_cosim_step(bit [31:0] insn, bit [31:0] pc);

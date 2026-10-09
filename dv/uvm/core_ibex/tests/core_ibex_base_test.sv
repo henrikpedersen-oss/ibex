@@ -31,6 +31,11 @@ class core_ibex_base_test extends uvm_test;
   bit[ibex_mem_intf_pkg::DATA_WIDTH-1:0]    signature_data;
   uvm_tlm_analysis_fifo #(ibex_mem_intf_seq_item) item_collected_port;
   uvm_tlm_analysis_fifo #(ibex_mem_intf_seq_item) test_done_port;
+  // Data-side transactions for the cheriot_enable_on_write watcher; connected only when it is used,
+  // so other tests do not collect an unread copy of every transaction.
+  uvm_tlm_analysis_fifo #(ibex_mem_intf_seq_item) cheriot_enable_port;
+  // The same for the cheriot_disable_on_write watcher (its own FIFO: both watchers may run).
+  uvm_tlm_analysis_fifo #(ibex_mem_intf_seq_item) cheriot_disable_port;
   uvm_tlm_analysis_fifo #(irq_seq_item)           irq_collected_port;
   uvm_phase                                       cur_run_phase;
   bit                                             test_done = 1'b0;
@@ -44,6 +49,8 @@ class core_ibex_base_test extends uvm_test;
     uvm_report_server::set_server(ibex_report_server);
     item_collected_port = new("item_collected_port_test", this);
     test_done_port = new("test_done_port_instance", this);
+    cheriot_enable_port = new("cheriot_enable_port_instance", this);
+    cheriot_disable_port = new("cheriot_disable_port_instance", this);
     irq_collected_port  = new("irq_collected_port_test", this);
   endfunction
 
@@ -224,6 +231,7 @@ class core_ibex_base_test extends uvm_test;
     cosim_cfg.pmp_granularity = pmp_granularity;
     cosim_cfg.mhpm_counter_num = mhpm_counter_num;
     cosim_cfg.relax_cosim_check = cfg.disable_cosim | cfg.enable_cheriot_seq;
+    cosim_cfg.cosim_off = cfg.cosim_off;
     cosim_cfg.secure_ibex = secure_ibex;
     cosim_cfg.icache = icache;
     cosim_cfg.dm_start_addr = 32'h`DM_ADDR;
@@ -269,6 +277,14 @@ class core_ibex_base_test extends uvm_test;
       this.item_collected_port.analysis_export);
     env.data_if_response_agent.monitor.item_collected_port.connect(
       this.test_done_port.analysis_export);
+    if (cfg.cheriot_enable_on_write != 0) begin
+      env.data_if_response_agent.monitor.item_collected_port.connect(
+        this.cheriot_enable_port.analysis_export);
+    end
+    if (cfg.cheriot_disable_on_write != 0) begin
+      env.data_if_response_agent.monitor.item_collected_port.connect(
+        this.cheriot_disable_port.analysis_export);
+    end
     env.irq_agent.monitor.irq_port.connect(this.irq_collected_port.analysis_export);
     // Connect the data memory seq to the cosim agent
     // This allows the cosim memory to be updated to match when we generate random data in
@@ -289,6 +305,16 @@ class core_ibex_base_test extends uvm_test;
     clk_vif.wait_clks(100);
     load_binary_to_mems();
     dut_vif.dut_cb.fetch_enable <= ibex_pkg::IbexMuBiOn;
+
+    if (cfg.cheriot_enable_on_write != 0) begin
+      if (cfg.enable_cheriot_seq) begin
+        `uvm_fatal(`gfn, "+cheriot_enable_on_write and +enable_cheriot_seq both set: the pin would start On")
+      end
+      fork watch_cheriot_enable_trigger(); join_none
+    end
+    if (cfg.cheriot_disable_on_write != 0) begin
+      fork watch_cheriot_disable_trigger(); join_none
+    end
 
     fork
       send_stimulus();
@@ -458,6 +484,93 @@ class core_ibex_base_test extends uvm_test;
     clk_vif.wait_clks(3000);
   endtask
 
+
+  // The cheriot_enable_i 0->1 transition, driven by the program (directed_tests/
+  // cheriot_enable_transition): wait for its write to cfg.cheriot_enable_on_write, then
+  // cfg.cheriot_enable_delay cycles -- so that store has left writeback before CHERIoT checks turn
+  // on -- and raise the pin, once. Nothing lowers it again: the pin is monotone by contract, as the
+  // formal transition proof assumes -- except watch_cheriot_disable_trigger below, which breaks the
+  // contract on purpose.
+  virtual task watch_cheriot_enable_trigger();
+    ibex_mem_intf_seq_item txn;
+    forever begin
+      cheriot_enable_port.get(txn);
+      if (txn.read_write == WRITE && txn.addr == cfg.cheriot_enable_on_write) break;
+    end
+    clk_vif.wait_clks(cfg.cheriot_enable_delay);
+    dut_vif.dut_cb.cheriot_enable <= ibex_pkg::IbexMuBiOn;
+    `uvm_info(`gfn, $sformatf("cheriot_enable_i raised %0d cycles after the write to 0x%08h",
+                              cfg.cheriot_enable_delay, cfg.cheriot_enable_on_write), UVM_LOW)
+  endtask
+
+  // The 1->0 transition the pin contract forbids (REQ_BCK_06; directed_tests/cheriot_enable_on_off):
+  // the LSU must hold the request until granted and complete the CSC. Once the program writes to
+  // cfg.cheriot_disable_on_write: slow every later d-side grant to cheriot_disable_gnt_delay cycles,
+  // so the program's next CSC waits in CTX_WAIT_GNT1; lower the pin there; then require
+  // alert_major_internal_o within cheriot_disable_alert_window cycles. The program then continues
+  // in RISC-V mode without a trap. A silent downgrade turns the
+  // capability checks off with nothing to tell the system. CheriotEnableOneWaySwitch and the
+  // testbench's NoAlertsTriggered are turned off at that moment, not before: the first states the
+  // contract this run breaks, the second would fail on the alert it expects.
+  virtual task watch_cheriot_disable_trigger();
+    ibex_mem_intf_seq_item           txn;
+    ibex_mem_intf_response_agent_cfg dcfg = env.data_if_response_agent.cfg;
+    bit                              saved_zero_delays;
+    int unsigned                     saved_gnt_min, saved_gnt_max;
+    int unsigned                     waited = 0;
+    bit                              alert_seen = 1'b0;
+
+    forever begin
+      cheriot_disable_port.get(txn);
+      if (txn.read_write == WRITE && txn.addr == cfg.cheriot_disable_on_write) break;
+    end
+    saved_zero_delays = dcfg.zero_delays;
+    saved_gnt_min     = dcfg.gnt_delay_min;
+    saved_gnt_max     = dcfg.gnt_delay_max;
+    dcfg.zero_delays   = 1'b0;
+    dcfg.gnt_delay_min = cfg.cheriot_disable_gnt_delay;
+    dcfg.gnt_delay_max = cfg.cheriot_disable_gnt_delay + 2;
+
+    while (!dut_vif.dut_cb.lsu_ctx_wait_gnt1) begin
+      clk_vif.wait_clks(1);
+      if (++waited > 5000) begin
+        `uvm_fatal(`gfn, $sformatf("No CSC reached LSU state CTX_WAIT_GNT1 within %0d cycles of the write to 0x%08h",
+                                   waited, cfg.cheriot_disable_on_write))
+      end
+    end
+    clk_vif.wait_clks(2);
+    if (!dut_vif.dut_cb.lsu_ctx_wait_gnt1) begin
+      `uvm_fatal(`gfn, "The CSC left CTX_WAIT_GNT1 before the pin was lowered: the 1->0 path was not reached")
+    end
+
+    `DV_ASSERT_CTRL_REQ("tb_cheriot_enable_one_way", 1'b0)
+    `DV_ASSERT_CTRL_REQ("tb_no_alerts_triggered", 1'b0)
+    dut_vif.dut_cb.cheriot_enable <= ibex_pkg::IbexMuBiOff;
+    `uvm_info(`gfn, "cheriot_enable_i lowered (On -> Off) while a CSC waits in CTX_WAIT_GNT1", UVM_LOW)
+
+    for (int unsigned i = 0; i < cfg.cheriot_disable_alert_window; i++) begin
+      clk_vif.wait_clks(1);
+      if (!dut_vif.dut_cb.lsu_ctx_wait_gnt1 && i < 4) begin
+        `uvm_info(`gfn, $sformatf("LSU left CTX_WAIT_GNT1 %0d cycle(s) after the pin was lowered", i + 1),
+                  UVM_LOW)
+      end
+      if (dut_vif.dut_cb.alert_major_internal) begin
+        alert_seen = 1'b1;
+        `uvm_info(`gfn, $sformatf("alert_major_internal_o raised %0d cycle(s) after the pin was lowered", i + 1),
+                  UVM_LOW)
+        break;
+      end
+    end
+    if (!alert_seen) begin
+      `uvm_error(`gfn, $sformatf({"REQ_BCK_06: cheriot_enable_i lowered On -> Off while running, and ",
+                                  "alert_major_internal_o was not raised within %0d cycles: the capability ",
+                                  "checks were switched off silently"}, cfg.cheriot_disable_alert_window))
+    end
+
+    dcfg.zero_delays   = saved_zero_delays;
+    dcfg.gnt_delay_min = saved_gnt_min;
+    dcfg.gnt_delay_max = saved_gnt_max;
+  endtask
 
   virtual task wait_for_mem_txn(
     input bit [ibex_mem_intf_pkg::ADDR_WIDTH-1:0] ref_addr,

@@ -1,0 +1,121 @@
+# Copyright lowRISC contributors.
+# Licensed under the Apache License, Version 2.0, see LICENSE for details.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Expression-coverage closure: directed tests for the expression rows of ibex_top.u_ibex_core that
+# the full UVM regression never hit (formal_cov/unr/uncovered_after_exclude.txt, 2026-10-09, after
+# the Jasper UNR exclusions and the waivers of waivers/coverage_waivers_xlm.tcl). Each test header
+# names the expressions and rows it targets and where its expected values come from. Rows that
+# cannot occur in the verified configuration are waived, with their reasons, in
+# coverage_waivers_xlm.tcl (ibex_waive_expr), not here.
+#
+# Configs are shared across all directed_testlist*.yaml files (directed_test_schema.py):
+# riscv-tests is defined in directed_testlist.yaml, cheriot-dv-tests in
+# directed_testlist_cheriot_traps.yaml. +disable_spurious_dside_responses=1 for the reason given at
+# the top of directed_testlist.yaml: every test here owns a trap handler that fails on a trap it
+# did not plan for.
+
+- test: cov_expr_pmp_tor
+  desc: >
+    PMP TOR entries whose top is not above their bottom match nothing (Privileged ISA, PMP): for
+    every entry 0..15, an M-mode fetch and load at exactly the entry's start succeed while the
+    entry is locked with no permissions (mseccfg.RLB = 1 so entries can be rewritten); a fetch at
+    the start of a locked TOR entry [X, X+16) succeeds with X and faults (mcause 1, mtval X)
+    without. Also an instruction access fault at pc 0 (mtval 0) and an exception taken with the
+    mtvec base at 0 (handler copied to address 0). Targets ibex_pmp.sv region_match_all (TOR),
+    ibex_controller.sv csr_mtval_o for fetch faults and ibex_if_stage.sv exc_pc (EXC_PC_EXC).
+    Spike cosim on. TEST_FAIL code in gp (test header).
+  iterations: 1
+  test_srcs: cov_expr_pmp_tor/cov_expr_pmp_tor.S
+  config: riscv-tests
+  sim_opts: "+disable_spurious_dside_responses=1 +enable_bad_intg_on_uninit_access=0"
+
+- test: cov_expr_fetch_wrap
+  desc: >
+    A 32-bit instruction at 0xFFFFFFFE whose second half wraps to address 0: it executes when
+    nothing denies address 0, and with a locked no-X TOR entry [0, 4) its fetch faults with
+    mcause 1, mepc 0xFFFFFFFE, mtval 0 (pc + 2). Targets ibex_controller.sv csr_mtval_o with
+    instr_fetch_err_plus2_i. Cosim off (Spike forms pc + 2 in 64 bits); self-checking, TEST_FAIL
+    code in gp.
+  iterations: 1
+  test_srcs: cov_expr_fetch_wrap/cov_expr_fetch_wrap.S
+  config: riscv-tests
+  sim_opts: "+disable_cosim=1 +disable_spurious_dside_responses=1 +enable_bad_intg_on_uninit_access=0"
+
+- test: cov_expr_rv_misc
+  desc: >
+    rori and bexti with shamt 33 (instr[25] = 1, reserved on RV32) raise an illegal instruction
+    exception with mtval = the instruction and leave rd unwritten. Targets the rori/bexti
+    legality term of ibex_decoder.sv (OP-IMM funct3 101). Spike cosim on. TEST_FAIL code in gp.
+  iterations: 1
+  test_srcs: cov_expr_rv_misc/cov_expr_rv_misc.S
+  config: riscv-tests
+  sim_opts: "+disable_spurious_dside_responses=1"
+
+- test: cov_expr_counter_inhibit
+  desc: >
+    minstret and mhpmcounter10 (compressed instructions retired) count exactly (N + 1 / the
+    compressed ones), stay frozen while mcountinhibit bits 2 and 10 are set and instructions
+    (8 compressed, 8 not) retire, then count again. Targets ibex_cs_registers.sv mhpmcounter[2]
+    and gen_compressed_instr_cnt (instr_ret*_spec_i & ~mcountinhibit). Cosim off: this Spike does
+    not inhibit minstret (see counter_high_half_write). TEST_FAIL code in gp.
+  iterations: 1
+  test_srcs: cov_expr_counter_inhibit/cov_expr_counter_inhibit.S
+  config: riscv-tests
+  sim_opts: "+disable_cosim=1 +disable_spurious_dside_responses=1"
+
+- test: cov_expr_intg_err
+  desc: >
+    A load with bad integrity raises the internal NMI (mcause 0xFFFFFFE0, mtval its address, rd
+    unwritten); the NMI handler loads it again, so a second internal NMI is pending while
+    nmi_mode blocks it, and it is taken right after the handler's mret (same mepc); the
+    instructions after the first load each execute once. Then four Zcmp encodings (cm.push
+    rlist 4, cm.pop rlist 4 and 5, cm.mvsa01) fetched with bad integrity each raise an
+    instruction access fault at their address and change nothing. Integrity errors are injected
+    by address (+dside/iside_intg_err_lo/hi). Targets ibex_core.sv RVFI rvfi_ext_stage_nmi_int
+    (irq_nm_int pending without a capture) and ibex_compressed_decoder.sv CmIdle
+    `valid_i && id_in_ready_i` with valid_i = 0. core_ibex_cheriot_mem_err_test (mode-agnostic)
+    requires a bus alert per integrity error and no other alert. Cosim off; TEST_FAIL code in gp.
+  iterations: 1
+  test_srcs: cov_expr_intg_err/cov_expr_intg_err.S
+  config: riscv-tests
+  rtl_test: core_ibex_cheriot_mem_err_test
+  sim_opts: >-
+    +disable_cosim=1 +disable_spurious_dside_responses=1 +enable_bad_intg_on_uninit_access=0
+    +dside_intg_err_lo=80002000 +dside_intg_err_hi=80002003
+    +iside_intg_err_lo=80001000 +iside_intg_err_hi=8000100f
+    +cheriot_mem_err_min_bus_alerts=6
+
+- test: cov_expr_step_irq
+  desc: >
+    A single step (dcsr.step, stepie = 0) with mstatus.MIE set and the timer interrupt pending:
+    exactly one instruction runs, debug mode is re-entered with dcsr.cause 4, and after the next
+    dret the timer interrupt is taken with mepc = that dpc (Debug Spec 0.13.2). The bench raises
+    irq_timer_i at the program's wfi and debug_req_i on a doorbell store
+    (core_ibex_stall_events_test). Targets ibex_core.sv RVFI captured_taken (capture in
+    DBG_TAKEN_IF without debug_req_i). Spike cosim on; needs spike_cosim.cc to hide pending
+    interrupts from Spike while it single-steps (Ibex dcsr.stepie = 0; this Spike has no stepie and
+    takes the interrupt before the step's debug entry). Any other mismatch points at the RVFI
+    interrupt capture. TEST_FAIL code in gp.
+  iterations: 2
+  test_srcs: cov_expr_step_irq/cov_expr_step_irq.S
+  config: riscv-tests
+  rtl_test: core_ibex_stall_events_test
+  sim_opts: "+disable_spurious_dside_responses=1 +irq_timer_on_wfi=1 +dbg_req_on_write=80100100"
+
+- test: cov_expr_cheriot_dbg
+  desc: >
+    CHERIoT mode (pin raised by +cheriot_enable_on_write): a breakpoint trap through MTCC with
+    address 0 runs the handler copied there and returns; in one debug session (doorbell store,
+    core_ibex_stall_events_test) DEPCC := NULL reads back untagged with address 0, and an ecall
+    in debug mode goes to the debug exception address and leaves mcause and MEPCC unchanged.
+    Targets ibex_if_stage.sv exc_pc (CHERIoT arm) and ibex_cs_registers.sv gen_scr (DEPCC read,
+    mepc_cap save in debug mode). Cosim off (CHERIoT-Sail has no debug mode); exit code in a0
+    (test header).
+  iterations: 1
+  test_srcs: cov_expr_cheriot_dbg/cov_expr_cheriot_dbg.S
+  config: cheriot-dv-tests
+  rtl_test: core_ibex_stall_events_test
+  sim_opts: >-
+    +cheriot_enable_on_write=80200000 +disable_cosim=1 +disable_spurious_dside_responses=1
+    +require_signature_addr=1 +dbg_req_on_write=80100100

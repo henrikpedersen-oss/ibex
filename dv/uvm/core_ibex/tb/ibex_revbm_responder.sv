@@ -83,7 +83,7 @@ module ibex_revbm_responder #(
              ibex_revbm_pkg::RevBitmapAddrWidth, ibex_revbm_pkg::RevBitmapBaseAddr);
     end
     if (!MemECC && ibex_revbm_pkg::uses_intg_errors()) begin
-      $fatal(1, "[REVBM] +revbm_err_kind=intg|mixed needs MemECC (SecureIbex=1): without it TRVK ignores the ECC bits and the injected error would not revoke");
+      $fatal(1, "[REVBM] +revbm_err_kind=intg|both|mixed needs MemECC (SecureIbex=1): without it TRVK ignores the ECC bits and the injected error would not revoke");
     end
     heap_base_q   = ibex_revbm_pkg::get_heap_base();
     gnt_delay_max = ibex_revbm_pkg::gnt_delay_max;
@@ -144,7 +144,7 @@ module ibex_revbm_responder #(
         rsp_wait_q     <= draw_delay(rsp_delay_max);
         gnt_wait_q     <= draw_delay(gnt_delay_max);
         rsp_data_q     <= ibex_revbm_pkg::bitmap_word(word);
-        rsp_dev_err_q  <= ibex_revbm_pkg::word_err(word) && !ibex_revbm_pkg::word_err_is_intg(word);
+        rsp_dev_err_q  <= ibex_revbm_pkg::word_dev_err(word);
         rsp_intg_err_q <= ibex_revbm_pkg::word_err_is_intg(word);
       end
     end

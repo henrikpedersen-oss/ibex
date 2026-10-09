@@ -1,0 +1,55 @@
+# Copyright lowRISC contributors.
+# Licensed under the Apache License, Version 2.0, see LICENSE for details.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Tests of the core with the real RISC-V debug module (vendor/pulp_riscv_dbg dm_top, with the
+# CHERIoT patches), driven over its DMI port by core_ibex_dm_test.
+#
+# They need the DM build of the testbench and are skipped by all_directed without it
+# (requires_dm, scripts/metadata.py):
+#   make uvm-test-xlm TEST=dm_basic,dm_basic_cheriot DM=1
+# DM=1 compiles core_ibex_tb_top with +define+IBEX_DM_REAL and ibex_dv_dm.f: dm_top behind
+# ibex_dm_obi_mux on both core buses, the core's DmHaltAddr/DmExceptionAddr at the debug ROM
+# (0x1A11_0800 / 0x1A11_0810), debug_req_i from dm_top instead of the TB debug agent.
+#
+# Cosim off: neither Spike nor CHERIoT-Sail models the debug module's ROM and abstract-command
+# memory, so the tests are self-checking (DMI read-back in core_ibex_dm_test, register checks in
+# the program after resume). +disable_spurious_dside_responses=1: a spurious d-side response
+# would land among the DM's one-cycle responses (ibex_dm_obi_mux asserts against that) and is not
+# what these tests are about.
+#
+# Configs are shared across the directed testlists; cheriot-dv-tests (directed_testlist_cheriot_
+# traps.yaml) links at 0x80000000 with the rv32imc toolchain and needs no crt.
+
+- test: dm_basic
+  desc: >
+    Real debug module, RISC-V mode. The program fills registers and spins; over DMI the test
+    activates the DM, halts the hart, reads GPRs (x8-x15, x16, x31) and dcsr/dpc with abstract
+    commands, checks that a 64-bit access is refused (cmderr 2) and that an abstract read of an
+    unimplemented CSR reports the debug-mode exception (cmderr 3), runs a program buffer
+    (addi a1; ebreak), writes x20 and the mailbox a2, and resumes. The program then checks the
+    written registers and that s0/a0, which every abstract command borrows, were restored.
+    Self-checking, cosim off. Returns 0 on success; codes in the test header.
+  iterations: 1
+  test_srcs: dm_basic/dm_basic.S
+  config: cheriot-dv-tests
+  rtl_test: core_ibex_dm_test
+  requires_dm: true
+  sim_opts: "+cosim_off=1 +disable_spurious_dside_responses=1"
+
+- test: dm_basic_cheriot
+  desc: >
+    Real debug module, CHERIoT mode (cheriot_enable_i asserted from reset, so the DM selects its
+    CHERIoT debug ROM and CSpecialRW scratch handling). As dm_basic, plus 64-bit abstract register
+    reads of capability registers (s0, s1, a0, a5: address in data0, metadata in data1, checked
+    against the program's own csc images; the tag from the testbench's view of the core's store to
+    data0) and of DEPCC through the SCR path, a 64-bit write of an untagged capability to a4, and
+    an abstract read of x16 that must fault (no x16 in CHERIoT mode, cmderr 3). After resume the
+    program checks that s0/a0 kept their tags (DScratchC0/1) and the capability written to a4.
+    Self-checking, cosim off. Returns 0 on success; codes in the test header.
+  iterations: 1
+  test_srcs: dm_basic_cheriot/dm_basic_cheriot.S
+  config: cheriot-dv-tests
+  rtl_test: core_ibex_dm_test
+  requires_dm: true
+  sim_opts: "+enable_cheriot_seq=1 +cosim_off=1 +disable_spurious_dside_responses=1"

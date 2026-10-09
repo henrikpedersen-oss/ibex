@@ -12,11 +12,20 @@
 // The comparison itself (trap, next PC, integer and capability destination, memory access, and
 // every exclusion) lives in ibex_sail_rvfi_cmp, shared with the UVM cosim's RISC-V Sail checker.
 //
+// Interrupts (QuickCheckVEngine's interrupt generator): the driver reports the interrupt lines it
+// raises and clears (set_irq_mip), so the model's pending bits come from the stimulus, never from
+// the core. At every retirement the scoreboard asks whether the DUT entered an interrupt handler
+// before the instruction (rvfi_intr without a preceding trap) and whether the model, in its own
+// state, would take an interrupt with those bits pending. They must agree: a core that takes an
+// interrupt the model has not enabled fails, and so does one that never takes an enabled one
+// (otherwise both sides would simply run on and agree). When both take it, the model takes it from
+// its own state (cause, handler address) before stepping the handler's first instruction.
+//
 // Plusargs (to prove the checks can fail):
 //   +dii_sb_corrupt=<n>             corrupt the RTL side of the n-th retired instruction (1-based)
 //                                   that exercises the chosen field
-//   +dii_sb_corrupt_field=<field>   rd | pc | trap | mem | insn | rdtag | wtag (default rd;
-//                                   rdtag/wtag need the CHERIoT flavour)
+//   +dii_sb_corrupt_field=<field>   rd | pc | trap | mem | insn | rdtag | wtag | intr (default rd;
+//                                   rdtag/wtag need the CHERIoT flavour; intr: see check_interrupt)
 //   +dii_sb_max_errors=<n>          print only the first n mismatches (default 100); all are counted
 class ibex_dii_scoreboard extends uvm_scoreboard;
   `uvm_component_utils(ibex_dii_scoreboard)
@@ -33,6 +42,11 @@ class ibex_dii_scoreboard extends uvm_scoreboard;
 
   // Words the core has taken (dii_ack) and not yet retired, oldest first.
   protected bit [31:0] injected_q[$];
+  // The DII interrupt lines as mip bits (3 MSIP, 7 MTIP, 11 MEIP), as the driver drives them.
+  protected bit [31:0] irq_mip;
+  // The previous retirement trapped: an rvfi_intr that follows is that trap's handler.
+  protected bit        prev_trap;
+  int unsigned num_interrupts;
   // Only the first max_errors mismatches are printed; one divergence usually cascades.
   int unsigned max_errors = 100;
 
@@ -52,6 +66,15 @@ class ibex_dii_scoreboard extends uvm_scoreboard;
 
   // (Re)initialise the model to the core's reset state, with empty memory.
   virtual function void model_init();
+  endfunction
+
+  // 1 if the model, in its current state, would take an interrupt with mip pending.
+  virtual function bit model_irq_would_take(bit [31:0] mip);
+    return 1'b0;
+  endfunction
+
+  // The model takes the interrupt from its own state; problems append to errs.
+  virtual function void model_take_interrupt(bit [31:0] mip, ref string errs[$]);
   endfunction
 
   // Step the model over one retired instruction, executing insn. Flavour-specific checks append
@@ -93,12 +116,37 @@ class ibex_dii_scoreboard extends uvm_scoreboard;
       end
       model_init();
       cmp.reset();
+      irq_mip   = '0;
+      prev_trap = 1'b0;
     end
   endtask
 
   // Called by the driver for every word the core takes.
   function void injected(bit [31:0] insn);
     injected_q.push_back(insn);
+  endfunction
+
+  // Called by the driver when it raises or clears interrupt lines.
+  function void set_irq_mip(bit [31:0] mip);
+    irq_mip = mip;
+  endfunction
+
+  // Did the DUT enter an interrupt handler before this retirement, and would the model? See the
+  // header. Advances prev_trap.
+  protected function void check_interrupt(ibex_rvfi_seq_item rtl, ref string errs[$]);
+    bit dut_took   = rtl.intr && !prev_trap;
+    bit model_took = (irq_mip != '0) && model_irq_would_take(irq_mip);
+    prev_trap = rtl.trap;
+    if (dut_took && !model_took) begin
+      errs.push_back($sformatf({"DUT entered an interrupt handler the model would not take ",
+                                "(stimulus mip=0x%08x, DUT pre_mip=0x%08x)"}, irq_mip, rtl.pre_mip));
+    end else if (!dut_took && model_took) begin
+      errs.push_back($sformatf({"interrupt pending and enabled in the model (stimulus ",
+                                "mip=0x%08x), DUT executed the instruction instead"}, irq_mip));
+    end else if (dut_took) begin
+      model_take_interrupt(irq_mip, errs);
+      num_interrupts++;
+    end
   endfunction
 
   // Pairs a retirement with the oldest injected word and returns the word to step the model with.
@@ -157,6 +205,7 @@ class ibex_dii_scoreboard extends uvm_scoreboard;
     rtl = cmp.maybe_corrupt(item, info);
     if (info != "") `uvm_info(`gfn, {"+dii_sb_corrupt: ", info}, UVM_NONE)
     if (take_injected(rtl, step_insn, errs)) begin
+      check_interrupt(rtl, errs);
       cmp.check_trap_target(rtl, errs);
       model_step(rtl, step_insn, model, errs);
       cmp.compare(rtl, model, errs);
@@ -178,8 +227,8 @@ class ibex_dii_scoreboard extends uvm_scoreboard;
 
   virtual function void report_phase(uvm_phase phase);
     super.report_phase(phase);
-    `uvm_info(`gfn, $sformatf("%s: %0d instructions compared, %0d mismatches", get_type_name(),
-                              num_steps, num_mismatches), UVM_NONE)
+    `uvm_info(`gfn, $sformatf("%s: %0d instructions compared, %0d interrupts taken, %0d mismatches",
+                              get_type_name(), num_steps, num_interrupts, num_mismatches), UVM_NONE)
   endfunction
 endclass : ibex_dii_scoreboard
 
@@ -199,12 +248,32 @@ class ibex_dii_cheriot_sail_scoreboard extends ibex_dii_scoreboard;
     cheriot_sail_cosim_init(BootAddr);
   endfunction
 
+  virtual function bit model_irq_would_take(bit [31:0] mip);
+    return cheriot_sail_cosim_irq_would_take(mip) != 0;
+  endfunction
+
+  virtual function void model_take_interrupt(bit [31:0] mip, ref string errs[$]);
+    cheriot_sail_cosim_clear_errors();
+    if (cheriot_sail_cosim_take_interrupt(mip) != 0) begin
+      for (int i = 0; i < cheriot_sail_cosim_get_num_errors(); i++) begin
+        errs.push_back(cheriot_sail_cosim_get_error(i));
+      end
+    end
+  endfunction
+
   virtual function void model_step(ibex_rvfi_seq_item item, bit [31:0] insn,
                                    output model_result_t res, ref string errs[$]);
     res = '{default: '0};
     // The model's counters do not advance on their own; later arithmetic on a mcycle read would
     // otherwise diverge.
     cheriot_sail_cosim_set_mcycle(item.mcycle);
+    // Bench inputs of ibex's CSRs in the model's platform (spec GAP-CS-3), as in the UVM cosim:
+    // what the HPM counters counted (the value the instruction reads) and the scrambling-key
+    // handshake (cpuctrlsts bit 8). mcounteren_writable_i is tied On here, the model's default.
+    for (int i = 0; i < 10; i++) begin
+      cheriot_sail_cosim_set_mhpmcounter(3 + i, {item.mhpmcountersh[i], item.mhpmcounters[i]});
+    end
+    cheriot_sail_cosim_set_ic_scr_key_valid(item.ic_scr_key_valid);
     cheriot_sail_cosim_clear_errors();
     // compare() checks the destination for both flavours, so step()'s own checks are switched
     // off: cheri_rf_we=0 skips its capability check and rtl_trap=1 its rd_wdata check. The model
@@ -265,6 +334,19 @@ class ibex_dii_riscv_sail_scoreboard extends ibex_dii_scoreboard;
     // Applied by the init that follows; repeated each time as init re-reads it.
     riscv_sail_cosim_configure(RamBase, RamSize, pmp_num_regions, pmp_granularity);
     riscv_sail_cosim_init(BootAddr);
+  endfunction
+
+  virtual function bit model_irq_would_take(bit [31:0] mip);
+    return riscv_sail_cosim_irq_would_take(mip) != 0;
+  endfunction
+
+  virtual function void model_take_interrupt(bit [31:0] mip, ref string errs[$]);
+    riscv_sail_cosim_clear_errors();
+    if (riscv_sail_cosim_take_interrupt(mip) != 0) begin
+      for (int i = 0; i < riscv_sail_cosim_get_num_errors(); i++) begin
+        errs.push_back(riscv_sail_cosim_get_error(i));
+      end
+    end
   endfunction
 
   virtual function void model_step(ibex_rvfi_seq_item item, bit [31:0] insn,

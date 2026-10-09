@@ -160,12 +160,16 @@ class QueryOpts:
 
 class SimOpts:
     def __init__(self, cmd_name, description, param_set_fn, define_set_fn,
-                 hierarchy_sep):
+                 hierarchy_sep, params_as_defines=False):
         self.cmd_name = cmd_name
         self.description = description
         self.param_set_fn = param_set_fn
         self.define_set_fn = define_set_fn
         self.hierarchy_sep = hierarchy_sep
+        # Pass the bool/int parameters as <string_define_prefix><field>=<value>
+        # defines too, instead of parameter overrides on --ins_hier_path. The
+        # testbench then takes its parameter defaults from the defines.
+        self.params_as_defines = params_as_defines
 
     def setup_args(self, arg_subparser):
         output_argparser = arg_subparser.add_parser(
@@ -205,8 +209,14 @@ class SimOpts:
                 # Explicitly convert to 0/1 (handling genuine booleans)
                 val_as_int = int(val)
 
-                full_param = ins_hier_path + fld
-                param_opts = self.param_set_fn(full_param, str(val_as_int))
+                if self.params_as_defines:
+                    parameter_define = args.string_define_prefix + fld
+                    param_opts = self.define_set_fn(parameter_define,
+                                                    str(val_as_int))
+                else:
+                    full_param = ins_hier_path + fld
+                    param_opts = self.param_set_fn(full_param,
+                                                   str(val_as_int))
                 sim_opts += [shlex.quote(arg) for arg in param_opts]
 
         return ' '.join(sim_opts)
@@ -277,6 +287,18 @@ def main():
         SimOpts('xlm_opts', 'Xcelium compile',
                 lambda p, v: ['-defparam', p + '=' + v],
                 lambda d, v: ['-define', d + '=' + v], '.'),
+        # Xcelium compile with every parameter as a define. A -defparam on the
+        # top-level module (even an unused one) makes the Jasper UNR App's
+        # Xcelium-driven flow (xrun -unr) discard every coverage item of the
+        # snapshot as "not synthesized during UNR elaboration" (bisected
+        # 2026-10-07; a bare testbench with the same RTL, parameters and
+        # coverage configuration maps every item). The UVM testbench therefore
+        # takes its parameter defaults from IBEX_CFG_<param> defines and is
+        # compiled with this outputter instead of xlm_opts.
+        SimOpts('xlm_define_opts', 'Xcelium compile, parameters as defines',
+                lambda p, v: [],
+                lambda d, v: ['-define', d + '=' + v], '.',
+                params_as_defines=True),
         SimOpts('dsim_opts', 'DSim compile',
                 lambda p, v: ['-defparam', p + '=' + v],
                 lambda d, v: ['+define+' + d + '=' + v], '.'),

@@ -21,6 +21,29 @@
 #   MTCC perms=0x1EB (EX bit set), base=0, len=0xFFFFFFFF, addr=0, type=0.
 #   Then SW revokes: reload → tag=0.
 #
+# ── Round-trip 3: one capability per exponent E = 2, 4, 5, 7, 8, 9, 11..14 ─
+#   CSetBoundsExact(MTDC @ 0x80000000, 0x100 << E): CHERIoT-Sail setCapBounds
+#   picks exactly E for that length (T - B = 0x100), and the 2^E-aligned base
+#   makes it exact, so the source is tagged. After CSC/CLC: tag = 1, length
+#   0x100 << E, base 0x80000000 (LoadCapImm returns the stored bits; the MTDC
+#   authority has MC, LG and LM, so nothing is attenuated).
+#   Round-trip 3b does the same for E = 1, 3, 6 and 10, so that every exponent
+#   bin of cheriot_uarch_cg.cp_clc_csc_bounds_roundtrip (mid[1..13], large_exp,
+#   via a tagged CLC result) is reached by this test alone; on 2026-10-09
+#   mid[1], mid[3] and mid[6] were reached by nothing.
+#
+# ── Round-trip 4: data capability sealed with otype 14 ────────────────────
+#   CSeal(MTDC, MScratchC @ 14): tag 1, CGetType 14 (a non-executable cap
+#   takes otypes 9-15, stored as the 3-bit field 6). After CSC/CLC: tag 1,
+#   CGetType 14.
+#
+# ── Round-trip 5: data capability sealed with otype 15 ────────────────────
+#   As round-trip 4 with MScratchC @ 15: the 3-bit otype field is 7, the
+#   sealed[7] bin of cheriot_uarch_cg.cp_clc_csc_otype_roundtrip (a tagged CLC
+#   result with otype field 7). Round-trip 4 gives sealed[6]. On 2026-10-09
+#   (seed-4408 merge) sealed[7] was reached by nothing: only random CSC/CLC
+#   traffic (cheriot_rand_operands) had produced it before.
+#
 # Memory: capabilities stored at 0x80080000 (8-byte-aligned data address,
 #         well above the instruction range ending at 0x8003FFFF).
 #
@@ -60,7 +83,43 @@
 #   15  = unexpected: mstatus.MIE cleared
 #   16  = unexpected: mcause non-zero (exception during test)
 #   17  = unexpected: mip non-zero
+#   20+4i.. 23+4i = round-trip 3, i-th exponent of the list above (i = 0..9):
+#         source tag / loaded tag / loaded length / loaded base
+#   60-63 = round-trip 4: source tag / source otype / loaded tag / loaded otype
+#   64+4i.. 67+4i = round-trip 3b, E = 1, 3, 6, 10 (i = 0..3), as round-trip 3
+#   80-83 = round-trip 5: source tag / source otype / loaded tag / loaded otype
 # =============================================================================
+
+#include "cheriot_dv.h"
+
+# Return \code from main unless \a == \b.
+.macro RB_CHECK a, b, code
+    beq     \a, \b, 1f
+    li      a0, \code
+    ret
+1:
+.endm
+
+# Round-trip 3 for one exponent: a2 = CSetBoundsExact(MTDC @ 0x80000000, 0x100 << e),
+# CSC to 0(a0), CLC back into a3. Codes \code .. \code+3.
+.macro RT_EXP e, code
+    cspecialr a2, SCR_MTDC
+    li      t0, 0x80000000
+    csetaddr a2, a2, t0
+    li      t1, (0x100 << \e)
+    csetboundsexact a2, a2, t1
+    li      t2, 1
+    cgettag a5, a2
+    RB_CHECK a5, t2, \code
+    csc     a2, a0, 0
+    clc     a3, a0, 0
+    cgettag a5, a3
+    RB_CHECK a5, t2, (\code + 1)
+    cgetlen a5, a3
+    RB_CHECK a5, t1, (\code + 2)
+    cgetbase a5, a3
+    RB_CHECK a5, t0, (\code + 3)
+.endm
 
 .globl main
 main:
@@ -166,6 +225,60 @@ main:
     .word   0x00053683              # lc a3, 0(a0)
     .word   0xFE4687DB              # cgettag a5, a3
     bnez    a5, .Lfail2_revoke
+
+    # ── Round-trip 3: exponents ─────────────────────────────────────────────
+    # a0 still holds MTDC with cursor=0x80080000 (the authority).
+    RT_EXP  2, 20
+    RT_EXP  4, 24
+    RT_EXP  5, 28
+    RT_EXP  7, 32
+    RT_EXP  8, 36
+    RT_EXP  9, 40
+    RT_EXP  11, 44
+    RT_EXP  12, 48
+    RT_EXP  13, 52
+    RT_EXP  14, 56
+    # ── Round-trip 3b: the remaining mid exponents ──────────────────────────
+    RT_EXP  1, 64
+    RT_EXP  3, 68
+    RT_EXP  6, 72
+    RT_EXP  10, 76
+
+    # ── Round-trip 4: otype 14 ──────────────────────────────────────────────
+    cspecialr a2, SCR_MTDC
+    cspecialr a4, SCR_MSCRATCHC     # sealing root
+    li      t0, 14
+    csetaddr a4, a4, t0
+    cseal   a2, a2, a4
+    li      t2, 1
+    cgettag a5, a2
+    RB_CHECK a5, t2, 60
+    cgettype a5, a2
+    RB_CHECK a5, t0, 61
+    csc     a2, a0, 0
+    clc     a3, a0, 0
+    cgettag a5, a3
+    RB_CHECK a5, t2, 62
+    cgettype a5, a3
+    RB_CHECK a5, t0, 63
+
+    # ── Round-trip 5: otype 15 ──────────────────────────────────────────────
+    cspecialr a2, SCR_MTDC
+    cspecialr a4, SCR_MSCRATCHC     # sealing root
+    li      t0, 15
+    csetaddr a4, a4, t0
+    cseal   a2, a2, a4
+    li      t2, 1
+    cgettag a5, a2
+    RB_CHECK a5, t2, 80
+    cgettype a5, a2
+    RB_CHECK a5, t0, 81
+    csc     a2, a0, 0
+    clc     a3, a0, 0
+    cgettag a5, a3
+    RB_CHECK a5, t2, 82
+    cgettype a5, a3
+    RB_CHECK a5, t0, 83
 
     # ── Interrupt-state sanity check ────────────────────────────────────────
     # Any CHERIoT exception would have cleared MIE (mstatus.bit3) and set

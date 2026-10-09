@@ -15,16 +15,27 @@
 # funct7=0x0a -> cheriot_operator_o.CSET_BOUNDS_RNDN,
 # cheriot_setbounds_sel=SETBOUNDS_RNDN.
 #
-# len=300 is not a power of two, so it is NOT exactly representable at any
-# single exponent -- this is the same property cheriot_setboundsexact relies
-# on to prove rounding occurred. Here it proves CSetBounds and
-# CSetBoundsRoundDown genuinely diverge: from the same MTDC (base=0, cursor=0,
-# full range) and the same requested length, plain CSetBounds must round UP
-# (result length >= 300) while CSetBoundsRoundDown must round DOWN (result
-# length <= 300); if 300 required rounding at all (which it does), the two
-# results are strictly different lengths.
+# Choosing a length that actually requires rounding
+# -------------------------------------------------
+# The requested length must not be exactly representable, or round-up and
+# round-down produce the same answer and Test 4 cannot distinguish them.
 #
-#   Test 1 (CGetLen after CSetBoundsRoundDown(MTDC,300) <= 300)
+# CHERIoT compresses each bound to a 9-bit mantissa (CBOUND_W in
+# ibex_cheriot_pkg.sv). At base 0 the exponent E must satisfy len/2^E <= 511, and
+# the result is exact when len is a multiple of the 2^E granule. Every length up
+# to 511 is therefore exact at E=0.
+#
+# This test previously requested 300, which is exact -- CSetBounds,
+# CSetBoundsRoundDown and CSetBoundsExact all returned 300 and Test 4 compared
+# 300 against 300. len=1001 requires E=1 (1001 > 511) and is odd, so it is not a
+# multiple of the 2-byte granule: round-down gives 1000, round-up gives 1002.
+#
+# That makes the two operators genuinely diverge: from the same MTDC (base=0,
+# cursor=0, full range) and the same requested length, plain CSetBounds must
+# round UP (result length >= 1001) while CSetBoundsRoundDown must round DOWN
+# (result length <= 1001), so the results are strictly different lengths.
+#
+#   Test 1 (CGetLen after CSetBoundsRoundDown(MTDC,1001) <= 1001)
 #   Test 2 (CGetBase after CSetBoundsRoundDown = 0, cursor was 0)
 #   Test 3 (tag = 1: rounding down from a full-range cap always stays in-bounds)
 #   Test 4 (round-down length is strictly less than plain CSetBounds's
@@ -46,17 +57,17 @@
 main:
     csrsi   mstatus, 8              # set mstatus.MIE (bit 3)
 
-    # ── CSetBoundsRoundDown(MTDC, 300) ────────────────────────────────────────
+    # ── CSetBoundsRoundDown(MTDC, 1001) ───────────────────────────────────────
     .word   0x03D0055B              # cspecialr ca0, mtdc
-    li      a1, 300
+    li      a1, 1001
     .word   0x14B5055B              # csetboundsrndn ca0, ca0, a1
     .word   0xFEA505DB              # cmove ca1, ca0  (save before cget* clears ca0)
 
-    # ── Test 1: length <= 300 (rounded DOWN, never exceeds request) ──────────
+    # ── Test 1: length <= 1001 (rounded DOWN, never exceeds request) ─────────
     .word   0xFE35855B              # cgetlen a0, ca1
     mv      t0, a0                  # t0 = round-down length, kept for Test 4
-    li      a2, 301
-    bgeu    a0, a2, .Lfail_test1    # fail if length >= 301 (i.e. length > 300)
+    li      a2, 1002
+    bgeu    a0, a2, .Lfail_test1    # fail if length >= 1002 (i.e. length > 1001)
 
     # ── Test 2: base = 0 (cursor was 0) ───────────────────────────────────────
     .word   0xFE25855B              # cgetbase a0, ca1
@@ -67,9 +78,9 @@ main:
     li      a2, 1
     bne     a0, a2, .Lfail_test3
 
-    # ── Plain CSetBounds(MTDC, 300) for comparison (rounds UP) ────────────────
+    # ── Plain CSetBounds(MTDC, 1001) for comparison (rounds UP) ──────────────
     .word   0x03D0055B              # cspecialr ca0, mtdc
-    li      a1, 300
+    li      a1, 1001
     .word   0x10B5055B              # csetbounds ca0, ca0, a1
     .word   0xFE35055B              # cgetlen a0, ca0   -> round-up length
 

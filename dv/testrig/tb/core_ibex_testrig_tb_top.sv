@@ -595,11 +595,13 @@ module core_ibex_testrig_tb_top;
       if (dut.u_ibex_top.u_ibex_core.csr_shadow_err)          src = {src, " core.csr_shadow_err"};
       if (dut.u_ibex_top.u_ibex_core.cheriot_fatal_err)       src = {src, " core.cheriot_fatal"};
       if (dut.u_ibex_top.u_ibex_core.cheriot_enable_mubi_err) src = {src, " core.cheriot_enable_mubi"};
+      if (dut.u_ibex_top.u_ibex_core.cheriot_disable_err)     src = {src, " core.cheriot_disable"};
       if (`IBEX_SHADOW_CORE.rf_ecc_err_comb)                  src = {src, " shadow.rf_ecc_err"};
       if (`IBEX_SHADOW_CORE.pc_mismatch_alert)                src = {src, " shadow.pc_mismatch"};
       if (`IBEX_SHADOW_CORE.csr_shadow_err)                   src = {src, " shadow.csr_shadow_err"};
       if (`IBEX_SHADOW_CORE.cheriot_fatal_err)                src = {src, " shadow.cheriot_fatal"};
       if (`IBEX_SHADOW_CORE.cheriot_enable_mubi_err)          src = {src, " shadow.cheriot_enable_mubi"};
+      if (`IBEX_SHADOW_CORE.cheriot_disable_err)              src = {src, " shadow.cheriot_disable"};
       if (dut.u_ibex_top.gen_lockstep.u_ibex_lockstep.outputs_mismatch)
         src = {src, " lockstep.outputs_mismatch"};
       if (dut.u_ibex_top.gen_lockstep.u_ibex_lockstep.rst_shadow_cnt_err)
@@ -624,20 +626,25 @@ module core_ibex_testrig_tb_top;
   // cheriot_fatal_err (ibex_cs_registers.sv, "exception with invalid mepcc ... need external
   // reset"). TestRIG's random CSpecialRW writes MTCC with capabilities CHERIoT legalises to
   // untagged (e.g. without EX), so this is the RTL working as designed; TestRIG resets between
-  // tests. Exempt only while cheriot_fatal_err is the sole source: any other source still fails.
+  // tests. Exempt only while cheriot_fatal_err is the sole source: any other source still fails,
+  // including cheriot_disable_err (REQ_BCK_06: cheriot_enable_i left On while running), which is
+  // never expected here: the flavour sets the pin during build, while the initial reset is still
+  // asserted, and it must not change mid-test (core_ibex_dii_intf.sv).
   logic cheriot_fatal_only;
   logic core_other_internal;
   assign core_other_internal = dut.u_ibex_top.u_ibex_core.rf_ecc_err_comb |
                                dut.u_ibex_top.u_ibex_core.pc_mismatch_alert |
                                dut.u_ibex_top.u_ibex_core.csr_shadow_err |
                                dut.u_ibex_top.u_ibex_core.cheriot_enable_mubi_err |
+                               dut.u_ibex_top.u_ibex_core.cheriot_disable_err |
                                dut.u_ibex_top.icache_alert_major_internal;
   if (SecureIbex) begin : g_fatal_only_lockstep
     assign cheriot_fatal_only =
         (dut.u_ibex_top.u_ibex_core.cheriot_fatal_err | `IBEX_SHADOW_CORE.cheriot_fatal_err) &
         ~core_other_internal &
         ~(`IBEX_SHADOW_CORE.rf_ecc_err_comb | `IBEX_SHADOW_CORE.pc_mismatch_alert |
-          `IBEX_SHADOW_CORE.csr_shadow_err | `IBEX_SHADOW_CORE.cheriot_enable_mubi_err) &
+          `IBEX_SHADOW_CORE.csr_shadow_err | `IBEX_SHADOW_CORE.cheriot_enable_mubi_err |
+          `IBEX_SHADOW_CORE.cheriot_disable_err) &
         ~(dut.u_ibex_top.gen_lockstep.u_ibex_lockstep.outputs_mismatch |
           dut.u_ibex_top.gen_lockstep.u_ibex_lockstep.rst_shadow_cnt_err);
   end else begin : g_fatal_only_single

@@ -12,10 +12,14 @@
 // with the RVFI quirk or model limitation that forces it.
 //
 // Fault injection (to prove the checks can fail): the owner reads +<prefix>_corrupt=<n> and
-// +<prefix>_corrupt_field=rd|pc|trap|mem|insn|rdtag|wtag through configure_corruption();
+// +<prefix>_corrupt_field=rd|pc|trap|mem|insn|rdtag|wtag|intr through configure_corruption();
 // maybe_corrupt() then flips one bit on the RTL side of the n-th retired instruction that
 // exercises that field. insn is checked by the TestRIG scoreboard (against the injected word),
-// rdtag/wtag only by CHERIoT runs (an integer write's tag, a capability store's tag).
+// rdtag/wtag only by CHERIoT runs (an integer write's tag, a capability store's tag). intr flips
+// rvfi_intr of a non-trapping retirement that does not follow a trap, for the TestRIG
+// scoreboard's interrupt check: on an
+// ordinary instruction it is an interrupt entry the model did not take (n=1 always is: the first
+// instruction of a run), on an interrupt handler's first instruction one the DUT did not take.
 class ibex_sail_rvfi_cmp extends uvm_object;
   `uvm_object_utils(ibex_sail_rvfi_cmp)
 
@@ -48,6 +52,9 @@ class ibex_sail_rvfi_cmp extends uvm_object;
   protected string       corrupt_field = "rd";
   protected int unsigned corrupt_candidates;
   protected bit          corrupt_applied;
+  // Whether the previous item passed to maybe_corrupt() trapped: rvfi_intr on the retirement after
+  // a trap marks the synchronous handler's first instruction, which the interrupt check ignores.
+  protected bit          corrupt_prev_trap;
 
   function new(string name = "ibex_sail_rvfi_cmp");
     super.new(name);
@@ -66,7 +73,7 @@ class ibex_sail_rvfi_cmp extends uvm_object;
     void'($value$plusargs({prefix, "_corrupt=%d"}, corrupt_at));
     void'($value$plusargs({prefix, "_corrupt_field=%s"}, corrupt_field));
     if (corrupt_at != 0 &&
-        !(corrupt_field inside {"rd", "pc", "trap", "mem", "insn", "rdtag", "wtag"})) begin
+        !(corrupt_field inside {"rd", "pc", "trap", "mem", "insn", "rdtag", "wtag", "intr"})) begin
       return $sformatf("Unknown +%s_corrupt_field=%s", prefix, corrupt_field);
     end
     return "";
@@ -81,8 +88,10 @@ class ibex_sail_rvfi_cmp extends uvm_object;
   function ibex_rvfi_seq_item maybe_corrupt(ibex_rvfi_seq_item item, output string info);
     ibex_rvfi_seq_item c;
     bit applicable;
+    bit prev_trap = corrupt_prev_trap;
 
     info = "";
+    corrupt_prev_trap = item.trap;
     if (corrupt_at == 0 || corrupt_applied) return item;
     case (corrupt_field)
       "rd":    applicable = !item.trap && item.rd_addr != 0 && !is_counter_csr_read(item.insn);
@@ -92,6 +101,9 @@ class ibex_sail_rvfi_cmp extends uvm_object;
       "rdtag": applicable = !item.trap && item.rd_addr != 0 && !item.rd_wcap[32] &&
                             !is_counter_csr_read(item.insn);
       "wtag":  applicable = !item.trap && item.mem_is_cap && item.mem_wmask != 0;
+      // Not after a trap either: ibex_dii_scoreboard check_interrupt() ignores rvfi_intr there, so
+      // a flip would be applied and never seen.
+      "intr":  applicable = !item.trap && !prev_trap;
       default: applicable = 1'b1;
     endcase
     if (!applicable || ++corrupt_candidates < corrupt_at) return item;
@@ -105,6 +117,7 @@ class ibex_sail_rvfi_cmp extends uvm_object;
       "insn": c.insn[7]      = ~c.insn[7];
       "rdtag": c.rd_wcap[32] = 1'b1;
       "wtag": c.mem_wcap[32] = ~c.mem_wcap[32];
+      "intr": c.intr         = ~c.intr;
     endcase
     corrupt_applied = 1'b1;
     info = $sformatf("corrupted %s of pc=0x%08x insn=0x%08x", corrupt_field, item.pc, item.insn);

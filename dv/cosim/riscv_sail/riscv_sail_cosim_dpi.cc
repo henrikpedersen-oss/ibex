@@ -242,6 +242,18 @@ int riscv_sail_cosim_take_interrupt(const svBitVecVal *mip_p) {
   return 0;
 }
 
+// Mirrors the model's own decision (dispatchInterrupt; ibex has no S-mode, so no delegation): an
+// interrupt is taken when one of the pending bits is enabled in mie, and the hart runs below M-mode
+// or has mstatus.MIE set. Reads the model's state only.
+int riscv_sail_cosim_irq_would_take(const svBitVecVal *mip_p) {
+  if (!s_initialized) {
+    return 0;
+  }
+  const uint64_t enabled = (uint64_t)mip_p[0] & zmie.zbits;
+  const bool mie_set = (zmstatus.zbits >> 3) & 1;
+  return enabled != 0 && (zcur_privilege != zMachine || mie_set);
+}
+
 uint32_t riscv_sail_cosim_get_mcause(void) {
   return (uint32_t)(zmcause.zbits & 0xffffffffULL);
 }

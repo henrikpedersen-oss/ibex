@@ -39,6 +39,10 @@ RISCV_SAIL_DPI void riscv_sail_cosim_write_mem_byte(const svBitVecVal *addr,
 // interrupt from its own state, -1 otherwise (message queued).
 RISCV_SAIL_DPI int riscv_sail_cosim_take_interrupt(const svBitVecVal *mip);
 
+// 1 if the model, in its current state, would take an interrupt were these bits pending: one is
+// enabled in mie, and the hart is below M-mode or mstatus.MIE is set. Changes nothing.
+RISCV_SAIL_DPI int riscv_sail_cosim_irq_would_take(const svBitVecVal *mip);
+
 // Model CSRs, meaningful after a step that trapped.
 RISCV_SAIL_DPI uint32_t riscv_sail_cosim_get_mcause(void);
 RISCV_SAIL_DPI uint32_t riscv_sail_cosim_get_mtval(void);

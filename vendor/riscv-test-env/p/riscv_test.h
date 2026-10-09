@@ -171,18 +171,20 @@ _start:                                                                 \
 trap_vector:                                                            \
         /* test whether the test came from pass/fail */                 \
         csrr t5, mcause;                                                \
-        li t6, CAUSE_USER_ECALL;                                        \
+        /* check mtvec_handler before ecall shortcuts so tests with     \
+         * a custom handler (e.g. scall) can call RVTEST_PASS themselves \
+         * rather than looping in write_tohost and timing out */        \
+        la t6, mtvec_handler;                                           \
+        beqz t6, 1f;                                                    \
+        jr t6;                                                          \
+  1:    li t6, CAUSE_USER_ECALL;                                        \
         beq t5, t6, write_tohost;                                       \
         li t6, CAUSE_SUPERVISOR_ECALL;                                  \
         beq t5, t6, write_tohost;                                       \
         li t6, CAUSE_MACHINE_ECALL;                                     \
         beq t5, t6, write_tohost;                                       \
-        /* if an mtvec_handler is defined, jump to it */                \
-        la t5, mtvec_handler;                                           \
-        beqz t5, 1f;                                                    \
-        jr t5;                                                          \
         /* was it an interrupt or an exception? */                      \
-  1:    csrr t5, mcause;                                                \
+        csrr t5, mcause;                                                \
         bgez t5, handle_exception;                                      \
         INTERRUPT_HANDLER;                                              \
 handle_exception:                                                       \

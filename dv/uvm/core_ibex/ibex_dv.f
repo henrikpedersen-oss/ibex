@@ -115,6 +115,7 @@ ${PRJ_DIR}/vendor/google_riscv-dv/src/riscv_signature_pkg.sv
 +incdir+${PRJ_DIR}/dv/uvm/core_ibex/common/ibex_cosim_agent
 +incdir+${PRJ_DIR}/dv/cosim
 +incdir+${PRJ_DIR}/dv/cosim/cheriot_sail
++incdir+${PRJ_DIR}/dv/cosim/riscv_sail
 ${PRJ_DIR}/dv/uvm/bus_params_pkg/bus_params_pkg.sv
 ${LOWRISC_IP_DIR}/dv/sv/common_ifs/common_ifs_pkg.sv
 ${LOWRISC_IP_DIR}/dv/sv/common_ifs/clk_rst_if.sv
@@ -135,16 +136,20 @@ ${PRJ_DIR}/dv/uvm/core_ibex/common/irq_agent/irq_agent_pkg.sv
 ${PRJ_DIR}/dv/uvm/core_ibex/env/core_ibex_rvfi_if.sv
 ${PRJ_DIR}/dv/uvm/core_ibex/common/ibex_cosim_agent/core_ibex_ifetch_if.sv
 ${PRJ_DIR}/dv/uvm/core_ibex/common/ibex_cosim_agent/core_ibex_ifetch_pmp_if.sv
+${PRJ_DIR}/dv/uvm/core_ibex/tb/ibex_revbm_pkg.sv
 ${PRJ_DIR}/dv/uvm/core_ibex/common/ibex_cosim_agent/ibex_cosim_agent_pkg.sv
 ${PRJ_DIR}/dv/uvm/core_ibex/common/ibex_mem_intf_agent/ibex_mem_intf_agent_pkg.sv
 ${PRJ_DIR}/dv/uvm/core_ibex/env/core_ibex_instr_monitor_if.sv
 ${PRJ_DIR}/dv/uvm/core_ibex/env/core_ibex_dut_probe_if.sv
 ${PRJ_DIR}/dv/uvm/core_ibex/env/core_ibex_csr_if.sv
+// DMI port of the real debug module; only a DM build connects it (ibex_dv_dm.f, make ... DM=1)
+${PRJ_DIR}/dv/uvm/core_ibex/tb/ibex_dm_dmi_if.sv
 ${PRJ_DIR}/dv/uvm/core_ibex/env/core_ibex_env_pkg.sv
 ${PRJ_DIR}/dv/uvm/core_ibex/tests/core_ibex_test_pkg.sv
 ${PRJ_DIR}/dv/uvm/core_ibex/fcov/core_ibex_fcov_if.sv
 ${PRJ_DIR}/dv/uvm/core_ibex/fcov/core_ibex_fcov_bind.sv
 ${PRJ_DIR}/dv/uvm/core_ibex/fcov/core_ibex_pmp_fcov_if.sv
+${PRJ_DIR}/dv/uvm/core_ibex/fcov/core_ibex_trvk_fcov_if.sv
 ${PRJ_DIR}/dv/uvm/core_ibex/tb/ibex_tag_mem.sv
 ${PRJ_DIR}/dv/uvm/core_ibex/tb/ibex_revbm_responder.sv
 ${PRJ_DIR}/dv/uvm/core_ibex/tb/core_ibex_tb_top.sv

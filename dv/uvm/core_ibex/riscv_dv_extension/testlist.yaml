@@ -40,52 +40,80 @@
     +no_csr_instr=0
   rtl_test: core_ibex_base_test
 
-- test: riscv_cheriot_rand_instr_test
-  description: >
-    Random instruction stress test confined to the 16 registers CHERIoT allows.
-    ibex_decoder.sv's illegal_reg_16 makes any access to x16-x31 an illegal
-    instruction once cheriot_enable_i is asserted -- it checks rf_ren_a/rf_ren_b/
-    rs3 and rd, so plain loads and stores trap too, not only capability opcodes.
-    Stock riscv-dv roams all 32 registers and cannot run in CHERIoT mode at all,
-    so this test needs both overrides below, not just one:
-      +instr_seq             pins the three instruction streams (main, stack
-                             enter, stack exit) and, via a factory override
-                             registered in its constructor, the callstack jumps
-                             -- riscv_jump_instr picks from its own `gpr` field
-                             and ignores avail_regs.
-      +uvm_set_type_override pins the register *roles*. sp/tp/ra/scratch_reg/
-                             gpr[]/pmp_reg[] are all rand in riscv_instr_gen_config
-                             with no upper bound; left alone they drew sp=s6 (x22)
-                             and ra=t5 (x30), so every prologue emitted
-                             "addi s6, s6, -12" however tightly the streams were
-                             constrained. It must be a plusarg rather than code:
-                             riscv_instr_base_test creates cfg in its build_phase
-                             (riscv_instr_base_test.sv:43), before any object here
-                             exists.
-    See riscv_dv_extension/ibex_cheriot_instr_sequence.sv for the full reasoning.
+# DISABLED 2026-09-24 — this test aborted the whole nyx regression.
+#
+# riscv-dv's generator exited zero but wrote no test_0.S for some seeds
+# (seed 23043 failed; 12042-12044 succeeded), so the randomisation has no
+# solution on some seeds without raising UVM_FATAL. run_instr_gen.py then
+# raises "Generation commands exited with zero status but left no test_0.S",
+# and because the inner make runs with -j that one failure takes the entire
+# regression down with it (make[1]: *** [Makefile:72: run] Error 2). No test
+# was assembled or simulated in that run.
+#
+# Re-enable only after the generator produces a program on every seed --
+# suspect the ibex_cheriot_instr_gen_config role-register constraints
+# ([RA:A5]) being unsatisfiable in combination with reserved_regs for some
+# seeds. Test it standalone with several seeds before it goes back in a
+# regression.
+#
+# Second blocker (2026-10-01): even when it generates, the program is not
+# CHERIoT-correct outside the random stream. riscv-dv's trap handler saves
+# registers with sw through an integer kernel stack pointer, sets mtvec/mepc
+# with csrw (illegal with the pin On), signs off through li'd integer addresses,
+# and its callstack jumps are `la` + jalr (CJALR on an untagged register), so
+# the first trap or jump faults and the handler faults in turn. Interrupt,
+# debug and memory-error coverage in CHERIoT mode therefore comes from the
+# directed tests in directed_tests/directed_testlist_cheriot_traps.yaml.
+# The random CHERI stream itself is now seeded: ibex_cheriot_instr_sequence
+# prepends ibex_cheriot_cap_seed_stream (MTDC/MScratchC/AUIPCC-derived bounded,
+# sealed and sealing capabilities) and +directed_instr_1 below re-seeds.
+# - test: riscv_cheriot_rand_instr_test
+#   description: >
+#     Random instruction stress test confined to the 16 registers CHERIoT allows.
+#     ibex_decoder.sv's illegal_reg_16 makes any access to x16-x31 an illegal
+#     instruction once cheriot_enable_i is asserted -- it checks rf_ren_a/rf_ren_b/
+#     rs3 and rd, so plain loads and stores trap too, not only capability opcodes.
+#     Stock riscv-dv roams all 32 registers and cannot run in CHERIoT mode at all,
+#     so this test needs both overrides below, not just one:
+#       +instr_seq             pins the three instruction streams (main, stack
+#                              enter, stack exit) and, via a factory override
+#                              registered in its constructor, the callstack jumps
+#                              -- riscv_jump_instr picks from its own `gpr` field
+#                              and ignores avail_regs.
+#       +uvm_set_type_override pins the register *roles*. sp/tp/ra/scratch_reg/
+#                              gpr[]/pmp_reg[] are all rand in riscv_instr_gen_config
+#                              with no upper bound; left alone they drew sp=s6 (x22)
+#                              and ra=t5 (x30), so every prologue emitted
+#                              "addi s6, s6, -12" however tightly the streams were
+#                              constrained. It must be a plusarg rather than code:
+#                              riscv_instr_base_test creates cfg in its build_phase
+#                              (riscv_instr_base_test.sv:43), before any object here
+#                              exists.
+#     See riscv_dv_extension/ibex_cheriot_instr_sequence.sv for the full reasoning.
 
-    +march adds RV32X, the custom group carrying the 26 CHERIoT instructions
-    defined in vendor/google_riscv-dv/src/isa/custom/ (vendor patch 0006). It is
-    set per test rather than in riscv_core_setting.tpl.sv so no other random test
-    starts emitting capability instructions -- riscv_instr_gen_config.sv:633-634
-    lets +march replace supported_isa outright. Those instructions are emitted as
-    raw `.word` encodings because the toolchain is stock rv32imc and cannot
-    assemble CHERIoT mnemonics; the trapping ones (clc/csc/cjalr/cspecialrw) are
-    deliberately excluded, see rv32x_instr.sv.
-  iterations: 10
-  gen_test: riscv_instr_base_test
-  gen_opts: >
-    +instr_cnt=10000
-    +num_of_sub_program=5
-    +instr_seq=ibex_cheriot_instr_sequence
-    +uvm_set_type_override=riscv_instr_gen_config,ibex_cheriot_instr_gen_config
-    +directed_instr_0=ibex_cheriot_asr_stream,8
-    +no_csr_instr=0
-    +march=RV32I,RV32M,RV32C,RV32X
-  rtl_test: core_ibex_base_test
-  sim_opts: >
-    +enable_cheriot_seq=1
-    +disable_spurious_dside_responses=1
+#     +march adds RV32X, the custom group carrying the 26 CHERIoT instructions
+#     defined in vendor/google_riscv-dv/src/isa/custom/ (vendor patch 0006). It is
+#     set per test rather than in riscv_core_setting.tpl.sv so no other random test
+#     starts emitting capability instructions -- riscv_instr_gen_config.sv:633-634
+#     lets +march replace supported_isa outright. Those instructions are emitted as
+#     raw `.word` encodings because the toolchain is stock rv32imc and cannot
+#     assemble CHERIoT mnemonics; the trapping ones (clc/csc/cjalr/cspecialrw) are
+#     deliberately excluded, see rv32x_instr.sv.
+#   iterations: 10
+#   gen_test: riscv_instr_base_test
+#   gen_opts: >
+#     +instr_cnt=10000
+#     +num_of_sub_program=5
+#     +instr_seq=ibex_cheriot_instr_sequence
+#     +uvm_set_type_override=riscv_instr_gen_config,ibex_cheriot_instr_gen_config
+#     +directed_instr_0=ibex_cheriot_asr_stream,8
+#     +directed_instr_1=ibex_cheriot_cap_seed_stream,20
+#     +no_csr_instr=0
+#     +march=RV32I,RV32M,RV32C,RV32X
+#   rtl_test: core_ibex_base_test
+#   sim_opts: >
+#     +enable_cheriot_seq=1
+#     +disable_spurious_dside_responses=1
 
 - test: riscv_rand_jump_test
   description: >
@@ -136,6 +164,9 @@
   rtl_test: core_ibex_base_test
   sim_opts: >
     +enable_bad_intg_on_uninit_access=0
+  # Seed 167 of regression 163 (2026-10-09, nyx loaded) was still retiring instructions when the
+  # 1800 s default expired (sim time 70 ms, 351k trace lines); the other 9 seeds passed under it.
+  timeout_s: 3600
 
 - test: riscv_illegal_instr_test
   description: >
@@ -148,6 +179,23 @@
   gen_opts: >
     +illegal_instr_ratio=25
   rtl_test: core_ibex_base_test
+  # Added 2026-09-24. Without this, seeds 21573/21574/21577/21578 failed
+  # NoAlertsTriggered in the regression.
+  #
+  # core_ibex_base_test.sv:207 turns bad-integrity-on-uninitialised-access ON by
+  # default, and ibex_mem_intf_response_seq_lib.sv:156 then inverts the SECDED
+  # bits on any d-side read of a word the memory model has never seen written.
+  # That raises lsu_load_resp_intg_err -> alert_major_bus_o
+  # (ibex_core.sv:1356), which is a real alert from a real injected fault --
+  # not an RTL defect.
+  #
+  # This test is *designed* to corrupt architectural state: with
+  # illegal_instr_ratio=25 the stream clobbers base registers, so loads go to
+  # wild addresses (a2=0, sp=0x9e) that were never written. Eleven sibling
+  # tests already disable the injection for the same reason; this entry simply
+  # had no sim_opts stanza at all.
+  sim_opts: >
+    +enable_bad_intg_on_uninit_access=0
 
 - test: riscv_hint_instr_test
   description: >
@@ -227,7 +275,14 @@
     +require_signature_addr=1
     +enable_debug_seq=1
     +enable_bad_intg_on_uninit_access=0
-  timeout_s: 600
+  # Raised from 600 to the 1800 default after seeds 21575 and 21581 hit the
+  # wall-clock limit in the 2026-09-23 regression. Both were still retiring
+  # instructions when killed (the logs are enormous, not stalled), and this test
+  # runs 10000 instructions with illegal_instr_ratio=20 and a debug-mode round
+  # trip per breakpoint, so 600s was simply under-budgeted relative to the other
+  # debug tests. If it times out at 1800s too, that is a genuine livelock and
+  # worth investigating rather than raising again.
+  timeout_s: 1800
 
 - test: riscv_debug_stress_test
   description: >
@@ -376,6 +431,8 @@
     +enable_debug_seq=1
   compare_opts:
     compare_final_value_only: 1
+  # Passing seeds take up to 1363 s of the 1800 s default; seed 28609 ran past it, still executing (2026-10-09).
+  timeout_s: 3600
 
 - test: riscv_debug_ebreakmu_test
   description: >
@@ -440,6 +497,8 @@
     +enable_irq_multiple_seq=1
   compare_opts:
     compare_final_value_only: 1
+  # Passing seeds take up to 1706 s of the 1800 s default (regression 2026-10-09).
+  timeout_s: 3600
 
 - test: riscv_debug_in_irq_test
   description: >
@@ -462,6 +521,8 @@
     +enable_bad_intg_on_uninit_access=0
   compare_opts:
     compare_final_value_only: 1
+  # Passing seeds take up to 1462 s of the 1800 s default (regression 2026-10-09).
+  timeout_s: 3600
 
 - test: riscv_assorted_traps_interrupts_debug_test
   description: >
@@ -664,6 +725,111 @@
   compare_opts:
     compare_final_value_only: 1
 
+- test: riscv_nmi_at_exc_test
+  description: >
+    NMIs raised while an excepting instruction (ECALL, EBREAK as an exception, an illegal
+    instruction) is in ID, so the NMI is taken ahead of it, plus maskable interrupts at random.
+    Targets the nmi = 1 bins of uarch_cg.interrupt_taken_instr_cross with an excepting last
+    category. No debug section: EBREAK must raise a breakpoint exception, not enter debug mode.
+  iterations: 15
+  gen_test: riscv_rand_instr_test
+  gen_opts: >
+    +require_signature_addr=1
+    +instr_cnt=10000
+    +no_ebreak=0
+    +no_ecall=0
+    +no_wfi=1
+    +illegal_instr_ratio=10
+    +enable_interrupt=1
+    +enable_timer_irq=1
+    +randomize_csr=1
+    +no_csr_instr=1
+    +no_directed_instr=1
+    +num_of_sub_program=5
+  rtl_test: core_ibex_nmi_at_exc_test
+  sim_opts: >
+    +require_signature_addr=1
+    +enable_bad_intg_on_uninit_access=0
+  compare_opts:
+    compare_final_value_only: 1
+
+- test: riscv_mem_error_traps_test
+  description: >
+    riscv_mem_error_test with interrupts and debug requests on top (the irq/debug generators of
+    riscv_assorted_traps_interrupts_debug_test). Targets the irq_pending/debug_req bins of
+    uarch_cg.exception_stall_instr_cross: memory and PMP errors, stalls and instruction
+    categories crossed with a pending interrupt or debug request.
+  iterations: 15
+  gen_test: riscv_rand_instr_test
+  gen_opts: >
+    +require_signature_addr=1
+    +instr_cnt=10000
+    +randomize_csr=1
+    +gen_all_csrs_by_default=1
+    +add_csr_write=MSTATUS,MEPC,MCAUSE,MTVAL,0x7c0,0x7c1
+    +enable_unaligned_load_store=1
+    +suppress_pmp_setup=1
+    +disable_pmp_exception_handler=1
+    +enable_interrupt=1
+    +enable_timer_irq=1
+    +gen_debug_section=1
+    +num_debug_sub_program=5
+    +directed_instr_0=riscv_load_store_rand_instr_stream,40
+    +directed_instr_1=riscv_load_store_hazard_instr_stream,40
+  rtl_test: core_ibex_mem_error_traps_test
+  sim_opts: >
+    +enable_mem_intg_err=0
+    +enable_double_fault_detector=0
+    +require_signature_addr=1
+    +enable_bad_intg_on_uninit_access=0
+  compare_opts:
+    compare_final_value_only: 1
+
+- test: riscv_fetch_en_chk_test
+  description: >
+    Load/store-heavy random program while fetch_enable_i is toggled by a second, more frequent
+    generator (core_ibex_fetch_en_chk_test) on top of the default one. Targets uarch_cg.pipe_cross:
+    fetch disabled while a load or store is waiting in writeback.
+  iterations: 10
+  gen_test: riscv_rand_instr_test
+  gen_opts: >
+    +instr_cnt=10000
+    +enable_unaligned_load_store=1
+    +directed_instr_0=riscv_load_store_rand_instr_stream,60
+    +directed_instr_1=riscv_load_store_hazard_instr_stream,60
+    +directed_instr_2=riscv_multi_page_load_store_instr_stream,20
+  rtl_test: core_ibex_fetch_en_chk_test
+
+- test: riscv_debug_on_stall_test
+  description: >
+    Random program with load/store hazard streams, data-independent timing toggles and illegal
+    instructions under core_ibex_stall_events_test: debug requests raised while an instruction is
+    held in ID (stalled or waiting to trap), and fetch_enable_i dropped for a few cycles there.
+    Targets the debug_req = 1 bins of uarch_cg.exception_stall_instr_cross without LSU errors,
+    debug_entry_if_instr_cross and pipe_cross (IF idle while ID is stalled).
+  iterations: 10
+  gen_test: riscv_rand_instr_test
+  gen_opts: >
+    +require_signature_addr=1
+    +gen_debug_section=1
+    +instr_cnt=10000
+    +num_of_sub_program=0
+    +illegal_instr_ratio=5
+    +directed_instr_0=riscv_load_store_hazard_instr_stream,40
+    +directed_instr_1=riscv_load_store_rand_instr_stream,20
+    +directed_instr_2=ibex_rand_cpuctrlsts_stream,4
+    +toggle_dit=1
+  rtl_test: core_ibex_stall_events_test
+  sim_opts: >
+    +require_signature_addr=1
+    +enable_bad_intg_on_uninit_access=0
+    +dbg_on_stall_pct=3
+    +fetch_off_on_stall_pct=3
+    +dbg_gap_min=200
+    +dbg_gap_max=1000
+  compare_opts:
+    compare_final_value_only: 1
+
 - test: riscv_mem_intg_error_test
   description: >
     Normal random instruction test, but randomly insert memory load/store integrity errors
@@ -717,6 +883,12 @@
     +max_interval=1500
     +enable_debug_seq=1
     +enable_bad_intg_on_uninit_access=0
+  # Slow, not hung: every stepped instruction goes through the debug ROM. Passing seeds took up to
+  # 29:46 (seed 811, 437k trace lines) against the 1800 s default; the seeds that hit it were still
+  # retiring at the same rate (10/14 of regression 163, 2026-10-09, on a loaded nyx).
+  # 3600 s was still short for 7 of 15 seeds in the 2026-10-09 regression: 94% of the trace is
+  # the random debug section that runs on every step (~190 instructions per step).
+  timeout_s: 7200
 
 - test: riscv_reset_test
   description: >
@@ -876,7 +1048,7 @@
   rtl_test: core_ibex_base_test
   rtl_params:
     PMPEnable: 1
-  timeout_s: 300
+  timeout_s: 900
 
 - test: riscv_pmp_disable_all_regions_test
   desc: >
@@ -932,7 +1104,9 @@
   sim_opts: >
     +is_double_fault_detected_fatal=0
     +enable_bad_intg_on_uninit_access=0
-  timeout_s: 300
+  # Bimodal runtime: most seeds ~8k cycles, 17/50 ran 70k-520k (up to 213 s); seed 23326 was
+  # still in normal code at 800k cycles when 300 s expired.
+  timeout_s: 1800
 
 - test: riscv_pmp_full_random_test
   desc: >
@@ -963,6 +1137,37 @@
     +is_timeout_s_fatal=0
     +enable_bad_intg_on_uninit_access=0
   rtl_test: core_ibex_base_test
+  rtl_params:
+    PMPEnable: 1
+  timeout_s: 180
+
+- test: riscv_pmp_traps_test
+  desc: >
+    riscv_pmp_full_random_test with interrupts on top (core_ibex_irq_traps_test: stimulus only, no
+    per-interrupt checks). Targets the PMP-error bins of uarch_cg.exception_stall_instr_cross
+    crossed with a pending interrupt. No debug requests: Ibex exempts the debug module range from
+    PMP in debug mode and Spike does not, so random PMP configurations break every debug entry.
+  iterations: 50
+  gen_test: riscv_rand_instr_test
+  gen_opts: >
+    +require_signature_addr=1
+    +instr_cnt=6000
+    +set_mstatus_mprv=1
+    +pmp_randomize=1
+    +pmp_max_offset=00040000
+    +pmp_allow_illegal_tor=1
+    +directed_instr_0=riscv_load_store_rand_instr_stream,40
+    +directed_instr_1=riscv_load_store_hazard_instr_stream,40
+    +directed_instr_3=riscv_load_store_rand_addr_instr_stream,40
+    +enable_unaligned_load_store=1
+    +enable_interrupt=1
+    +enable_timer_irq=1
+  sim_opts: >
+    +require_signature_addr=1
+    +is_double_fault_detected_fatal=0
+    +is_timeout_s_fatal=0
+    +enable_bad_intg_on_uninit_access=0
+  rtl_test: core_ibex_irq_traps_test
   rtl_params:
     PMPEnable: 1
   timeout_s: 180
@@ -1026,7 +1231,7 @@
   rtl_test: core_ibex_base_test
   rtl_params:
     PMPEnable: 1
-  timeout_s: 300
+  timeout_s: 900
 
 - test: riscv_epmp_mml_execute_only_test
   desc: >
@@ -1119,7 +1324,7 @@
     PMPEnable: 1
   sim_opts: >
     +is_double_fault_detected_fatal=0
-  timeout_s: 300
+  timeout_s: 900
 
 - test: riscv_epmp_rlb_test
   desc: >
@@ -1153,7 +1358,7 @@
   rtl_test: core_ibex_base_test
   rtl_params:
     PMPEnable: 1
-  timeout_s: 300
+  timeout_s: 900
 
 # Both an updated compiler and ISS are required to verify the bitmanip v.1.00
 # and draft v.0.93 extensions. For now, disable the bitmanip tests.

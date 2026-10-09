@@ -245,6 +245,39 @@ class riscv_rand_instr_stream extends riscv_instr_stream;
       end else if (!cfg.no_ebreak && !cfg.enable_ebreak_in_debug_rom) begin
         exclude_instr = {exclude_instr, EBREAK, C_EBREAK};
       end
+      // Never place a DRET in the debug ROM's random instruction stream.
+      //
+      // riscv_debug_rom_gen builds the ROM as: push_gpr_to_kernel_stack -> this random
+      // stream -> "la x<scratch>, debug_end; jalr" -> debug_end, where debug_end is
+      // pop_gpr_from_kernel_stack followed by a literal "dret" (set in the constructor,
+      // not drawn from the instruction pool -- so excluding DRET here does not remove the
+      // ROM's real exit). A DRET reached inside the random stream leaves debug mode
+      // *before* debug_end runs, so the pop never executes and every GPR this stream
+      // clobbered stays clobbered in the interrupted program.
+      //
+      // Observed in riscv_debug_single_step_test seeds 246 and 247: the ROM executed
+      // `csrrs x24, dcsr` (x24 = 0x400000c7) and then a random dret. The interrupted
+      // program had `la x24, _start` live and was mid-way through a self-modifying
+      // register dump `sw xN, off(x24)`, so its 13 remaining stores landed at
+      // 0x400001xx instead of over _start. Execution later reached 0x40000112, where the
+      // DUT fetched stale 0x0000 while the ISS saw the stored 0x0300 -- legal on both
+      // sides with no fence.i between the store and the fetch, but an unresolvable cosim
+      // mismatch. This is the same hazard class the EBREAK guard above exists for.
+      //
+      // DRET stays available outside the debug ROM: cfg.no_dret is untouched, so tests
+      // that set +no_dret=0 keep their illegal-instruction coverage for DRET in M-mode.
+      exclude_instr = {exclude_instr, DRET};
+      // Nor an ECALL, for the same reason by another route: an exception in debug mode goes to
+      // dm_exception_addr, whose handler (gen_debug_exception_handler) is a bare dret, so again
+      // pop_gpr_from_kernel_stack never runs. Observed in riscv_debug_single_step_test.3723: the
+      // ROM's random stream set x31 = 0x80000000 (mul), then hit an ecall; after the dret the
+      // single-stepped trap handler ran `sw x16, 0(x31)` and overwrote the debug halt entry at
+      // 0x80000000, so the next single-step entry fetched 0x0000. ECALL stays available outside
+      // the debug ROM (+no_ecall=0 is untouched). Not covered: any other instruction in the
+      // stream that traps in debug mode (e.g. an illegal CSR access) still takes this exit; the
+      // complete fix is a debug exception handler that restores the GPRs before its dret.
+      // (Local change, like the DRET one above; not yet in vendor/patches/google_riscv-dv.)
+      exclude_instr = {exclude_instr, ECALL};
     end
     instr = riscv_instr::get_rand_instr(.include_instr(allowed_instr),
                                         .exclude_instr(exclude_instr),

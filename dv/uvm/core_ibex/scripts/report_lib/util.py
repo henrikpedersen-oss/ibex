@@ -107,8 +107,13 @@ def parse_xcelium_cov_report(cov_report: str) -> Dict[str, Dict[str, Dict[str, i
         raise RuntimeError('Could not read xcelium coverage report')
 
     for line in cov_report_lines[metrics_start_line:]:
-        line = re.sub(r'%\s+\(', '%(', line)
+        # Join each value to its "(covered/total)" count, so one metric is one column. A
+        # covergroup with no bins reads "n/a (0/0/3)" rather than "17.83% (652/11083)".
+        line = re.sub(r'(%|n/a)\s+\(', r'\1(', line)
         values = line.strip().split()
+        if len(values) - 1 > len(metric_info):
+            raise RuntimeError(f'xcelium coverage report row has {len(values) - 1} values for '
+                               f'{len(metric_info)} metrics: {line.strip()!r}')
 
         module_name = ''
 

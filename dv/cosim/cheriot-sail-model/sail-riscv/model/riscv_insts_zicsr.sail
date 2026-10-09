@@ -23,6 +23,8 @@ mapping clause encdec = CSR(csr, rs1, rd, is_imm, op)
 
 function readCSR csr : csreg -> xlenbits = {
   let res : xlenbits =
+  /* Local, GAP-CS-3: Ibex's platform CSRs (riscv_sys_control.sail ibex_csr_*). */
+  if ibex_csr_defined(csr) then ibex_csr_read(csr) else
   match (csr, sizeof(xlen)) {
     /* machine mode */
     (0xF11,  _) => zero_extend(mvendorid),
@@ -112,6 +114,12 @@ function readCSR csr : csreg -> xlenbits = {
 }
 
 function writeCSR (csr : csreg, value : xlenbits) -> unit = {
+  /* Local, GAP-CS-3: Ibex's platform CSRs (riscv_sys_control.sail ibex_csr_*). The model's own
+   * mcountinhibit (bits 0 and 2, which gate its minstret) follows the same write. */
+  if ibex_csr_defined(csr) then {
+    if csr == 0x320 then mcountinhibit = legalize_mcountinhibit(mcountinhibit, value);
+    ibex_csr_write(csr, value)
+  } else {
   let res : option(xlenbits) =
   match (csr, sizeof(xlen)) {
     /* machine mode */
@@ -188,6 +196,7 @@ function writeCSR (csr : csreg, value : xlenbits) -> unit = {
                then print_reg("CSR " ^ to_str(csr) ^ " <- " ^ BitStr(v) ^ " (input: " ^ BitStr(value) ^ ")"),
     None()  => print_bits("unhandled write to CSR ", csr)
   }
+  } /* local, GAP-CS-3: end of the else of the ibex_csr_defined test */
 }
 
 $ifdef RVFI_DII

@@ -140,7 +140,10 @@ To deal with this the RVFI can also signal an interrupt event not associated wit
 When this is set the interrupt related RVFI signals are valid and provide the interrupt state.
 The RVFI is used in this way, as opposed to a separate notification interface, so the interrupt notifications are ordered relative to the retired instructions.
 
-See the comments in :file:`rtl/ibex_core.sv`, around the ``new_debug_req``, ``new_nmi``, ``new_irq`` and ``rvfi_irq_valid`` signals for further details.
+Interrupts and the NMI are level-sensitive, so a request can be withdrawn after the controller has decided to trap but before it enters the handler; the controller then abandons the trap.
+The state captured at the decision is therefore attached to an instruction only once the controller has committed to the trap (``captured_taken``); until then the instruction carries the current state of the inputs.
+
+See the comments in :file:`rtl/ibex_core.sv`, around the ``new_debug_req``, ``new_nmi``, ``new_irq``, ``captured_taken`` and ``rvfi_irq_valid`` signals for further details.
 
 Memory Access Checking and Bus Errors
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

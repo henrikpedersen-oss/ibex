@@ -18,6 +18,7 @@ from report_lib.text import output_results_text, gen_summary_line
 from report_lib.html import output_results_html
 from report_lib.junit_xml import output_run_results_junit_xml
 from report_lib.dvsim_json import output_results_dvsim_json
+from known_gaps import load_known_gaps, match_known_gap
 
 try:
     # SVG requires python 3.7 and above, for environments that don't have python
@@ -45,14 +46,23 @@ def main() -> int:
         summary_dict = {}
         passing_tests = []
         failing_tests = []
+        # Failures that match a known model/generator gap (waivers/known_gaps.yaml): reported as
+        # warnings, kept out of the exit status. Anything that matches no entry stays a failure.
+        known_gaps = load_known_gaps()
+        known_gap_tests = []
         for f in md.tests_pickle_files:
             try:
                 trr = TestRunResult.construct_from_pickle(f)
                 summary_dict[f"{trr.testname}.{trr.seed}"] = \
                     ('PASS' if trr.passed else
                      'FAILED' + (" {T}" if (trr.failure_mode == Failure_Modes.TIMEOUT) else ""))
+                gap = None if trr.passed else \
+                    match_known_gap(trr.testname, trr.failure_message, known_gaps)
                 if trr.passed:
                     passing_tests.append(trr)
+                elif gap is not None:
+                    summary_dict[f"{trr.testname}.{trr.seed}"] = f"KNOWN-GAP {gap['id']}"
+                    known_gap_tests.append((trr, gap))
                 else:
                     failing_tests.append(trr)
             except RuntimeError as e:
@@ -73,17 +83,19 @@ def main() -> int:
              open(md.regr_log_junit_merged,
                   'w',
                   encoding='UTF-8') as junit_merged_xml:
-            output_run_results_junit_xml(passing_tests, failing_tests,
+            # junit keeps known-gap tests as failures: it is a per-test record, not the verdict.
+            output_run_results_junit_xml(passing_tests,
+                                         failing_tests + [t for t, _ in known_gap_tests],
                                          junit_xml,
                                          junit_merged_xml)
 
         with open(md.regr_log, 'w', encoding='UTF-8') as outfile:
             #  Write results as regr.log (custom logfile format)
             output_results_text(passing_tests, failing_tests, summary_dict,
-                                outfile)
+                                outfile, known_gap_tests)
 
         test_summary_dict = create_test_summary_dict(passing_tests +
-                failing_tests)
+                failing_tests + [t for t, _ in known_gap_tests])
 
         cov_summary_dict = {}
         if md.simulator == "xlm":
@@ -94,7 +106,8 @@ def main() -> int:
 
         html_report_filename = md.dir_run/'report.html'
         with open(html_report_filename, 'w') as outfile:
-            output_results_html(md, passing_tests + failing_tests,
+            output_results_html(md, passing_tests + failing_tests +
+                    [t for t, _ in known_gap_tests],
                     test_summary_dict, cov_summary_dict, outfile)
 
         json_report_filename = md.dir_run/'report.json'
@@ -111,9 +124,10 @@ def main() -> int:
             print('WARNING: svg module not available, skipping SVG results output')
 
         # Print a summary line to the terminal
-        print(gen_summary_line(passing_tests, failing_tests))
+        print(gen_summary_line(passing_tests, failing_tests, known_gap_tests))
 
-    # Succeed if no tests failed
+    # Succeed if no test failed; known-gap warnings do not fail the run (they are counted in the
+    # summary line and listed in regr.log).
     return 1 if failing_tests else 0
 
 

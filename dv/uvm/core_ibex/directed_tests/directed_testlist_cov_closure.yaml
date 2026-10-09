@@ -1,0 +1,161 @@
+# Copyright lowRISC contributors.
+# Licensed under the Apache License, Version 2.0, see LICENSE for details.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Coverage closure: directed tests for RTL blocks the full UVM regression never executed
+# (block coverage, 2026-10). Each test header names the blocks it targets and where its expected
+# values come from; where that is not the specification, the header says so.
+#
+# Configs are shared across all directed_testlist*.yaml files (directed_test_schema.py):
+# riscv-tests is defined in directed_testlist.yaml, cheriot-dv-tests in
+# directed_testlist_cheriot_traps.yaml. The two CHERIoT tests boot in RISC-V mode and have the
+# bench raise cheriot_enable_i on the write to 0x80200000 (+cheriot_enable_on_write), with
+# +disable_cosim=1, because CHERIoT-Sail cannot be their oracle (reasons in each entry); that
+# keeps the CHERIoT-Sail oracle uninitialised (+enable_cheriot_seq is not given), as for
+# cheriot_debug_mode and cheriot_mem_err. +disable_spurious_dside_responses=1 for the reason given
+# at the top of directed_testlist.yaml.
+#
+# Not covered by a test here: ibex_controller.sv cheriot_ex_err_prio (the case item and the
+# g_wb_exceptions / g_no_wb_exceptions branches). cheriot_ex_err_o of ibex_cheriot_ex.sv is
+# constant 0 (cheriot_ex_err_raw is only ever assigned 1'b0; cheriot_ex_err_info_o is tied to 0,
+# "no ex stage cheriot error currently"), so those blocks are unreachable: a coverage exclusion,
+# not a test, closes them.
+
+- test: counter_high_half_write
+  desc: >
+    Writes the upper half of every 64-bit counter: mcycleh and minstreth read back the written
+    value with the lower half undisturbed, and both counters carry from 0xFFFFFFxx into the
+    upper half; mhpmcounter3h-12h (MHPMCounterWidth = 32 in the verified configuration) read 0
+    after a write of all-ones and their lower halves are unchanged. Targets the
+    `if (counterh_we_i)` block of ibex_counter.sv in mcycle_counter_i, minstret_counter_i and the
+    ten mcounters_variable_i instances (REQ_ISA_10; cp_counter_upper_half_write,
+    cp_counter_lower_wrap). RISC-V mode, Spike oracle; mcountinhibit is not touched (this Spike
+    does not inhibit minstret). TEST_FAIL with the failing check's code in TESTNUM (gp): 1-10,
+    20+N / 40+N for mhpmcounterN, 99 liveness, 0x100|code unexpected trap.
+  iterations: 1
+  test_srcs: counter_high_half_write/counter_high_half_write.S
+  config: riscv-tests
+
+- test: cheriot_fatal_err_mtcc
+  desc: >
+    A trap taken while MTCC is untagged. The program checks MTCC reads back untagged after
+    CSpecialRW of an untagged value (REQ_PER_03), announces the trap (CORE_STATUS
+    HANDLING_EXCEPTION) and executes ecall; it can never report afterwards. The bench
+    (core_ibex_cheriot_fatal_err_test) requires the first trap after the announcement to be the
+    ecall with alert_major_internal_o still low, the alert within 4 cycles and held for 2000
+    (sticky cheriot_fatal_err_q, ibex_cs_registers.sv gen_scr: "unrecoverable, need external
+    reset"), no earlier alert and no minor/bus alert, then ends the run. The spec leaves this
+    trap undefined, so the alert is checked as RTL design intent. NoAlertsTriggered and the
+    double-fault detector are off in that class. CHERIoT-Sail stops at this trap
+    (not_implemented), hence the RISC-V boot and +disable_cosim=1. Program codes 1, 2, 10, 11,
+    249-251 (test header).
+  iterations: 1
+  test_srcs: cheriot_fatal_err_mtcc/cheriot_fatal_err_mtcc.S
+  config: cheriot-dv-tests
+  rtl_test: core_ibex_cheriot_fatal_err_test
+  sim_opts: "+cheriot_enable_on_write=80200000 +disable_cosim=1 +disable_spurious_dside_responses=1"
+
+- test: debug_mret_umode
+  desc: >
+    One debug session (haltreq) that runs, in debug mode: ebreak with dcsr.ebreakm while
+    data-independent timing and dummy instructions are on (re-enters without updating dpc/dcsr,
+    Debug Spec 4.1); ecall; mret with MPP = U to code that reads mstatus at U; mret to U again
+    and dret at U. ecall and mret in debug mode are UNSPECIFIED in the Debug Spec, so those
+    expected values come from the RTL and the privileged spec's mret semantics (test header):
+    an exception jumps to the debug exception address, updates no CSR and returns the hart to
+    M; dret at U returns to dpc at dcsr.prv = M (REQ_DBG_04). RISC-V mode, cosim off (Spike does
+    not return to M on a debug-mode exception). Returns 0 on success; codes in the test header.
+  iterations: 2
+  test_srcs: debug_mret_umode/debug_mret_umode.S
+  config: cheriot-dv-tests
+  rtl_test: core_ibex_single_debug_pulse_test
+  sim_opts: "+disable_cosim=1 +disable_spurious_dside_responses=1 +require_signature_addr=1 +enable_debug_seq=1"
+
+- test: debug_dm_pmp
+  desc: >
+    REQ_DBG_05 in RISC-V mode. In one debug session (haltreq) the handler copies a routine into
+    the Debug Module range [0x1A110000, 0x1A111000) and runs it there (fetch, load, store), first
+    with mseccfg.MMWP = 0 (the PMP check allows the range), then with MMWP = 1 (the PMP check
+    denies it and only the debug-mode exemption allows it). A load just above the range still
+    faults in debug mode (debug exception, no CSR updated). Back in M-mode, a load from and a jump
+    into the range fault (mcause 5 / 1). Spike cosim on. Targets pmp_top_cg's dm_* coverpoints.
+    Returns 0 on success; codes in the test header.
+  iterations: 2
+  test_srcs: debug_dm_pmp/debug_dm_pmp.S
+  config: cheriot-dv-tests
+  rtl_test: core_ibex_single_debug_pulse_test
+  sim_opts: "+disable_spurious_dside_responses=1 +require_signature_addr=1 +enable_debug_seq=1"
+
+- test: cheriot_dummy_instr
+  desc: >
+    CHERI work (derivation, CGet*, CSC/CLC round trip, CSEQX; every result checked) with
+    cheriot_enable_i asserted, once with cpuctrlsts.data_ind_timing set and once with dummy
+    instruction insertion on: no result may change and nothing may trap (Ibex
+    doc/03_reference/security.rst). Code 92 (a trap in the dummy-instruction pass) is the
+    suspected RTL finding in the test header: dummy instructions naming x16-x31 are illegal in
+    CHERIoT mode. Cosim off (Spike: +disable_cosim; CHERIoT-Sail runs only with
+    +enable_cheriot_seq, not with the pin raised mid-test). Returns 0 on success; codes in the
+    test header.
+  iterations: 2
+  test_srcs: cheriot_dummy_instr/cheriot_dummy_instr.S
+  config: cheriot-dv-tests
+  sim_opts: "+cheriot_enable_on_write=80200000 +disable_cosim=1 +disable_spurious_dside_responses=1"
+
+- test: ibex_mhartid
+  desc: >
+    mhartid reads the value on hart_id_i (0 here, the testbench default) and a csrw to it raises
+    an illegal-instruction exception and leaves it unchanged (RISC-V Privileged ISA, read-only
+    CSRs). Returns 0 on success; codes in the test header.
+  iterations: 1
+  test_srcs: ibex_mhartid/ibex_mhartid.S
+  config: riscv-tests
+
+- test: ibex_mhartid_ones
+  desc: >
+    As ibex_mhartid with hart_id_i = 0xFFFFFFFF (+hart_id). The testbench drives the complement
+    while rst_n is low, so this run toggles every hart_id_i bit 0->1 and the default runs toggle
+    it 1->0. Cosim off: Spike's mhartid is always 0, so the test's own checks are the only ones
+    on the value. gcc_opts repeats the riscv-tests config's flags (a test-level gcc_opts
+    replaces them). Returns 0 on success; codes in the test header.
+  iterations: 1
+  test_srcs: ibex_mhartid/ibex_mhartid.S
+  config: riscv-tests
+  gcc_opts: -static -mcmodel=medany -fvisibility=hidden -nostdlib -nostartfiles
+            -I../../../vendor/riscv-test-env/
+            -I../../../vendor/riscv-test-env/p/
+            -I../../../vendor/riscv-tests/isa/macros/scalar/
+            -DEXPECTED_HART_ID=0xFFFFFFFF
+  sim_opts: "+hart_id=FFFFFFFF +disable_cosim=1"
+
+- test: ibex_boot_addr
+  desc: >
+    mtvec reads {boot address[31:8], 8'h01} when the core boots, before software writes it
+    (doc/03_reference/exception_interrupts.rst: the vector table base is initialised to the
+    boot address). The reset PC is already checked by every test through the cosim. Also the
+    guard for the testbench driving boot_addr_i's complement during reset only. Returns 0 on
+    success; codes in the test header.
+  iterations: 1
+  test_srcs: ibex_boot_addr/ibex_boot_addr.S
+  config: riscv-tests
+
+- test: ibex_decode_holes
+  desc: >
+    packu and packh (draft 0.93 XZbp; riscv-dv emits neither, see vendor patch 0007) give
+    {rs2[31:16], rs1[31:16]} and {16'b0, rs2[7:0], rs1[7:0]}; the OP-IMM unary group with
+    rs2 = 15 and srli/srai with shamt[5] = 1 raise an illegal-instruction exception with
+    mtval = the instruction and leave rd unwritten; every mhpmcounter3..31 low half is
+    written, and mhpmcounter13..31 (unavailable with MHPMCounterNum = 10) read 0 after a
+    write of all-ones. Returns 0 on success; codes in the test header.
+  iterations: 1
+  test_srcs: ibex_decode_holes/ibex_decode_holes.S
+  config: riscv-tests
+
+- test: cheriot_c_shift_imm
+  desc: >
+    c.srli and c.srai with a non-zero shift in CHERIoT mode: on a capability register (an
+    MTCC copy) the result is the shifted address with the tag cleared; c.srai of a negative
+    integer shifts arithmetically. Returns 0 on success, else the failing check (1-6).
+  iterations: 1
+  test_srcs: cheriot_c_shift_imm/cheriot_c_shift_imm.S
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
+  config: cheriot-c-tests

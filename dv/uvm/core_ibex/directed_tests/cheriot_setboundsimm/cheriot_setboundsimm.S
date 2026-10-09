@@ -60,8 +60,11 @@ main:
 
     # ── Test 3: tag = 1 ([0,256) ⊆ [0,2^32) → derivation is legal) ───────────
     .word   0xFE45855B              # cgettag a0, ca1
-    li      a1, 1
-    bne     a0, a1, .Lfail_test3
+    # Compare against a2, NOT a1: a1 is x11 is ca1, the saved capability every cget*
+    # above reads. `li a1, 1` strips its tag, so test 4's cgetaddr would report the
+    # integer 1 as the cursor and fail for that reason rather than a real defect.
+    li      a2, 1
+    bne     a0, a2, .Lfail_test3
 
     # ── Test 4: cursor unchanged = 0 ──────────────────────────────────────────
     .word   0xFEF5855B              # cgetaddr a0, ca1

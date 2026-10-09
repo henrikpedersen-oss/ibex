@@ -14,7 +14,22 @@
 function csrAccess(csr : csreg) -> csrRW = csr[11..10]
 function csrPriv(csr : csreg) -> priv_level = csr[9..8]
 
+/* Local (ibex_cheriot_verification spec GAP-CS-3): CHERIoT-Ibex's implementation-defined CSRs
+ * (mconfigptr, mcounteren, menvcfg(h), mcountinhibit, mhpmevent3-31, mhpmcounter3-31(h),
+ * hpmcounter3-31(h), tselect, tdata1-3, mcontext, mscontext, scontext, cpuctrlsts, secureseed)
+ * are platform CSRs, implemented in C (c_emulator/ibex_platform_csrs.c) with Ibex's reset values
+ * and WARL masks; the bench supplies the counters' values. The access checks stay the model's
+ * own (check_CSR, ext_check_CSR). C only: no OCaml/interpreter implementation. */
+val ibex_csr_defined          = {c: "ibex_csr_defined"}          : csreg -> bool
+val ibex_csr_read             = {c: "ibex_csr_read"}             : csreg -> xlenbits
+val ibex_csr_write            = {c: "ibex_csr_write"}            : (csreg, xlenbits) -> unit
+val ibex_csr_read_without_asr = {c: "ibex_csr_read_without_asr"} : csreg -> bool
+val ibex_csr_reset            = {c: "ibex_csr_reset"}            : unit -> unit
+val ibex_csr_sync_exception   = {c: "ibex_csr_sync_exception"}   : unit -> unit
+val ibex_csr_mret             = {c: "ibex_csr_mret"}             : unit -> unit
+
 function is_CSR_defined (csr : csreg, p : Privilege) -> bool =
+  if p == Machine & ibex_csr_defined(csr) then true else /* local, GAP-CS-3 */
   match (csr) {
     /* machine mode: informational */
     0xf11 => p == Machine, // mvendorid
@@ -107,6 +122,9 @@ function check_TVM_SATP(csr : csreg, p : Privilege) -> bool =
   not(csr == 0x180 & p == Supervisor & mstatus[TVM] == 0b1)
 
 function check_Counteren(csr : csreg, p : Privilege) -> bool =
+  /* Local, GAP-CS-3: Ibex's hpmcounter3-31 exist; mcounteren gates them only below machine
+   * mode (ibex_cs_registers.sv:626, :640), and CHERIoT is M-mode only. */
+  if p == Machine & ibex_csr_defined(csr) then true else
   match(csr, p) {
     (0xC00, Supervisor) => mcounteren[CY] == 0b1,
     (0xC01, Supervisor) => mcounteren[TM] == 0b1,
@@ -326,6 +344,9 @@ $endif
 
 function trap_handler(del_priv : Privilege, intr : bool, c : exc_code, pc : xlenbits, info : option(xlenbits), ext : option(ext_exception))
                      -> xlenbits = {
+  /* Local, GAP-CS-3: a synchronous exception sets cpuctrlsts.sync_exc_seen (and
+   * double_fault_seen if it was already set), ibex_cs_registers.sv:936-946. */
+  if not(intr) then ibex_csr_sync_exception();
   rvfi_trap();
   if   get_config_print_platform()
   then print_platform("handling " ^ (if intr then "int#" else "exc#")
@@ -413,6 +434,8 @@ function exception_handler(cur_priv : Privilege, ctl : ctl_result,
       trap_handler(del_priv, false, exceptionType_to_bits(e.trap), pc, e.excinfo, e.ext)
     },
     (_, CTL_MRET())  => {
+      /* Local, GAP-CS-3: MRET clears cpuctrlsts.sync_exc_seen, ibex_cs_registers.sv:963-966. */
+      ibex_csr_mret();
       let prev_priv   = cur_privilege;
       mstatus[MIE]  = mstatus[MPIE];
       mstatus[MPIE] = 0b1;
@@ -484,6 +507,7 @@ function handle_interrupt(i : InterruptType, del_priv : Privilege) -> unit =
 /* state state initialization */
 
 function init_sys() -> unit = {
+  ibex_csr_reset(); /* Local, GAP-CS-3: Ibex's platform CSRs to their reset values. */
   cur_privilege = Machine;
 
   mhartid     = zero_extend(0b0);

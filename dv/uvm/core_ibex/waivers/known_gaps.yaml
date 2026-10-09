@@ -1,0 +1,21 @@
+# Known-gap waivers for the UVM regression (see "Gap Analysis" in ibex_cheriot_verification_spec.md).
+#
+# A failing test is reported as a KNOWN-GAP warning instead of a failure only when BOTH patterns
+# match: `test` (Python regex, full match on the test name) and `message` (Python regex, searched
+# in the test's failure message, which holds the log extract check_logs.py collected). A failure
+# that matches no entry stays a failure, so a different failure in a waived test still fails.
+#
+# Only model, generator or upstream gaps belong here. RTL findings (tech-notes/rtl_todo.md) are
+# never waived. Every entry names its gap ID; remove the entry when the gap is closed.
+
+- id: GAP-RV-3
+  test: riscv_debug_ebreakmu_test
+  message: 'EBreak seen whilst doing initial debug initialization'
+  reason: Known upstream failure, lowRISC/ibex#1313 (the bench flags it itself).
+
+- id: GAP-CS-3
+  test: cheriot_illegal_sweep_sail_only
+  message: 'CHERIoT-Sail mismatch|RISCV-DV handshake \(payload=TEST_FAIL\)'
+  reason: >-
+    The test enumerates encodings the RTL executes and CHERIoT-Sail rejects (Zcb,
+    draft bit-manipulation, RTL-only CSRs); it is expected to fail until each item is resolved.

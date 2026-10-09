@@ -1,0 +1,5 @@
+SamuelRiedel/opentitan ce6c22fbfe06846d2625c30713d435cccc6109c2 (branch rv-dm-cheriot), directory hw/vendor/pulp_riscv_dbg,
+fetched 2026-10-09. That tree is pulp-platform/riscv-dbg 2bc55e1e43a472b629a84ef3090a2aa13e13d351 with OpenTitan's patches
+0001-0004 and Samuel Riedel's CHERIoT patches 0005-0011 already applied (copies in patches/, for reference only:
+do not apply them again). Taken: src/, debug_rom/, sva/, LICENSE, LICENSE.SiFive, README.md, Bender.yml.
+Not taken: tb/, ci/, doc/. OpenTitan's fusesoc core file is kept beside it as ../pulp_riscv_dbg.core.opentitan.

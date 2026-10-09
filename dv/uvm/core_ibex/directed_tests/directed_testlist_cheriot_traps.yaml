@@ -1,0 +1,120 @@
+# Copyright lowRISC contributors.
+# Licensed under the Apache License, Version 2.0, see LICENSE for details.
+# SPDX-License-Identifier: Apache-2.0
+#
+# CHERIoT-mode interrupt, debug and memory-error tests.
+#
+# The riscv-dv interrupt/debug/memory-error tests (riscv_dv_extension/testlist.yaml) run with
+# cheriot_enable_i deasserted: riscv-dv's generated program cannot run in CHERIoT mode at all
+# (its trap handler saves registers with sw through an integer kernel stack pointer, sets
+# mtvec/mepc with csrw, which is illegal there, and its jumps go through `la` + jalr, i.e. CJALR
+# on an untagged register). These directed programs bring their own CHERIoT-correct handler
+# (directed_tests/cheriot_dv.h: MTCC, MScratchC trap stack, csc/clc save/restore, MEPCC + mret)
+# and speak the riscv-dv signature handshake, so the existing UVM interrupt/debug checkers
+# drive and check them.
+#
+# Self-contained programs: no crt_cheriot.S/syscalls.c. They lay out their own vector words at
+# BOOT_ADDR (+0 debug halt, +8 debug exception) and _start at +0x80, like riscv-dv programs.
+#
+# Cosim: cheriot_irq_cheri runs with the pin On from reset and the CHERIoT-Sail oracle on.
+# CHERIoT-Sail models neither debug mode nor bus/integrity errors nor NMIs, and no plusarg turns
+# only that oracle off, so the debug and memory-error tests boot in RISC-V mode, have the bench
+# raise the pin (+cheriot_enable_on_write) and run with +disable_cosim=1, self-checking -- the
+# arrangement cheriot_enable_transition and cheriot_mtvec_mepc_access already use.
+
+- config: cheriot-dv-tests
+  ld_script: link.ld
+  includes: .
+  gcc_opts: -march=rv32imc -mabi=ilp32 -static -mcmodel=medany -nostdlib -nostartfiles
+  rtl_test: core_ibex_base_test
+  rtl_params:
+    PMPEnable: 1
+  timeout_s: 600
+
+- test: cheriot_irq_cheri
+  desc: >
+    Timer/external/software interrupts taken while cheriot_enable_i is asserted, during CSC/CLC
+    bursts, misaligned accesses, interrupt-disabling and -enabling sentry calls and
+    register-only CHERI work. CHERIoT handler (MTCC, MScratchC trap stack, csc/clc frame,
+    mret through MEPCC) checks mtval = 0, mstatus MIE/MPIE/MPP, MEPCC tag/otype/perms/address
+    and mcause; the program checks capability state survives every interrupt, MIE across
+    sentries (REQ_INT_07) and that >= 12 interrupts arrived. The UVM side
+    (core_ibex_cheriot_irq_test) checks the riscv-dv handshake. CHERIoT-Sail oracle on.
+    Returns 0 on success; codes in the test header.
+  iterations: 4
+  test_srcs: cheriot_irq_cheri/cheriot_irq_cheri.S
+  config: cheriot-dv-tests
+  rtl_test: core_ibex_cheriot_irq_test
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1 +require_signature_addr=1 +enable_irq_single_seq=1"
+
+- test: cheriot_debug_mode
+  desc: >
+    Debug mode with cheriot_enable_i asserted: haltreq entry (DEPCC = PCC at dpc), the
+    debug-mode capability-check bypass (untagged/out-of-bounds/no-SD/sealed authority, clc
+    through an untagged pointer) and the same accesses faulting after dret, DScratchC0/1
+    preserving capabilities, ebreak with dcsr.ebreakm, single step (including a stepped ebreak,
+    cause ebreak, and a stepped faulting fetch that re-enters at the trap handler), dret with an
+    untagged /
+    out-of-bounds / sealed / non-executable DEPCC faulting on the first fetch, debug SCRs
+    illegal outside debug mode, then random debug requests over CHERI work
+    (core_ibex_cheriot_debug_test). Self-checking, cosim off (CHERIoT-Sail has no debug mode).
+    Returns 0 on success; codes in the test header.
+  iterations: 2
+  test_srcs: cheriot_debug_mode/cheriot_debug_mode.S
+  config: cheriot-dv-tests
+  rtl_test: core_ibex_cheriot_debug_test
+  sim_opts: "+cheriot_enable_on_write=80200000 +disable_cosim=1 +disable_spurious_dside_responses=1 +require_signature_addr=1 +enable_debug_seq=1 +max_interval=2000"
+
+- test: cheriot_mem_err
+  desc: >
+    Bus errors and memory integrity errors with cheriot_enable_i asserted, injected by
+    address so each lands on a chosen access: both halves of misaligned lw/sw/sh, both beats
+    of CLC and CSC, bad integrity on a word load and on each beat of a CLC (internal NMI,
+    mcause 0xFFFFFFE0), and instruction-fetch bus and integrity errors. Also a misaligned lw
+    with both halves faulting, a CHERI op and a branch after a faulting load (flushed), and
+    word-load integrity NMIs arriving among CHERI ops (exactly the ops before MEPCC executed).
+    Checks mcause, mtval,
+    MEPCC and that a faulted load leaves its destination unchanged; the UVM side
+    (core_ibex_cheriot_mem_err_test) requires a bus alert per integrity error and no other
+    alert. Self-checking, cosim off (CHERIoT-Sail has no bus errors and no NMI).
+    Returns 0 on success; codes in the test header (89 = open question, see there).
+  iterations: 2
+  test_srcs: cheriot_mem_err/cheriot_mem_err.S
+  config: cheriot-dv-tests
+  rtl_test: core_ibex_cheriot_mem_err_test
+  sim_opts: "+cheriot_enable_on_write=80200000 +disable_cosim=1 +disable_spurious_dside_responses=1 +require_signature_addr=1 +enable_bad_intg_on_uninit_access=0 +dside_bus_err_lo=80000814 +dside_bus_err_hi=8000081b +dside_intg_err_lo=8000082c +dside_intg_err_hi=80000833 +iside_bus_err_lo=80000c00 +iside_bus_err_hi=80000c03 +iside_intg_err_lo=80000d00 +iside_intg_err_hi=80000d03 +cheriot_mem_err_min_bus_alerts=6"
+
+- test: cheriot_branch_self_loop
+  desc: >
+    A taken branch (c.beqz) or CJAL (c.jal) to itself at the base of a PCC of length 2, 3 or
+    4: cp_cheri_branch_bound 0x022, 0x032, 0x0a2, 0x122, 0x132 and cp_cheri_cjal_bound 0x022,
+    0x032, 0x0c2, 0x122, 0x132, in bench memory, at 0 and just under 2^32
+    (+far_code_windows=1). The trap handler writes each loop, enters it by mret with MIE = 1,
+    and the interrupt core_ibex_cheriot_irq_test raises ends it. The handler checks mcause,
+    mtval = 0, mstatus, MEPCC = the loop PCC with the loop address and, for CJAL, the link
+    (tag, pc + 2, otype 5). CHERIoT-Sail oracle on. Returns 0, else a code from the test header
+    plus 256 x the loop index.
+  iterations: 1
+  test_srcs: cheriot_branch_self_loop/cheriot_branch_self_loop.S
+  config: cheriot-dv-tests
+  rtl_test: core_ibex_cheriot_irq_test
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1 +require_signature_addr=1 +enable_irq_single_seq=1 +far_code_windows=1"
+
+- test: cheriot_cjal_link_wrap
+  desc: >
+    A c.jal (CJAL cra) at 2^32 - 2 under PCC [2^32 - 2, 2^32), whose link address wraps to 0:
+    cp_cheri_cjal_bound 0x0c1 (2 bytes back, the target's fetch faults with mcause 28, mtval
+    0x401, MEPCC.address = target, untagged) and 0x0a2 (to itself, ended by an interrupt as in
+    cheriot_branch_self_loop, with the minstret liveness count). CHERIoT-Sail asserts that a CJAL
+    link is always representable, so the cosim is off and the test checks the obligation itself:
+    the link address is 0 and the link is untagged, or tagged with exactly the PCC's bounds and
+    a backward-sentry otype (4 with MIE = 0, 5 with MIE = 1). cra holds a recognisable tagged
+    capability before each CJAL, so an unwritten link fails. Returns 0, else a code from the test
+    header.
+  iterations: 1
+  test_srcs: cheriot_cjal_link_wrap/cheriot_cjal_link_wrap.S
+  config: cheriot-dv-tests
+  rtl_test: core_ibex_cheriot_irq_test
+  # +disable_cosim=1 relaxes Spike; +disable_cheriot_sail=1 turns the CHERIoT-Sail oracle off, which
+  # +disable_cosim alone did not (2026-10-08: "CHERIoT-Sail mismatch ... diverged" at step 33).
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1 +require_signature_addr=1 +enable_irq_single_seq=1 +disable_cosim=1 +disable_cheriot_sail=1"

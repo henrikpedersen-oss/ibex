@@ -70,13 +70,19 @@ main:
     # Enable machine-mode interrupts for the duration of this test.
     csrsi   mstatus, 8              # set mstatus.MIE (bit 3)
 
-    # Load MTCC into both ca0 and ca1 (cursor=0 for both).
+    # Load MTCC into both ca0 and ca1. Both hold the same cursor, whatever it is:
+    # crt_cheriot.S points MTCC at trap_entry (0x80000200), not 0. Test 1 only
+    # requires the two to be equal, so the absolute value does not matter.
     .word   0x03C0055B              # cspecialr ca0, mtcc
     .word   0x03C005DB              # cspecialr ca1, mtcc  (rd=ca1=x11)
 
-    # ── Test 1: CSub(ca0, ca1) = 0 — both cursors are 0 ─────────────────────
-    .word   0x28B5055B              # csub a0, ca0, ca1
-    bne     a0, x0, .Lfail_test1
+    # ── Test 1: CSub(ca0, ca1) = 0 — both cursors are equal ─────────────────
+    # Result goes to a3, NOT a0: a0 is x10 is ca0, so writing the integer result
+    # there would clear ca0's tag and zero its cursor, and test 2 would then
+    # advance a null capability instead of MTCC. That is what made test 2 compute
+    # 0x10 - 0x80000200 = 0x7ffffe10 and fail. Same trap as cheriot_cap_perms.S.
+    .word   0x28B506DB              # csub a3, ca0, ca1  (rd=x13=a3)
+    bne     a3, x0, .Lfail_test1
 
     # Advance ca0 cursor by 16 (ca1 still at original MTCC cursor).
     # Use a2 for the offset: li a1 would write to x11=ca1, corrupting its cursor.
@@ -84,9 +90,9 @@ main:
     .word   0x22C5055B              # cincaddr ca0, ca0, a2  (rs2=x12=a2)
 
     # ── Test 2: CSub(ca0, ca1) = 16 — one cursor advanced ────────────────────
-    .word   0x28B5055B              # csub a0, ca0, ca1
+    .word   0x28B506DB              # csub a3, ca0, ca1  (rd=x13=a3)
     li      a2, 16
-    bne     a0, a2, .Lfail_test2
+    bne     a3, a2, .Lfail_test2
 
     # ── Interrupt state verification ───────────────────────────────────────────
     csrr    a0, mstatus

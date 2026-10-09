@@ -20,7 +20,7 @@
 #
 #   Test 3 (MTDC → tag=1)
 #     MTDC (machine data capability, SCR 29) must be valid at reset.
-#     ibex CHERIoT does not implement DDC (SCR addresses < 27 are illegal);
+#     ibex CHERIoT does not implement DDC (outside debug mode only SCRs 28-31 are legal; 27 ZTOPC and anything below 24 are always illegal, 24-26 are debug-mode only);
 #     MTDC is the data root capability and is the relevant reset check.
 #
 #   Tests 4-6 (interrupt state — no interrupt expected)
@@ -61,8 +61,9 @@
 #   cgettag   a0,  ca0   = .word 0xFE45055B
 #
 # Note: ibex CHERIoT does not implement DDC.  Valid SCR addresses are
-#   27=ZTOP, 28=MTCC, 29=MTDC, 30=MScratchC, 31=MEPCC.  Access to
-#   SCR < 27 faults with illegal_scr_addr.
+#   28=MTCC, 29=MTDC, 30=MScratchC, 31=MEPCC outside debug mode; 24-26
+#   (DEPCC, DScratchC0/1) are debug-mode only; 27 (ZTOPC) and < 24 are always
+#   illegal (illegal_scr_addr in ibex_cheriot_ex.sv).
 #
 # Used with the 'cheriot-c-tests' directed test config (crt_cheriot.S startup,
 # syscalls.c pass/fail via SIGNATURE_ADDR write).  main() returning 0 = pass.

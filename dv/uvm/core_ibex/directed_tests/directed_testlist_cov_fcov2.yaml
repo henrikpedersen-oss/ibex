@@ -1,0 +1,89 @@
+# Copyright lowRISC contributors.
+# Licensed under the Apache License, Version 2.0, see LICENSE for details.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Functional coverage closure, second round: directed tests for the core_ibex_fcov_if.sv bins the
+# fcov merge of 2026-10-09 17:14 still left unhit (uarch_cg timing crosses, CHERIoT ISA crosses).
+# Each test header names its bins and why the stimulus reaches them. Bins an existing targeted
+# test should reach were added to that test instead (pmp_fault_hazard, cheriot_csethigh,
+# cheriot_setbounds, cheriot_fetch_bounds).
+#
+# Configs are shared across all directed_testlist*.yaml files (directed_test_schema.py):
+# riscv-tests and cheriot-c-tests are defined in directed_testlist.yaml, cheriot-dv-tests in
+# directed_testlist_cheriot_traps.yaml.
+#
+# The two _hazard tests run under core_ibex_stall_events_test with its +gnt_trig_lo/hi window
+# (debug request / NMI / fetch-enable drop timed from a data-side grant the program makes) and
+# +mem_mode_on_write (the program sets the memory agents' response delays per section). TRIG =
+# 0x80100000 is outside the image, hence +enable_bad_intg_on_uninit_access=0; its upper half is
+# the bus-error window. +disable_fetch_enable_seq=1: no fetch-enable drops but the program's.
+
+- test: cov_fcov2_rv_hazard
+  desc: >
+    RISC-V mode: debug requests, NMIs and fetch-enable drops placed in an exact cycle of the
+    instruction behind a data access (grant-timed, +gnt_trig), with the data-side response
+    delay chosen per section (+mem_mode_on_write) and a masked pending timer interrupt. Mul and
+    Load sleds and accesses with debug_req rising in the next instruction's only ID cycle;
+    ebreak, ecall and a fetch error unstalling with debug_req pending; ebreak and ecall
+    unstalling on a faulting access with the timer pending; ebreak into debug mode, an
+    uncompressed illegal and a CSR-illegal instruction behind a faulting access at every
+    response timing, irq and debug combination; a fetch error on a faulting access's response
+    with debug_req and the timer pending; mret and ebreak into debug mode unstalling with
+    debug_req; an NMI pending while ebreak (ebreakm), wfi, a fetch error or a dcsr read waits
+    behind a faulting access (taken right after its FLUSH); IF empty and idle behind c.ebreak
+    (into debug mode and not) and c.unimp for each WB state, with instruction-side responses
+    40..84 cycles apart (+mem_mode_on_write V[23:16]) so nothing is fetched behind them.
+    Targets uarch_cg exception_stall_instr_cross, interrupt_taken_instr_cross and pipe_cross.
+    Self-checking (trap, NMI and debug-entry counts, causes, NMI mepc; codes in the header),
+    Spike cosim on.
+  iterations: 2
+  test_srcs: cov_fcov2_rv_hazard/cov_fcov2_rv_hazard.S
+  config: riscv-tests
+  rtl_test: core_ibex_stall_events_test
+  sim_opts: >-
+    +disable_spurious_dside_responses=1 +disable_fetch_enable_seq=1
+    +enable_bad_intg_on_uninit_access=0
+    +dside_bus_err_lo=80100080 +dside_bus_err_hi=801000ff
+    +gnt_trig_lo=80100000 +gnt_trig_hi=801000ff +gnt_fetch_off_cycles=40
+    +dbg_req_on_write=80100100 +mem_mode_on_write=80100104 +irq_timer_on_wfi=1
+    +dbg_gap_min=2 +dbg_gap_max=4
+
+- test: cov_fcov2_cheri_hazard
+  desc: >
+    CHERIoT mode (pin raised by +cheriot_enable_on_write): a CHERI instruction (CIncAddrImm
+    independent of the access, CIncAddr reading the loaded register) behind a data access, with
+    debug_req raised from the access's grant (+gnt_trig), data-side responses immediate or 4..12
+    cycles late (+mem_mode_on_write), the timer interrupt pending and masked or not, and the
+    access completing or getting a bus error; plus a doorbell debug request landing in a sled of
+    CIncAddrImm. Targets the InstrCategoryCheri bins of uarch_cg exception_stall_instr_cross
+    (None / Mem / LdHz, unstalled, irq, debug, with and without the bus error) and
+    debug_entry_if_instr_cross. Self-checking (trap and debug-entry counts, causes), cosim off
+    (CHERIoT-Sail has no debug mode and no bus errors). Exit code in a0 (test header).
+  iterations: 2
+  test_srcs: cov_fcov2_cheri_hazard/cov_fcov2_cheri_hazard.S
+  config: cheriot-dv-tests
+  rtl_test: core_ibex_stall_events_test
+  sim_opts: >-
+    +cheriot_enable_on_write=80200000 +disable_cosim=1 +disable_spurious_dside_responses=1
+    +require_signature_addr=1 +disable_fetch_enable_seq=1 +enable_bad_intg_on_uninit_access=0
+    +dside_bus_err_lo=80100080 +dside_bus_err_hi=801000ff
+    +gnt_trig_lo=80100000 +gnt_trig_hi=801000ff
+    +dbg_req_on_write=80100100 +mem_mode_on_write=80100104 +irq_timer_on_wfi=1
+    +dbg_gap_min=2 +dbg_gap_max=4
+
+- test: cov_fcov2_cheri_isa
+  desc: >
+    AUICGP 0, CIncAddrImm 0 / -1 and CIncAddr x0 / 0xFFFFFFFF on an untagged sealed E = 0
+    capability (CSetHigh of the null capability at 0x10, high word 0x00422100) whose base decodes
+    to 0xFFFFFF00, above its address; CGetBase of the memory root at address 0xFFFFFFFF. Results
+    from CHERIoT-Sail: tag 0, address +increment, high word unchanged, no trap; base 0, tagged.
+    Targets cheriot_uarch_cg cheriot_cauicgp_cross, cheriot_cincaddrimm_cross,
+    cheriot_cincaddr_cross (untagged, case1, sealed, E = 0) and cheriot_cget_field_cross
+    (tagged, address 0xFFFFFFFF, CFIELD_BASE). Then a CSC of the memory root (GL) through that
+    untagged sealed source (no SD) must trap: mcause 28, mtval 0x182 (TagViolation against c12),
+    MEPCC at the CSC (cheriot_csc_cross0 {untagged, sealed, sd0, cs2 GL 1}). CHERIoT-Sail cosim
+    on. Returns 0, else a code from the test header, 250 (trap), 251 (liveness).
+  iterations: 1
+  test_srcs: cov_fcov2_cheri_isa/cov_fcov2_cheri_isa.S
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
+  config: cheriot-c-tests

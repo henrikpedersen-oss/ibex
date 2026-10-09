@@ -10,9 +10,9 @@
 # The check in each case is that the capability loses its tag or traps, rather
 # than that the C program misbehaves.
 #
-# Distinct from sonata-software/examples/juliet_cwe, which runs the same CWE
-# classes as compiled C on the Sonata board via `make sonata-juliet`. These need
-# no board and run under the normal uvm-test-xlm path.
+# Distinct from ibex/dv/cheriot-rtos-test-suites/firmware/juliet_cwe, which runs the
+# same CWE classes as compiled C under CHERIoT RTOS on the RTOS test SoC via
+# `make sonata-juliet-xlm`. These need no RTOS and run under the normal uvm-test-xlm path.
 #
 # Kept in their own testlist so the suite can be maintained and reviewed
 # separately; metadata.py loads every directed_testlist*.yaml in this directory,
@@ -26,17 +26,30 @@
 # codes only became observable on 2026-09-18: crt_cheriot.S reported TEST_PASS
 # unconditionally until then, so these tests could not fail through the
 # handshake.
+#
+# Every test here carries +disable_spurious_dside_responses=1 -- see the note at
+# the top of directed_testlist.yaml for why. In short: the TB injects spurious
+# d-side bus responses on ~20% of seeds, the core correctly faults, and
+# crt_cheriot.S's unported trap_entry then double-faults into a UVM_FATAL.
+#
+# These tests are the ones most likely to mask a real regression if that note is
+# ever undone: each one EXPECTS a CHERI fault, so a spurious-response fault can
+# look like the fault it was checking for.
 
 - test: juliet_cwe121_stack_bof
   desc: >
-    CWE-121 Stack Buffer Overflow (Juliet Test Suite, NIST/NSA).
-    Creates a 64-byte bounded "stack buffer" capability via CSetBounds(MTDC,64).
-    Tests: (1) CGetLen=64; (2) base=0; (3) tag=1; (4) CIncAddr+32→tag=1 (safe);
-    (5) CIncAddr+128 on the cursor-32 cap (cursor→160>top=64) → tag=0 (overflow
-    denied by CHERIoT bounds hardware).
+    CWE-121 Stack Buffer Overflow (Juliet Test Suite, NIST/NSA). A 64-byte
+    capability to a .data "stack frame" (CSetBounds of MTDC). (1) CGetLen=64;
+    (2) base=&frame; (3) tag=1; (4) CIncAddr+32 keeps tag=1; (9)-(10) control:
+    sw through buf+32 does not trap and is written; (5) CIncAddr+128 (cursor
+    160, past top 64 but representable, E=0) KEEPS tag=1; (11) cursor =
+    &frame+160; (6)-(8) no interrupt; then the overflowing sw through buf+160
+    (12) traps with (13) mcause 28, (14) mtval 0x141 (bounds violation 0x01,
+    c10), (15) MEPCC at the sw, and (16) frame[160] unchanged. (17) any other
+    trap. Test-local MTCC vectors. Returns 0 on success, else 1-17.
   iterations: 1
   test_srcs: juliet_cwe121_stack_bof/juliet_cwe121_stack_bof.S
-  sim_opts: "+enable_cheriot_seq=1"
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
   config: cheriot-c-tests
 
 - test: juliet_cwe122_heap_bof
@@ -48,32 +61,32 @@
     denied — CHERIoT prevents the out-of-bounds write).
   iterations: 1
   test_srcs: juliet_cwe122_heap_bof/juliet_cwe122_heap_bof.S
-  sim_opts: "+enable_cheriot_seq=1"
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
   config: cheriot-c-tests
 
 - test: juliet_cwe416_use_after_free
   desc: >
-    CWE-416 Use After Free (Juliet Test Suite, NIST/NSA).
-    Simulates free() via CClearTag (CHERIoT revocation primitive).
-    Tests: (1) tag=1 before free; (2) tag=0 after CClearTag (pointer revoked);
-    (3) CGetAddr=0 after CClearTag (cursor unchanged but capability unusable).
-    In CHERIoT, any load/store through a tag=0 pointer raises a CHERI exception.
+    Named after CWE-416 Use After Free; a register-level CClearTag check only.
+    A 64-byte capability to a .data object (MTDC, CSetAddr, CSetBounds): (1)
+    tag=1; (2) CClearTag ("free") gives tag=0; (3) CGetAddr is still the
+    object's (non-zero) address; (4)-(6) no interrupt. No load, store or
+    trap; nothing is freed or revoked (cheriot_revoke_basic covers the fault
+    on a revoked pointer). Returns 0 on success, else 1-6.
   iterations: 1
   test_srcs: juliet_cwe416_use_after_free/juliet_cwe416_use_after_free.S
-  sim_opts: "+enable_cheriot_seq=1"
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
   config: cheriot-c-tests
 
 - test: juliet_cwe415_double_free
   desc: >
-    CWE-415 Double Free (Juliet Test Suite, NIST/NSA).
-    CClearTag is idempotent: a second CClearTag on an already-cleared capability
-    does nothing (tag stays 0, no corruption).
-    Tests: (1) tag=1 before free; (2) tag=0 after first CClearTag; (3) tag=0
-    after second CClearTag (double free is safe in CHERIoT); (4) cursor=0
-    unchanged through both clears.
+    Named after CWE-415 Double Free; a register-level check only. (1)
+    CSetBounds(MTDC, 128) gives tag=1; (2) CClearTag clears it; (3) a second
+    CClearTag leaves it cleared; (4) the address is unchanged; (5)-(7) no
+    interrupt. No load, store or trap; nothing is freed or revoked (revocation
+    is covered at the Sonata layer).
   iterations: 1
   test_srcs: juliet_cwe415_double_free/juliet_cwe415_double_free.S
-  sim_opts: "+enable_cheriot_seq=1"
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
   config: cheriot-c-tests
 
 - test: juliet_cwe190_int_overflow
@@ -86,35 +99,40 @@
     denied — no software bounds check required).
   iterations: 1
   test_srcs: juliet_cwe190_int_overflow/juliet_cwe190_int_overflow.S
-  sim_opts: "+enable_cheriot_seq=1"
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
   config: cheriot-c-tests
 
 - test: juliet_cwe124_buf_underwrite
   desc: >
-    CWE-124 Buffer Underwrite (Juliet Test Suite, NIST/NSA).
-    CIncAddr with a negative offset (-4) moves the cursor below the base of a
-    16-byte bounded capability at 0x80080000.  cursor < base is out-of-bounds
-    in CHERIoT → tag cleared immediately.
-    Tests: (1) tag=1 after CSetBounds(16) (baseline); (2) tag=0 after
-    CIncAddr(-4) (cursor < base → underwrite denied); (3) cgetaddr=0x8007FFFC
-    (cursor set to base-4 despite tag=0, confirming arithmetic is correct).
+    CWE-124 Buffer Underwrite (Juliet Test Suite, NIST/NSA). The CHERIoT
+    representable window starts at base ([base, base + 2^(9+E))), so per
+    CHERIoT-Sail incCapAddr a cursor below base is unrepresentable and
+    CIncAddr clears the tag; a store at base - 4 is a bounds violation.
+    16-byte capability on a .data buffer with a guard word below it: (1)
+    tag=1; (7) control: CIncAddr +4 then -4 back to base keeps tag=1; (8)-(9)
+    control store at base succeeds; (4)-(6) no interrupt; (10)-(14) sw
+    -4(ca0) traps with mcause=28, mtval=0x141, MEPCC at the store, guard word
+    unchanged; (2) CIncAddr -4 from base gives tag=0; (3) CGetAddr = base-4;
+    (15) unexpected trap. Returns 0 on success, else 1-15.
   iterations: 1
   test_srcs: juliet_cwe124_buf_underwrite/juliet_cwe124_buf_underwrite.S
-  sim_opts: "+enable_cheriot_seq=1"
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
   config: cheriot-c-tests
 
 - test: juliet_cwe193_off_by_one
   desc: >
-    CWE-193 Off-by-One Error (Juliet Test Suite, NIST/NSA).
-    CHERI bounds are half-open [base, top).  CIncAddr(+16) on a 16-byte
-    capability moves cursor to exactly top, which is excluded → tag=0.
-    CIncAddr(+15) on a fresh cap lands at top-1, which is included → tag=1.
-    Tests: (1) tag=1 after CSetBounds(16) (baseline); (2) tag=0 after
-    CIncAddr(+16) (cursor=top is OOB — off-by-one denied); (3) tag=1 after
-    fresh CSetBounds(16)+CIncAddr(+15) (top-1 is valid last element).
+    CWE-193 Off-by-One Error (Juliet Test Suite, NIST/NSA). A 16-byte
+    capability to a .data buffer followed by a guard word. (1) tag=1; (2)
+    CIncAddr+16, cursor = top, KEEPS tag=1 (one-past-the-end is
+    representable); (7) cursor = &area+16; (3) fresh cap, CIncAddr+15 keeps
+    tag=1; (8)-(9) control: sb buf[15] does not trap and is written; (4)-(6)
+    no interrupt; then sb buf[16] through the cursor-at-top cap (10) traps
+    with (11) mcause 28, (12) mtval 0x141 (bounds violation 0x01, c10), (13)
+    MEPCC at the sb, and (14) the guard word unchanged. (15) any other trap.
+    Test-local MTCC vectors. Returns 0 on success, else 1-15.
   iterations: 1
   test_srcs: juliet_cwe193_off_by_one/juliet_cwe193_off_by_one.S
-  sim_opts: "+enable_cheriot_seq=1"
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
   config: cheriot-c-tests
 
 - test: juliet_cwe272_least_privilege
@@ -129,7 +147,7 @@
     (tag preserved — narrowing is safe).
   iterations: 1
   test_srcs: juliet_cwe272_least_privilege/juliet_cwe272_least_privilege.S
-  sim_opts: "+enable_cheriot_seq=1"
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
   config: cheriot-c-tests
 
 - test: juliet_cwe457_uninit_var
@@ -143,7 +161,7 @@
     x0=0 (null address is zero, not garbage).
   iterations: 1
   test_srcs: juliet_cwe457_uninit_var/juliet_cwe457_uninit_var.S
-  sim_opts: "+enable_cheriot_seq=1"
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
   config: cheriot-c-tests
 
 # ---------------------------------------------------------------------------
@@ -167,24 +185,18 @@
 # ---------------------------------------------------------------------------
 - test: juliet_cwe123_write_what_where
   desc: >
-    CWE-123 Write-What-Where Condition (Juliet Test Suite, NIST/NSA).
-    An attacker-controlled CSetAddr to 0x80090000 (outside the bounded cap
-    [0x80080000, 0x80080010)) clears the tag immediately — the write primitive
-    is neutralised before any store can execute.  CGetAddr still returns
-    0x80090000 (the address was placed; the tag is the protection).
-    Tests: (1) tag=1 on bounded cap (baseline); (2) tag=0 after
-    CSetAddr(0x80090000) (target outside bounds → write denied); (3)
-    cgetaddr=0x80090000 (address placed, tag=0 is the defence).
+    CWE-123 Write-What-Where Condition (Juliet Test Suite, NIST/NSA). Per
+    CHERIoT-Sail setCapAddr, CSetAddr clears the tag iff the new address is
+    unrepresentable (window [base, base + 2^(9+E))), not iff it leaves
+    [base, top). 16-byte capability at 0x80080000, E=0 (no memory access):
+    (1) tag=1; (7) control: CSetAddr(base+0x100), out of bounds but
+    representable, keeps tag=1; (2) the attacker's CSetAddr(0x80090000) =
+    base+0x10000 gives tag=0; (3) CGetAddr=0x80090000; (4)-(6) no interrupt.
+    Returns 0 on success, else 1-7.
   iterations: 1
   test_srcs: juliet_cwe123_write_what_where/juliet_cwe123_write_what_where.S
-  sim_opts: "+enable_cheriot_seq=1"
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
   config: cheriot-c-tests
-
-# ── cheriot-rtos tests (CHERIoT RTOS pattern tests) ──────────────────────────
-# These tests exercise CHERIoT instructions used internally by the CHERIoT RTOS
-# (cheriot-rtos/, Microsoft / CHERIoT contributors).  Each is adapted from a
-# pattern in cheriot-rtos/tests/ but expressed as bare-metal assembly.
-
 
 # ---------------------------------------------------------------------------
 # Added 2026-09-18. juliet_cwe131_buf_size_calc and juliet_cwe468_ptr_scaling
@@ -210,7 +222,7 @@
     4=in-bounds store trapped, 5=interrupt state.
   iterations: 1
   test_srcs: juliet_cwe131_fault/juliet_cwe131_fault.S
-  sim_opts: "+enable_cheriot_seq=1"
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
   config: cheriot-c-tests
 
 - test: juliet_cwe131_repr
@@ -223,7 +235,7 @@
     3=cursor wrong, 4-6=interrupt state.
   iterations: 1
   test_srcs: juliet_cwe131_repr/juliet_cwe131_repr.S
-  sim_opts: "+enable_cheriot_seq=1"
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
   config: cheriot-c-tests
 
 - test: juliet_cwe468_fault
@@ -237,7 +249,7 @@
     4=in-bounds store trapped, 5=interrupt state.
   iterations: 1
   test_srcs: juliet_cwe468_fault/juliet_cwe468_fault.S
-  sim_opts: "+enable_cheriot_seq=1"
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
   config: cheriot-c-tests
 
 - test: juliet_cwe468_repr
@@ -250,5 +262,5 @@
     3=cursor wrong, 4-6=interrupt state.
   iterations: 1
   test_srcs: juliet_cwe468_repr/juliet_cwe468_repr.S
-  sim_opts: "+enable_cheriot_seq=1"
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
   config: cheriot-c-tests

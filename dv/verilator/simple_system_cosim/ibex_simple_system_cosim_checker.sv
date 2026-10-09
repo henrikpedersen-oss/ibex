@@ -49,7 +49,14 @@ module ibex_simple_system_cosim_checker #(
   always @(posedge clk_i) begin
     if (u_top.rvfi_valid) begin
       riscv_cosim_set_nmi(cosim_handle, u_top.rvfi_ext_nmi);
-      riscv_cosim_set_nmi_int(cosim_handle, u_top.rvfi_ext_nmi_int);
+      // mtval argument added 2026-09-24 when set_nmi_int gained it so the UVM
+      // flow could tell the ISS what Ibex writes to mtval on an internal NMI
+      // (the ISS zeroes it, Ibex uses the integrity-error address). Passed as 0
+      // here only to keep this flow compiling: it has no equivalent peek, and 0
+      // reproduces exactly the behaviour it had before the signature changed,
+      // so nothing is regressed. If the Verilator cosim is ever used to chase
+      // an mtval mismatch after an integrity NMI, this is the line to fix.
+      riscv_cosim_set_nmi_int(cosim_handle, u_top.rvfi_ext_nmi_int, 32'h0);
       riscv_cosim_set_mip(cosim_handle, u_top.rvfi_ext_pre_mip, u_top.rvfi_ext_post_mip);
       riscv_cosim_set_debug_req(cosim_handle, u_top.rvfi_ext_debug_req);
       riscv_cosim_set_mcycle(cosim_handle, u_top.rvfi_ext_mcycle);
@@ -62,8 +69,9 @@ module ibex_simple_system_cosim_checker #(
       riscv_cosim_set_ic_scr_key_valid(cosim_handle, u_top.rvfi_ext_ic_scr_key_valid);
 
       if (riscv_cosim_step(cosim_handle, u_top.rvfi_rd_addr, u_top.rvfi_rd_wdata,
-                           u_top.rvfi_pc_rdata, u_top.rvfi_trap,
-                           u_top.rvfi_ext_rf_wr_suppress) == 0)
+                           u_top.rvfi_pc_rdata, u_top.rvfi_intr, u_top.rvfi_trap,
+                           u_top.rvfi_ext_rf_wr_suppress,
+            1'b0 /* more_ops: this flow has no expanded-instruction plumbing */) == 0)
       begin
         $display("FAILURE: Co-simulation mismatch at time %t", $time());
         for (int i = 0;i < riscv_cosim_get_num_errors(cosim_handle); ++i) begin

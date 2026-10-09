@@ -16,6 +16,9 @@ import "DPI-C" function void cheriot_sail_cosim_init(bit [31:0] boot_addr);
 import "DPI-C" function void cheriot_sail_cosim_null_gprs();
 // RAM size mapped at 0x80000000 by the next init (default 8 MiB, the TestRIG TB's data memory).
 import "DPI-C" function void cheriot_sail_cosim_set_ram_size(bit [31:0] size);
+// Second region [base, base + size) mapped by the next init, in the platform's ROM segment
+// (writable, as RAM). Default none.
+import "DPI-C" function void cheriot_sail_cosim_set_rom(bit [31:0] base, bit [31:0] size);
 
 // Tear down the model and release Sail runtime state.
 import "DPI-C" function void cheriot_sail_cosim_cleanup();
@@ -45,6 +48,10 @@ import "DPI-C" function int cheriot_sail_cosim_step(
 // the interrupt from its own state. Call before stepping the handler's first instruction.
 import "DPI-C" function int cheriot_sail_cosim_take_interrupt(bit [31:0] mip);
 
+// 1 if the model would take an interrupt were these bits pending (mie and mstatus.MIE). Changes
+// nothing.
+import "DPI-C" function int cheriot_sail_cosim_irq_would_take(bit [31:0] mip);
+
 // Return the Sail model's mtval register after the last step (valid when that step was a trap).
 import "DPI-C" function bit [31:0] cheriot_sail_cosim_get_mtval();
 // Return the Sail model's mcause register after the last step (valid when that step was a trap).
@@ -68,6 +75,17 @@ import "DPI-C" function void cheriot_sail_cosim_write_mem_byte(
 // does not advance mcycle on its own; without this push both csrr reads
 // would return 0 and arithmetic on those values would mismatch the RTL.
 import "DPI-C" function void cheriot_sail_cosim_set_mcycle(longint unsigned mcycle);
+
+// Bench inputs of CHERIoT-Ibex's CSRs in the model's platform (spec GAP-CS-3; reset values,
+// WARL masks and cpuctrlsts' trap/MRET effects are the model's own). Push before each step:
+//   set_mhpmcounter(idx, value): mhpmcounter<idx>, idx 3..31, value the RVFI record's
+//     {mhpmcountersh[idx-3], mhpmcounters[idx-3]} (the value the instruction reads)
+//   set_ic_scr_key_valid: cpuctrlsts bit 8, the RVFI record's ic_scr_key_valid
+//   set_mcounteren_writable: the mcounteren_writable_i pin (default 1)
+import "DPI-C" function void cheriot_sail_cosim_set_mhpmcounter(int unsigned idx,
+                                                               longint unsigned value);
+import "DPI-C" function void cheriot_sail_cosim_set_ic_scr_key_valid(bit valid);
+import "DPI-C" function void cheriot_sail_cosim_set_mcounteren_writable(bit writable);
 
 // Fields of the RVFI execution packet produced by the last step(). The rd and
 // mem getters return 0 when the model reported no integer write / memory access.

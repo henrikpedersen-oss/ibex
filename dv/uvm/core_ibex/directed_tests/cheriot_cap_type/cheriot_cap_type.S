@@ -14,8 +14,11 @@
 #
 # The otype field distinguishes:
 #   0: OTYPE_UNSEALED — a normal, usable capability
-#   1: OTYPE_SENTRY   — a sealed entry point (callable but not modifiable)
-#   2-3: sentry variants (forward/backward)
+#   1-5:  sentries on executable caps -- 1 plain, 2 forward interrupt-disable,
+#         3 forward interrupt-enable, 4 backward interrupt-disable,
+#         5 backward interrupt-enable
+#   6-7:  sealed executable caps that are not sentries
+#   9-15: sealed data caps (8 is not a valid data otype)
 #
 # Testing that all root SCRs return 0 confirms:
 #   (1) No root capability was accidentally sealed at reset (which would

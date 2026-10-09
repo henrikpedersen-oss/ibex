@@ -76,6 +76,8 @@ module ibex_load_store_unit import ibex_pkg::*; import ibex_cheriot_pkg::*; #(
   output logic         lsu_err_is_cheriot_o,
 
   output logic         busy_o,
+  output logic         cheriot_req_busy_o,   // access issued in CHERIoT mode still requesting
+                                             //                                  -> to core
 
   output logic         perf_load_o,
   output logic         perf_store_o
@@ -124,8 +126,13 @@ module ibex_load_store_unit import ibex_pkg::*; import ibex_cheriot_pkg::*; #(
   cap_rx_fsm_t  cap_rx_fsm_q, cap_rx_fsm_d;
 
   logic         cap_lsw_err_q;
+  logic         cap_lsw_intg_err_q;
+  logic         cap_intg_err;
   logic [31:0]  cap_lsw_data_q;
   logic         cap_lsw_tag_q;
+
+  logic         cheriot_req_q;   // the access in progress was issued in CHERIoT mode
+  logic [32:0]  csc_mw_q;        // CSC: metadata word and tag, captured when issued
 
   assign data_addr   = adder_result_ex_i;
   assign data_offset = ((BaseIsa == BaseIsaRV32IorCHERIoT) &
@@ -207,10 +214,16 @@ module ibex_load_store_unit import ibex_pkg::*; import ibex_cheriot_pkg::*; #(
     endcase // case (data_offset)
   end
 
+  // A CSC's beats after the issue cycle take the capability from csc_mw_q, captured when the CSC
+  // was issued: it equals cheriot_cap_to_mem(lsu_wcap_i) while cheriot_enable_i stays On, and keeps
+  // the write data and tag of a raised request stable if the pin leaves On (REQ_BCK_06, see the
+  // CTX_* states), when the register file no longer returns the capability.
   always_comb begin
     if ((BaseIsa == BaseIsaRV32IorCHERIoT) & (cheriot_enable_i == IbexMuBiOn) & lsu_is_cap_i) begin
       if (lsu_we_i & (ls_fsm_cs == CTX_WAIT_GNT2))
-        {data_wdata_tag, data_wdata_data} = cheriot_cap_to_mem(lsu_wcap_i);
+        {data_wdata_tag, data_wdata_data} = csc_mw_q;
+      else if (lsu_we_i & (ls_fsm_cs == CTX_WAIT_GNT1))
+        {data_wdata_tag, data_wdata_data} = {csc_mw_q[32], lsu_wdata_i};
       else if (lsu_we_i)
         {data_wdata_tag, data_wdata_data} = {lsu_wcap_i.valid, lsu_wdata_i};
       else
@@ -562,42 +575,37 @@ module ibex_load_store_unit import ibex_pkg::*; import ibex_cheriot_pkg::*; #(
         end
       end
 
+      // A capability access always completes both words once its first request is raised: the
+      // CTX_* states do not look at cheriot_enable_i. If the pin leaves On meanwhile (REQ_BCK_06,
+      // a break of the pin contract), the core keeps this LSU, the ID/EX stage and the data-side
+      // PMP gate in CHERIoT mode until this FSM is back in IDLE (cheriot_req_busy_o, see
+      // ibex_core), so each request stays raised with stable address and data until granted, and
+      // the instruction in ID completes rather than becoming illegal under it. The core raises
+      // alert_major_internal_o for the pin change.
       CTX_WAIT_GNT1: begin
-        if (cheriot_enable_i == IbexMuBiOn) begin
-          addr_incr_req_o = 1'b0;
-          data_req_o      = 1'b1;
-          if (data_gnt_i) begin
-            ls_fsm_ns   = CTX_WAIT_GNT2;
-            ctrl_update = 1'b1;
-            addr_update = 1'b1;
-          end
-        end else begin
-          ls_fsm_ns = IDLE;
+        addr_incr_req_o = 1'b0;
+        data_req_o      = 1'b1;
+        if (data_gnt_i) begin
+          ls_fsm_ns   = CTX_WAIT_GNT2;
+          ctrl_update = 1'b1;
+          addr_update = 1'b1;
         end
       end
 
       CTX_WAIT_GNT2: begin
-        if (cheriot_enable_i == IbexMuBiOn) begin
-          addr_incr_req_o = 1'b1;
-          data_req_o      = 1'b1;
-          if (data_gnt_i && (data_rvalid_i || (cap_rx_fsm_q == CRX_WAIT_RESP2))) begin
-            ls_fsm_ns = IDLE;
-          end else if (data_gnt_i) begin
-            ls_fsm_ns = CTX_WAIT_RESP;
-          end
-        end else begin
+        addr_incr_req_o = 1'b1;
+        data_req_o      = 1'b1;
+        if (data_gnt_i && (data_rvalid_i || (cap_rx_fsm_q == CRX_WAIT_RESP2))) begin
           ls_fsm_ns = IDLE;
+        end else if (data_gnt_i) begin
+          ls_fsm_ns = CTX_WAIT_RESP;
         end
       end
 
       CTX_WAIT_RESP: begin        // only needed if mem allows 2 active req
-        if (cheriot_enable_i == IbexMuBiOn) begin
-          addr_incr_req_o = 1'b1;
-          data_req_o      = 1'b0;
-          if (data_rvalid_i) begin
-            ls_fsm_ns = IDLE;
-          end
-        end else begin
+        addr_incr_req_o = 1'b1;
+        data_req_o      = 1'b0;
+        if (data_rvalid_i) begin
           ls_fsm_ns = IDLE;
         end
       end
@@ -644,8 +652,11 @@ module ibex_load_store_unit import ibex_pkg::*; import ibex_cheriot_pkg::*; #(
       cheriot_err_q       <= 1'b0;
       cap_rx_fsm_q        <= CRX_IDLE;
       cap_lsw_err_q       <= 1'b0;
+      cap_lsw_intg_err_q  <= 1'b0;
       cap_lsw_data_q      <= '0;
       cap_lsw_tag_q       <= 1'b0;
+      cheriot_req_q       <= 1'b0;
+      csc_mw_q            <= '0;
     end else begin
       ls_fsm_cs           <= ls_fsm_ns;
       handle_misaligned_q <= handle_misaligned_d;
@@ -664,6 +675,11 @@ module ibex_load_store_unit import ibex_pkg::*; import ibex_cheriot_pkg::*; #(
       if (lsu_go) begin
         resp_is_cap_q     <= lsu_is_cap_i;
         resp_lc_clrperm_q <= lsu_lc_clrperm_i;
+        cheriot_req_q     <= (BaseIsa == BaseIsaRV32IorCHERIoT) & (cheriot_enable_i == IbexMuBiOn);
+      end
+
+      if (lsu_go_goodcap & lsu_we_i) begin
+        csc_mw_q          <= cheriot_cap_to_mem(lsu_wcap_i);
       end
 
       if ((BaseIsa == BaseIsaRV32IorCHERIoT) & (cheriot_enable_i == IbexMuBiOn) &&
@@ -674,7 +690,10 @@ module ibex_load_store_unit import ibex_pkg::*; import ibex_cheriot_pkg::*; #(
 
       if ((BaseIsa == BaseIsaRV32IorCHERIoT) & (cheriot_enable_i == IbexMuBiOn) &&
           (cap_rx_fsm_q == CRX_WAIT_RESP1) && data_rvalid_i) begin
-        cap_lsw_err_q <= data_bus_err_i;
+        cap_lsw_err_q      <= data_bus_err_i;
+        // Integrity is latched apart from the bus error: folding it into cap_lsw_err_q would add
+        // a load access fault (mcause 5) on top of the integrity NMI.
+        cap_lsw_intg_err_q <= data_intg_err;
       end
 
     end
@@ -684,26 +703,33 @@ module ibex_load_store_unit import ibex_pkg::*; import ibex_cheriot_pkg::*; #(
   // Outputs //
   /////////////
 
+  // The response side does not look at cheriot_enable_i: cheriot_err_q and resp_is_cap_q are only
+  // set for an access issued in CHERIoT mode, and its response must still complete it if the pin
+  // has left On since (REQ_BCK_06). Otherwise a CHERIoT access error would never be answered (the
+  // instruction in writeback would wait for ever), and a first-word bus error of a CLC/CSC would be
+  // lost.
   logic all_resp;
-  assign data_or_pmp_err    = lsu_err_q | data_bus_err_i | pmp_err_q |
-                              ((cheriot_enable_i == IbexMuBiOn) &
-                               (cheriot_err_q | (resp_is_cap_q & cap_lsw_err_q)));
+  assign data_or_pmp_err    = lsu_err_q | data_bus_err_i | pmp_err_q | cheriot_err_q |
+                              (resp_is_cap_q & cap_lsw_err_q);
 
-  assign all_resp           = data_rvalid_i | pmp_err_q |
-                              ((cheriot_enable_i == IbexMuBiOn) & cheriot_err_q);
+  assign all_resp           = data_rvalid_i | pmp_err_q | cheriot_err_q;
   assign lsu_resp_valid_o   = all_resp & (ls_fsm_cs == IDLE);
+
+  // Integrity error on either beat of a CLC: data_intg_err sees only the current (second) beat.
+  assign cap_intg_err       = data_intg_err | (resp_is_cap_q & cap_lsw_intg_err_q);
 
   // this goes to wb as rf_we_lsu, so needs to be gated when data needs to go back to EX
   assign lsu_rdata_valid_o  = (ls_fsm_cs == IDLE) & data_rvalid_i & ~data_or_pmp_err & ~data_we_q &
-                              ~data_intg_err;
+                              ~cap_intg_err;
 
   // output to register file
   if (BaseIsa == BaseIsaRV32IorCHERIoT) begin : gen_memcap_rd
-    assign lsu_rdata_o = ((cheriot_enable_i == IbexMuBiOn) & resp_is_cap_q) ?
-                         cap_lsw_data_q : data_rdata_ext;
+    // A CLC's address word, also if the pin left On before its last response; the capability
+    // itself is returned only while the pin is On.
+    assign lsu_rdata_o = resp_is_cap_q ? cap_lsw_data_q : data_rdata_ext;
     assign lsu_rcap_o  = ((cheriot_enable_i == IbexMuBiOn) && resp_is_cap_q &&
                           data_rvalid_i && (cap_rx_fsm_q == CRX_WAIT_RESP2) &&
-                          (~data_or_pmp_err)) ?
+                          (~data_or_pmp_err) && (~cap_intg_err)) ?
                          cheriot_mem_to_cap({data_tag_i, data_rdata_i[31:0]},
                              {cap_lsw_tag_q, cap_lsw_data_q}, resp_lc_clrperm_q) :
                          NULL_CAP;
@@ -760,6 +786,10 @@ module ibex_load_store_unit import ibex_pkg::*; import ibex_cheriot_pkg::*; #(
   assign lsu_err_is_cheriot_o  = (cheriot_enable_i == IbexMuBiOn) & cheriot_err_q;
 
   assign busy_o = (ls_fsm_cs != IDLE);
+
+  // The access in progress was issued in CHERIoT mode and has requests left (REQ_BCK_06): the core
+  // holds CHERIoT mode for it, see the CTX_* states.
+  assign cheriot_req_busy_o = (ls_fsm_cs != IDLE) & cheriot_req_q;
 
   //////////
   // FCOV //
@@ -832,5 +862,9 @@ module ibex_load_store_unit import ibex_pkg::*; import ibex_cheriot_pkg::*; #(
   // CHERIoT isolation: when CHERIoT is disabled, capability-specific inputs must be 0.
   `ASSERT_IF(IbexLsuIsCapDisabled,    !lsu_is_cap_i,       cheriot_enable_i != IbexMuBiOn)
   `ASSERT_IF(IbexLsuCheriotErrDisabled, !lsu_cheriot_err_i, cheriot_enable_i != IbexMuBiOn)
+
+  // The core holds CHERIoT mode while a capability access is in progress (cheriot_req_busy_o).
+  `ASSERT(IbexLsuCtxCheriotOn, (ls_fsm_cs inside {CTX_WAIT_GNT1, CTX_WAIT_GNT2, CTX_WAIT_RESP}) |->
+                               (cheriot_enable_i == IbexMuBiOn))
 
 endmodule

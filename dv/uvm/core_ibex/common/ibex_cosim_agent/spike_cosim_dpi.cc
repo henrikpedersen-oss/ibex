@@ -30,8 +30,20 @@ void *spike_cosim_init(const char *isa_string, svBitVecVal *start_pc,
       icache, pmp_num_regions[0], pmp_granularity[0], mhpm_counter_num[0],
       dm_start_addr[0], dm_end_addr[0]);
   // Add a memory device that covers the entire address space.
-  // This will only be sparsely populated.
-  cosim->add_memory(0x00000000, 0xFFFF0000);
+  // This will only be sparsely populated (Spike's mem_t allocates pages on
+  // demand), so the full 4 GiB costs nothing.
+  //
+  // This was 0xFFFF0000, which is 64 KiB SHORT of the 4 GiB the comment claims:
+  // it left 0xFFFF0000-0xFFFFFFFF unmapped in Spike while the UVM mem_model
+  // answers every address. riscv-dv emits `li rX,-1` followed by a memory access
+  // through it, so any access at 0xFFFFFFFF/0xFFFFFFFE -- including the wrapped
+  // second half of a misaligned access -- completed in the DUT but raised
+  // trap_load_access_fault in the ISS. That surfaced as three unrelated-looking
+  // cosim mismatches ("load at address fffffffc ... data 0 was expected",
+  // "Synchronous trap was expected ... but the DUT didn't report one", and
+  // "Register write data mismatch ... expected: ffffffff" from a later
+  // csrrs mtval), which were one bug, not three.
+  cosim->add_memory(0x00000000, 0x100000000ULL);
   return static_cast<Cosim *>(cosim);
 }
 

@@ -43,6 +43,9 @@ class ibex_cosim_agent extends uvm_agent;
 
   function void write_mem_byte(bit [31:0] addr, bit [7:0] d);
     riscv_cosim_write_mem_byte(scoreboard.cosim_handle, addr, d);
+    // Every write to Spike's memory goes to the Sail models too, so all see one image.
+    scoreboard.riscv_sail_write_mem_byte(addr, d);
+    scoreboard.cheriot_sail_write_mem_byte(addr, d);
   endfunction
 
   function void write_mem_word(bit [31:0] addr, bit [DATA_WIDTH-1:0] d);

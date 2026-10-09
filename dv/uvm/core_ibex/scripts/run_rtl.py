@@ -21,6 +21,14 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+# How long after the test's own wall-clock timeout (+test_timeout_s) the xrun process is killed.
+# The in-simulation timer starts only after elaboration and loading, and a test that ends on it
+# (+is_timeout_s_fatal=0, e.g. riscv_pmp_traps_test) still writes its coverage afterwards; under a
+# loaded nyx those took 71 s on 2026-10-08, so 60 s killed passing runs (riscv_pmp_traps_test.3105:
+# TEST PASSED, coverage written, killed at 240 s of 251). A hung simulation is still killed.
+KILL_MARGIN_S = 300
+
+
 def _main() -> int:
     """Generate and run rtl simulation commands."""
     parser = argparse.ArgumentParser()
@@ -120,12 +128,12 @@ def _main() -> int:
                 # or IBEX_TEST_TIMEOUT_S above 1800 s used to be cut off here at 1860 s.
                 run_one(md.verbose, cmd,
                         redirect_stdstreams=sim_fd,
-                        timeout_s=trr.timeout_s+60,  # Ideally we time-out inside the simulation
+                        timeout_s=trr.timeout_s+KILL_MARGIN_S,  # Ideally we time-out inside the simulation
                         reraise=True)  # Allow us to catch timeout exceptions at this level
         except subprocess.TimeoutExpired:
             trr.failure_mode = Failure_Modes.TIMEOUT
             trr.failure_message = "[FAILURE] Simulation process killed due to timeout " \
-                                 f"[{trr.timeout_s+60}s].\n"
+                                 f"[{trr.timeout_s+KILL_MARGIN_S}s].\n"
 
     trr.export(write_yaml=True)
     # Always return 0 (success), even if the test failed. We've successfully

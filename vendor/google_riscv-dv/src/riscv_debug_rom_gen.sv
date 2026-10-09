@@ -51,6 +51,10 @@ class riscv_debug_rom_gen extends riscv_asm_program_gen;
       if (cfg.enable_ebreak_in_debug_rom) begin
         gen_ebreak_header();
       end
+      // Skip one trap frame (the saved sp plus x1-x31) first. A debug request can arrive while the
+      // trap handler is still in push_gpr_to_kernel_stack: its frame then lies below tp, half
+      // written, and a push from tp would overwrite it (GAP-RV-4). debug_end adds it back.
+      debug_main.push_back($sformatf("addi x%0d, x%0d, -%0d", cfg.tp, cfg.tp, 33 * (XLEN/8)));
       // Need to save off GPRs to avoid modifying program flow
       push_gpr_to_kernel_stack(MSTATUS, MSCRATCH, cfg.mstatus_mprv, cfg.sp, cfg.tp, debug_main);
       // Signal that the core entered debug rom only if the rom is actually
@@ -105,6 +109,8 @@ class riscv_debug_rom_gen extends riscv_asm_program_gen;
       end
       pop_gpr_from_kernel_stack(MSTATUS, MSCRATCH, cfg.mstatus_mprv,
                                 cfg.sp, cfg.tp, debug_end);
+      // Undo the trap-frame skip at the start of debug_main.
+      debug_end.push_back($sformatf("addi x%0d, x%0d, %0d", cfg.tp, cfg.tp, 33 * (XLEN/8)));
       if (cfg.enable_ebreak_in_debug_rom) begin
         gen_restore_ebreak_scratch_reg();
       end
@@ -116,9 +122,16 @@ class riscv_debug_rom_gen extends riscv_asm_program_gen;
   endfunction
 
   // Generate exception handling routine for debug ROM
-  // TODO(udinator) - remains empty for now, only a DRET
+  // An exception in the debug program leaves debug_main's GPRs and kernel-stack frame in place; a
+  // bare dret returned with them unrestored and the frame leaked (GAP-RV-4). Leave through
+  // debug_end instead: it pops the frame, restores tp and executes the dret. An exception in debug
+  // mode does not update dpc, so the dret still returns to the interrupted program.
   virtual function void gen_debug_exception_handler();
-    str = {"dret"};
+    if (cfg.gen_debug_section) begin
+      str = {$sformatf("j %0sdebug_end", hart_prefix(hart))};
+    end else begin
+      str = {"dret"};
+    end
     gen_section($sformatf("%0sdebug_exception", hart_prefix(hart)), str);
   endfunction
 

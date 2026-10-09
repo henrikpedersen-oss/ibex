@@ -1,0 +1,3 @@
+module ibex_top.rvfi_*
+module ibex_top.hart_id_i
+module ibex_top.boot_addr_i

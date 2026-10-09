@@ -74,7 +74,7 @@ void exit(int code);
 static const unsigned long expected_seccfg_fail = 0;
 static unsigned actual_seccfg_fail = 0;
 
-static const unsigned long expected_pmpaddr_fail = 0;
+static const unsigned long expected_pmpaddr_fail = 1;
 static unsigned actual_pmpaddr_fail = 0;
 
 static const unsigned long expected_pmpcfg_fail = 0;
@@ -138,7 +138,7 @@ static void set_cfg() {
     asm volatile ("csrw pmpaddr1, %0 \n" :: "r"(TEST_MEM_START >> 2) : "memory");
     
 #if M_MODE_RWX
-    asm volatile ("csrw pmpaddr0, %0 \n" :: "r"((0x80000000 >> 2) | 0xfffff) : "memory");
+    asm volatile ("csrw pmpaddr0, %0 \n" :: "r"((0x80000000 >> 2) | 0x1ffff) : "memory");
     reg_t cfg0 = (PMP_R | PMP_W | PMP_X | PMP_NAPOT);
     reg_t cfg1 = (PMP_R | PMP_W | PMP_NAPOT) << 24;
 #else

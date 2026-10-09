@@ -175,7 +175,10 @@
   CSR_MCONTEXT, \
   CSR_MSCONTEXT, \
   CSR_SCONTEXT, \
-  CSR_TDATA3
+  CSR_TDATA3, \
+  // cdbg_ctrl (0xBC4) was removed from the RTL (ibex a8b6181b): every access is illegal in both \
+  // modes, like any unimplemented address (cp_csr_invalid_*); csr_num_e still lists it \
+  CSR_CDBG_CTRL
 
 // Debug related CSRs
 `define DEBUG_CSRS \

@@ -67,12 +67,17 @@ class irq_request_driver extends uvm_driver #(irq_seq_item);
     drive_reset_value();
   endtask : reset_signals
 
+  // Lines the item does not drive (drive_maskable / drive_nm = 0) keep their current value.
   virtual protected task drive_seq_item (irq_seq_item trans);
-    vif.driver_cb.irq_software <= trans.irq_software;
-    vif.driver_cb.irq_timer    <= trans.irq_timer;
-    vif.driver_cb.irq_external <= trans.irq_external;
-    vif.driver_cb.irq_fast     <= trans.irq_fast;
-    vif.driver_cb.irq_nm       <= trans.irq_nm;
+    if (trans.drive_maskable) begin
+      vif.driver_cb.irq_software <= trans.irq_software;
+      vif.driver_cb.irq_timer    <= trans.irq_timer;
+      vif.driver_cb.irq_external <= trans.irq_external;
+      vif.driver_cb.irq_fast     <= trans.irq_fast;
+    end
+    if (trans.drive_nm) begin
+      vif.driver_cb.irq_nm       <= trans.irq_nm;
+    end
   endtask : drive_seq_item
 
   task drive_reset_value();

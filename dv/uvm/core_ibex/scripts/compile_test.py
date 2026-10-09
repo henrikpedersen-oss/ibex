@@ -161,9 +161,13 @@ def get_directed_compile_cmds(md: RegressionMetadata, trr: TestRunResult) -> Lis
     trr.objectfile = trr.dir_test/'test.o'
     trr.binary = trr.dir_test/'test.bin'
 
-    # Compose the compilation commands
+    # Compose the compilation commands.
+    # -DDV_SEED: each test.seed is compiled into its own directory, so a directed test can draw
+    # per-seed stimulus at assembly time (cheriot_rand_operands seeds its LFSR with it). Tests that
+    # do not use the macro are unaffected.
     riscv_gcc_cmd = " ".join([env.get('RISCV_GCC'),
                               trr.directed_data.get('gcc_opts'),
+                              f"-DDV_SEED={trr.seed}",
                               f"-I{trr.directed_data.get('includes')}",
                               f"-T{trr.directed_data.get('ld_script')}",
                               f"-o {trr.objectfile}",

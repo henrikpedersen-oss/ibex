@@ -12,6 +12,7 @@ package ibex_cosim_agent_pkg;
   `include "ibex_cosim_cfg.sv"
   `include "ibex_rvfi_seq_item.sv"
   `include "ibex_rvfi_monitor.sv"
+  `include "ibex_sail_rvfi_cmp.sv"
   `include "ibex_ifetch_seq_item.sv"
   `include "ibex_ifetch_monitor.sv"
   `include "ibex_ifetch_pmp_seq_item.sv"

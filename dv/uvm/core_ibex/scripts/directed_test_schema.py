@@ -91,6 +91,10 @@ class DTest(DConfig):  # noqa
     # so without this field a directed test's sim_opts is parsed but never
     # reaches run_rtl.py's testopts.get('sim_opts').
     sim_opts: Optional[str] = None
+    # The test needs the testbench built with the real debug module (make ... DM=1,
+    # scripts/compile_tb.py). metadata.py leaves it out of all_directed on a normal build and
+    # refuses it by name there, since it could only fail.
+    requires_dm: bool = False
 
     ##################################
     # DTest.VALIDATORS

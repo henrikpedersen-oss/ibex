@@ -31,9 +31,10 @@ def find_cov_dbs(start_dir: pathlib.Path, simulator: str) -> Set[pathlib.Path]:
             logging.info(f"Found coverage database (vdb) at {p}")
             cov_dbs.add(p)
 
+    # An empty set, not an error: main() calls this once per test, and a test with no database (one
+    # that never simulated) must not stop the others being merged. main() fails if none has any.
     if not cov_dbs:
-        logging.info(f"No coverage found for {simulator}")
-        return 1
+        logging.info(f"No coverage found for {simulator} under {start_dir}")
 
     return cov_dbs
 
@@ -95,7 +96,11 @@ def merge_cov_xlm(md: RegressionMetadata, cov_dbs: Set[pathlib.Path]) -> int:
     xlm_cov_dirs = {
         'cov_merge_db_dir': str(md.dir_cov_merged),
         'cov_report_dir': str(md.dir_cov_report),
-        'cov_db_dirs': "",
+        # Must not be empty: the vendored cov_merge.tcl builds its Tcl variable cov_db_dirs only
+        # inside a foreach over this value and prints it before taking the runfile branch, so ""
+        # fails with "can't read cov_db_dirs" and leaves imc at its prompt (nyx 2026-10-06). The
+        # databases themselves come from cov_db_runfile. Same placeholder as run_all_tests.sh.
+        'cov_db_dirs': "(runfile)",
         'cov_db_runfile': str(md.cov_merge_db_list),
         "DUT_TOP": md.dut_cov_rtl_path
     }
@@ -142,8 +147,22 @@ def main():
 
     md.dir_cov.mkdir(exist_ok=True, parents=True)
 
-    # Compile a list of all the coverage databases
-    cov_dbs = find_cov_dbs(md.dir_run, md.simulator)
+    # Compile a list of the coverage databases of this invocation's tests only. Globbing all of
+    # dir_run (as upstream does, assuming a fresh output directory) also picked up every earlier
+    # regression's and single test's databases still on disk: 6416 runs from several RTL builds on
+    # 2026-09-28, with IMC dropping 5066 items whose models differed. Each test's directory is
+    # named after its metadata pickle (<test>.<seed>).
+    cov_dbs = set()
+    for pickle_file in md.tests_pickle_files:
+        test_dir = md.dir_tests / pathlib.Path(pickle_file).stem
+        if test_dir.is_dir():
+            cov_dbs |= find_cov_dbs(test_dir, md.simulator)
+    if not cov_dbs:
+        logging.error(f"No coverage databases in any of the {len(md.tests_pickle_files)} tests "
+                      f"of this invocation")
+        return 1
+    logging.info(f"Merging coverage of {len(cov_dbs)} databases from "
+                 f"{len(md.tests_pickle_files)} tests of this invocation")
 
     merge_funs = {
         'vcs': merge_cov_vcs,

@@ -3,96 +3,80 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # =============================================================================
-# Test: cheriot_ccleartag — CClearTag explicitly revokes the capability tag
+# Test: cheriot_ccleartag — CClearTag clears the tag and nothing else
 # =============================================================================
-# CClearTag (funct7=0x7F, rs2=0x0B in the CGet decode block of ibex_decoder.sv)
-# returns the same capability value but with tag = 0.  This is the explicit
-# capability revocation instruction — used when software wants to pass a
-# reference to data that carries the same address/bounds as a valid capability
-# but must not be treated as one (e.g., when communicating with untrusted code).
+# CHERIoT-Sail (cheri_insts.sail, CClearTag): C(cd) = clearTag(C(cs1)) -- the
+# result is cs1 with tag := 0; address, bounds, perms and otype are unchanged.
+# RTL: ibex_cheriot_ex.sv, CCLEAR_TAG: result_cap_o = cs1 with valid = 0,
+# result_data_o = cs1's address.
 #
-# cheri_ex.sv: CCLEAR_TAG: result_data_o = rf_rdata_a; result_cap_o = cap with
-# valid=0.  The integer address is preserved; only the tag bit is cleared.
+# The capability under test is MTCC, read with cspecialr. Its address at main()
+# is NOT 0: crt_cheriot.S installs trap_entry in MTCC before calling main, so
+# the cursor is trap_entry's address. The test therefore records the address
+# before CClearTag and compares against that, rather than a constant.
 #
-#   Test 1 (MTCC tag starts at 1, before CClearTag)
-#     Confirm the starting state is tag=1.  This rules out the possibility
-#     that the tag was already 0 before the instruction ran.
+# Integer results go to t0 and s0, never a0: aN and caN are the same register,
+# so `cgettag a0, ca0` would overwrite the capability under test with an
+# integer and every later query would read that integer instead.
 #
-#   Test 2 (tag is 0 after CClearTag)
-#     After CClearTag, cgettag must return 0.  A failure means CClearTag is
-#     either not decoded, or the tag-clear logic is not writing the result back.
+#   Test 1  Before CClearTag, CGetTag(MTCC copy) = 1. Rules out a tag that was
+#           already 0.
+#   Test 7  Before CClearTag, CGetAddr is non-zero (it is trap_entry). A
+#           precondition: it makes test 3 able to tell "address kept" from
+#           "address zeroed".
+#   Test 2  After CClearTag, CGetTag = 0. Fails if CClearTag is not decoded or
+#           the tag clear is not written back.
+#   Test 3  After CClearTag, CGetAddr = the address recorded before. Fails if
+#           CClearTag alters or zeroes the address.
+#   Tests 4-6  mstatus.MIE = 1, mcause = 0, mip = 0 (no interrupt taken).
 #
-#   Test 3 (the integer address value is unchanged after CClearTag)
-#     CClearTag must NOT modify the address portion.  MTCC address=0 at reset.
-#     If the address changes, the instruction is also corrupting data.
+# Returns 0 on success, else the failing test number (1-7).
 #
-#   Tests 4-6 (interrupt state — no interrupt expected)
-#     Machine-mode interrupts are enabled at the start of the test.
-#     Test 4: mstatus.MIE still = 1.
-#     Test 5: mcause = 0.
-#     Test 6: mip = 0.
-#
-# Verification:
-#   Two independent layers catch a faulty DUT:
-#
-#   1. Cosim (Spike vs ibex RTL, per instruction step):
-#      cgettag and cgetaddr write to integer register a0 → cosim verifies each
-#      result.  If CClearTag does not clear the tag, the subsequent cgettag
-#      returns 1 in the DUT but 0 in Spike → cosim FAIL.
-#
-#   2. Self-check (bne/beq against expected constants):
-#      main() returns non-zero if any check fails → UVM testbench marks FAILED.
-#
-# Relevant to clang_purecap_null.c and any test that checks that integer
-# values do not have capability tags (CTSRD/Cambridge).  CClearTag is the
-# deliberate instruction-level counterpart to the automatic tag-clearing that
-# happens with integer ALU operations (tested in cheriot_intcap_arith).
+# Encodings (Sail encdec, opcode 0x5B; cross-checked against
+# cheriot_perm_lc_sc.S):
+#   cspecialr ca0, mtcc   = .word 0x03C0055B  (CSpecialRW, SCR 28)
+#   cgettag   t0, ca0     = .word 0xFE4502DB  (funct7=0x7F, rs2=0x04)
+#   cgetaddr  t0, ca0     = .word 0xFEF502DB  (funct7=0x7F, rs2=0x0F)
+#   cgetaddr  s0, ca0     = .word 0xFEF5045B
+#   ccleartag ca0, ca0    = .word 0xFEB5055B  (funct7=0x7F, rs2=0x0B)
 # =============================================================================
-#
-# CClearTag encoding (funct7=0x7F, rs2=0x0B, rs1=ca0=x10, rd=ca0=x10):
-#   funct7=0b1111111, rs2=0b01011, rs1=0b01010, funct3=000, rd=0b01010
-#   = 1111111_01011_01010_000_01010_1011011 = 0xFEB5055B
-#
-# Tests:
-#   1. Before CClearTag: MTCC tag = 1.
-#   2. After  CClearTag: ca0 tag = 0.
-#   3. After  CClearTag: ca0 address = 0 (address unchanged by CClearTag).
-#   4. mstatus.MIE = 1.
-#   5. mcause = 0.
-#   6. mip = 0.
 
 .globl main
 main:
     # Enable machine-mode interrupts for the duration of this test.
     csrsi   mstatus, 8              # set mstatus.MIE (bit 3)
 
-    # Load MTCC (tag=1, address=0).
+    # Load MTCC (tag=1, full range, cursor = trap_entry).
     .word   0x03C0055B              # cspecialr ca0, mtcc
 
     # ── Test 1: tag = 1 before CClearTag ──────────────────────────────────────
-    .word   0xFE45055B              # cgettag a0, ca0
-    li      a1, 1
-    bne     a0, a1, .Lfail_test1
+    .word   0xFE4502DB              # cgettag t0, ca0 (t0: keep ca0 intact)
+    li      t1, 1
+    bne     t0, t1, .Lfail_test1
+
+    # ── Test 7: record the address; it must be non-zero ───────────────────────
+    .word   0xFEF5045B              # cgetaddr s0, ca0
+    beqz    s0, .Lfail_test7
 
     # Apply CClearTag.
     .word   0xFEB5055B              # ccleartag ca0, ca0
 
     # ── Test 2: tag = 0 after CClearTag ───────────────────────────────────────
-    .word   0xFE45055B              # cgettag a0, ca0
-    bne     a0, x0, .Lfail_test2   # tag must be 0
+    .word   0xFE4502DB              # cgettag t0, ca0
+    bnez    t0, .Lfail_test2        # tag must be 0
 
-    # ── Test 3: address unchanged (still 0) ───────────────────────────────────
-    .word   0xFEF5055B              # cgetaddr a0, ca0
-    bne     a0, x0, .Lfail_test3   # address must still be 0
+    # ── Test 3: address unchanged ─────────────────────────────────────────────
+    .word   0xFEF502DB              # cgetaddr t0, ca0
+    bne     t0, s0, .Lfail_test3
 
     # ── Interrupt state verification ───────────────────────────────────────────
-    csrr    a0, mstatus
-    andi    a1, a0, 8
-    beq     a1, x0, .Lfail_test4
-    csrr    a0, mcause
-    bne     a0, x0, .Lfail_test5
-    csrr    a0, mip
-    bne     a0, x0, .Lfail_test6
+    csrr    t0, mstatus
+    andi    t0, t0, 8
+    beqz    t0, .Lfail_test4
+    csrr    t0, mcause
+    bnez    t0, .Lfail_test5
+    csrr    t0, mip
+    bnez    t0, .Lfail_test6
 
     li      a0, 0
     ret
@@ -103,3 +87,4 @@ main:
 .Lfail_test4: li a0, 4; ret
 .Lfail_test5: li a0, 5; ret
 .Lfail_test6: li a0, 6; ret
+.Lfail_test7: li a0, 7; ret

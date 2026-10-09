@@ -69,10 +69,29 @@ echo ""
 BASE_GCC_OPTS="-static -mcmodel=medany -fvisibility=hidden -nostdlib -nostartfiles"
 GCC_OPTS_OVERRIDE="${BASE_GCC_OPTS}${EXTRA_GCC_OPTS:+ ${EXTRA_GCC_OPTS}}"
 
+# Signatures and logs go under the output directory, not the suite's own work/: riscv-compliance
+# exports WORK = $(ROOTDIR)/work, so the enable-low (xlm_compliance_out) and enable-high
+# (xlm_compliance_cheriot_out) runs wrote the same files and the second replaced the first -- and
+# the HTML report then showed one run's results under both headings. The per-ISA makefiles ignore
+# WORK and set their own work_dir := $(ROOTDIR)/work, so both are overridden: a command-line
+# variable beats a makefile assignment and reaches the per-ISA sub-makes.
+WORK_DIR="${SCRIPT_DIR}/${OUTDIR}/work"
+mkdir -p "${WORK_DIR}"
+echo "Signatures: ${WORK_DIR}/<isa>/"
+
+# Simulate on the library in this output directory (run_xlm.sh defaults to xlm_compliance_out, which
+# made the CHERIoT run -- and any later RISC-V run -- use whichever library was built there last).
+export XLM_DIR="${SCRIPT_DIR}/${OUTDIR}"
+if [[ ! -d "${XLM_DIR}/xcelium.d" ]]; then
+  echo "ERROR: no Xcelium library in ${XLM_DIR} (run build_xlm.sh -o ${OUTDIR})" >&2
+  exit 1
+fi
+echo "Library: ${XLM_DIR}/xcelium.d ($(cat "${XLM_DIR}/.build_mode" 2>/dev/null || echo "mode unknown"))"
+
 fail=0
 for isa in rv32i rv32im rv32imc rv32Zicsr rv32Zifencei; do
   echo "=== ISA: ${isa} ==="
-  if ! make -C "${COMPLIANCE_DIR}" RISCV_ISA="${isa}" \
+  if ! make -C "${COMPLIANCE_DIR}" RISCV_ISA="${isa}" WORK="${WORK_DIR}" work_dir="${WORK_DIR}" \
        RISCV_GCC_OPTS="${GCC_OPTS_OVERRIDE}" simulate 2>&1; then
     echo "FAIL: compliance test failed for ${isa}"
     fail=1

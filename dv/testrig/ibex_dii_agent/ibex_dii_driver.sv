@@ -44,6 +44,10 @@ class ibex_dii_driver extends uvm_driver #(ibex_dii_seq_item);
   protected int unsigned num_injected;
   // Set when a test was aborted; its remaining instructions and closing RST are swallowed.
   protected bit          test_aborted;
+  // The DII interrupt lines as mip bits, for the scoreboard (the model's pending bits come from
+  // here, not from the core). Declared before drain_and_reset() uses it: Xcelium resolves class
+  // members in declaration order.
+  protected bit [31:0]   irq_mip;
 
   int unsigned num_aborted_tests;
   int unsigned num_drain_timeouts;
@@ -190,6 +194,11 @@ class ibex_dii_driver extends uvm_driver #(ibex_dii_seq_item);
     end
     @(dii_vif.cb);
 
+    // No interrupt line survives into the next test; the scoreboard clears its copy on reset.
+    irq_mip = '0;
+    dii_vif.cb.irq_software <= 1'b0;
+    dii_vif.cb.irq_timer    <= 1'b0;
+    dii_vif.cb.irq_external <= 1'b0;
     clk_vif.apply_reset(.reset_width_clks(2));
     @(dii_vif.cb);
 
@@ -198,21 +207,36 @@ class ibex_dii_driver extends uvm_driver #(ibex_dii_seq_item);
     num_injected  = 0;
   endtask
 
+  // Lines change only between instructions (one in flight, so the previous one has retired), and
+  // IrqSettleClks around the change keep each retirement on one side of it: the monitor delivers a
+  // retirement a cycle after instr_out counts it, so the scoreboard must judge the previous
+  // instruction before it learns the new lines; and the core must see the new lines before the
+  // next word is offered, so an enabled interrupt is taken before that word, as the model takes it.
+  localparam int unsigned IrqSettleClks = 3;
+
+  protected task set_irq_lines(bit [31:0] mip);
+    repeat (IrqSettleClks) @(dii_vif.cb);
+    irq_mip = mip;
+    dii_vif.cb.irq_software <= mip[3];
+    dii_vif.cb.irq_timer    <= mip[7];
+    dii_vif.cb.irq_external <= mip[11];
+    agent.scoreboard.set_irq_mip(mip);
+    repeat (IrqSettleClks) @(dii_vif.cb);
+  endtask
+
   protected task raise_irq(bit [3:0] channel);
+    if (test_aborted) return;
     case (channel)
-      4'd3:    dii_vif.cb.irq_software <= 1'b1;
-      4'd7:    dii_vif.cb.irq_timer    <= 1'b1;
-      4'd11:   dii_vif.cb.irq_external <= 1'b1;
+      4'd3, 4'd7, 4'd11: set_irq_lines(irq_mip | (32'b1 << channel));
       default: `uvm_error(`gfn, $sformatf("Unknown DII interrupt channel %0d", channel))
     endcase
   endtask
 
-  // The barrier slot takes a reply like any instruction, so it is counted and waited for.
+  // The barrier slot takes a reply like any instruction, so it is counted and waited for; the
+  // lines drop once it has retired (an enabled interrupt is taken before it).
   protected task irq_barrier();
     inject(DII_DRAIN_INSN);
-    dii_vif.cb.irq_software <= 1'b0;
-    dii_vif.cb.irq_timer    <= 1'b0;
-    dii_vif.cb.irq_external <= 1'b0;
+    if (!test_aborted) set_irq_lines('0);
   endtask
 
   virtual function void report_phase(uvm_phase phase);

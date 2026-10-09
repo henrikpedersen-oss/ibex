@@ -19,7 +19,7 @@ import riscvdv_interface
 from scripts_lib import run_one, format_to_cmd
 from ibex_cmd import get_config
 from metadata import RegressionMetadata
-from test_run_result import TestRunResult
+from test_run_result import TestRunResult, Failure_Modes
 
 import logging
 logger = logging.getLogger(__name__)
@@ -199,13 +199,30 @@ def _main() -> int:
 
         # Ensure that the output directory actually exists
         trr.dir_test.mkdir(parents=True, exist_ok=True)
-        trr.riscvdv_run_gen_stdout = md.dir_instruction_generator/'riscvdv_cmds.log'
+        # Per-test logs. Both used to be single files in the generator build directory, which every
+        # parallel job truncated: on nyx 2026-10-06 two of 2671 tests failed this step and left no
+        # trace of why.
+        trr.riscvdv_run_gen_stdout = trr.dir_test/'riscvdv_cmds.log'
         trr.riscvdv_run_gen_cmds   = [format_to_cmd(cmd)]
         # Run riscv-dv to generate commands. This is rather chatty, so redirect
-        # its output to a log file.
+        # its output to a log file. One retry: the failure seen is intermittent (same test, other
+        # seeds fine); the first attempt's log is kept beside the second's.
         gen_retcode = run_one(md.verbose, trr.riscvdv_run_gen_cmds[0],
                               redirect_stdstreams=trr.riscvdv_run_gen_stdout)
         if gen_retcode:
+            first_log = trr.dir_test/'riscvdv_cmds.attempt1.log'
+            trr.riscvdv_run_gen_stdout.replace(first_log)
+            logging.warning(f"riscv-dv command generation failed for {tds[0]}.{tds[1]} "
+                            f"(exit {gen_retcode}, log {first_log}); retrying once")
+            gen_retcode = run_one(md.verbose, trr.riscvdv_run_gen_cmds[0],
+                                  redirect_stdstreams=trr.riscvdv_run_gen_stdout)
+        if gen_retcode:
+            # Record why, so the report shows a reason instead of an empty result.
+            trr.passed = False
+            trr.failure_mode = Failure_Modes.LOG_ERROR
+            trr.failure_message = (f"riscv-dv command generation failed twice (exit {gen_retcode}); "
+                                   f"see {trr.riscvdv_run_gen_stdout}")
+            trr.export(write_yaml=True)
             return gen_retcode
 
         # Those commands assume the riscv-dv directory layout, where the build
@@ -219,7 +236,7 @@ def _main() -> int:
                               str(orig_list))
 
         trr.riscvdv_run_cmds   = [format_to_cmd(cmd) for cmd in cmds]
-        trr.riscvdv_run_stdout = md.dir_instruction_generator/'riscvdv_run.log'
+        trr.riscvdv_run_stdout = trr.dir_test/'riscvdv_run.log'
         trr.assembly           = trr.dir_test / 'test.S'
         # Open up a file to take output from running the commands
         with trr.riscvdv_run_stdout.open('w') as log_fd:

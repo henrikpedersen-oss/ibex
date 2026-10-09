@@ -15,17 +15,35 @@ module ibex_riscv_compliance (
   input IO_RST_N
 );
 
-  parameter ibex_pkg::base_isa_e BaseIsa  = ibex_pkg::BaseIsaRV32IorCHERIoT;
+  // The enum-typed parameters come from IBEX_CFG_* defines when the build sets them (build_xlm.sh
+  // generates them, with -defparam for the rest, from ibex_configs.yaml via util/ibex_config.py, as
+  // the UVM testbench does); otherwise the fallbacks below apply.
+`ifndef IBEX_CFG_BaseIsa
+  `define IBEX_CFG_BaseIsa ibex_pkg::BaseIsaRV32IorCHERIoT
+`endif
+`ifndef IBEX_CFG_RV32M
+  `define IBEX_CFG_RV32M ibex_pkg::RV32MFast
+`endif
+`ifndef IBEX_CFG_RV32B
+  `define IBEX_CFG_RV32B ibex_pkg::RV32BNone
+`endif
+`ifndef IBEX_CFG_RV32ZC
+  `define IBEX_CFG_RV32ZC ibex_pkg::RV32Zca
+`endif
+`ifndef IBEX_CFG_RegFile
+  `define IBEX_CFG_RegFile ibex_pkg::RegFileFF
+`endif
+  parameter ibex_pkg::base_isa_e BaseIsa  = `IBEX_CFG_BaseIsa;
   parameter bit          PMPEnable        = 1'b0;
   parameter int unsigned PMPGranularity   = 0;
   parameter int unsigned PMPNumRegions    = 4;
   parameter int unsigned MHPMCounterNum   = 0;
   parameter int unsigned MHPMCounterWidth = 40;
   parameter bit RV32E                     = 1'b0;
-  parameter ibex_pkg::rv32m_e RV32M       = ibex_pkg::RV32MFast;
-  parameter ibex_pkg::rv32b_e RV32B       = ibex_pkg::RV32BNone;
-  parameter ibex_pkg::rv32zc_e RV32ZC     = ibex_pkg::RV32Zca;
-  parameter ibex_pkg::regfile_e RegFile   = ibex_pkg::RegFileFF;
+  parameter ibex_pkg::rv32m_e RV32M       = `IBEX_CFG_RV32M;
+  parameter ibex_pkg::rv32b_e RV32B       = `IBEX_CFG_RV32B;
+  parameter ibex_pkg::rv32zc_e RV32ZC     = `IBEX_CFG_RV32ZC;
+  parameter ibex_pkg::regfile_e RegFile   = `IBEX_CFG_RegFile;
   parameter bit BranchTargetALU           = 1'b0;
   parameter bit WritebackStage            = 1'b0;
   parameter bit ICache                    = 1'b0;
@@ -69,6 +87,15 @@ module ibex_riscv_compliance (
   logic           host_rvalid [NrHosts];
   logic [31:0]    host_rdata  [NrHosts];
   logic           host_err    [NrHosts];
+
+  // ICacheScramble: out of reset the ICache requests a scrambling key and blocks its tag RAM until
+  // one is valid. Answer every request one cycle later with a fixed (zero) key, as a key manager
+  // would; the UVM testbench does the same through scrambling_key_if.
+  logic scramble_req, scramble_key_valid;
+  always_ff @(posedge clk_sys or negedge rst_sys_n) begin
+    if (!rst_sys_n) scramble_key_valid <= 1'b0;
+    else            scramble_key_valid <= scramble_req;
+  end
 
   logic [6:0]     ibex_data_rdata_intg;
   logic [6:0]     ibex_instr_rdata_intg;
@@ -224,10 +251,10 @@ module ibex_riscv_compliance (
       .irq_fast_i                (15'b0                ),
       .irq_nm_i                  (1'b0                 ),
 
-      .scramble_key_valid_i      ('0                   ),
+      .scramble_key_valid_i      (scramble_key_valid   ),
       .scramble_key_i            ('0                   ),
       .scramble_nonce_i          ('0                   ),
-      .scramble_req_o            (                     ),
+      .scramble_req_o            (scramble_req         ),
 
       .debug_req_i               ('b0                  ),
       .crash_dump_o              (                     ),

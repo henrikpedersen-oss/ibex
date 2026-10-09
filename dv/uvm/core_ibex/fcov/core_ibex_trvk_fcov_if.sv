@@ -109,15 +109,38 @@ interface core_ibex_trvk_fcov_if (
     cp_trvk_upstream_tag: coverpoint upstream_tag_o iff (rst_ni && upstream_rvalid_o);
 
     // Revocation must be reached through the bitmap, not only through error paths.
+    // ibex_trvk.sv: revbm_revoked = bitmap bit || revbm_err_i || |intg_error, and every term is
+    // sampled in the same cycle, so a source without the verdict, or the verdict without a source,
+    // is a defect. Several sources at once is reachable (+revbm_err_kind=intg|both).
     trvk_revoked_source_cross: cross cp_trvk_revoked, cp_trvk_revoked_by_bitmap,
-                                     cp_trvk_revbm_err, cp_trvk_intg_error;
+                                     cp_trvk_revbm_err, cp_trvk_intg_error {
+      illegal_bins source_without_verdict =
+          binsof(cp_trvk_revoked.not_revoked) &&
+          (binsof(cp_trvk_revoked_by_bitmap) intersect {1'b1} ||
+           binsof(cp_trvk_revbm_err) intersect {1'b1} ||
+           binsof(cp_trvk_intg_error) intersect {1'b1});
+      illegal_bins verdict_without_source =
+          binsof(cp_trvk_revoked.revoked) &&
+          binsof(cp_trvk_revoked_by_bitmap) intersect {1'b0} &&
+          binsof(cp_trvk_revbm_err) intersect {1'b0} &&
+          binsof(cp_trvk_intg_error) intersect {1'b0};
+    }
 
     // Revocation arriving while another lookup is outstanding.
-    trvk_revoked_outstanding_cross: cross cp_trvk_revoked, cp_trvk_outstanding;
+    trvk_revoked_outstanding_cross: cross cp_trvk_revoked, cp_trvk_outstanding {
+      // A bitmap response only answers an outstanding lookup (ibex_trvk.sv
+      // RevbmRspOnlyWhenOutstanding_A); revbm_outstanding_q clears only on the response itself
+      illegal_bins rsp_not_outstanding = binsof(cp_trvk_outstanding) intersect {1'b0};
+    }
 
     // A sealing capability must never be revoked: the exemption check is upstream of
     // the request, so this cross should leave the {revoked, sealing} bin empty.
-    trvk_sealing_cross: cross cp_trvk_revoked, cp_trvk_sealing_cap;
+    trvk_sealing_cross: cross cp_trvk_revoked, cp_trvk_sealing_cap {
+      // No lookup is made for a sealing capability (revbm_req_required needs !is_sealing_cap),
+      // and the stream join holds the response head that is_sealing_cap decodes until
+      // revbm_rvalid_i (ibex_trvk.sv), so a bitmap response never sees one
+      illegal_bins lookup_for_sealing_cap = binsof(cp_trvk_sealing_cap) intersect {1'b1};
+    }
   endgroup
 
   bit en_trvk_cov;

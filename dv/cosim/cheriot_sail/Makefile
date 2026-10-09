@@ -52,11 +52,14 @@ SAIL_RUNTIME_SRCS := \
     $(SAIL_LIB_DIR)/elf.c \
     $(SAIL_LIB_DIR)/sail_failure.c
 
-# cheriot-sail platform support (no main — riscv_sim.c is intentionally excluded)
+# cheriot-sail platform support (no main — riscv_sim.c is intentionally excluded).
+# ibex_platform_csrs.c: CHERIoT-Ibex's implementation-defined CSRs (spec GAP-CS-3), called by
+# the model (see cheriot-sail-model/VENDORED_FROM).
 PLATFORM_SRCS := \
     $(SAIL_RISCV_DIR)/c_emulator/riscv_prelude.c \
     $(SAIL_RISCV_DIR)/c_emulator/riscv_platform_impl.c \
-    $(SAIL_RISCV_DIR)/c_emulator/riscv_platform.c
+    $(SAIL_RISCV_DIR)/c_emulator/riscv_platform.c \
+    $(SAIL_RISCV_DIR)/c_emulator/ibex_platform_csrs.c
 
 # DPI wrapper (compiled as C++ with Sail headers already on the path)
 DPI_SRCS := cheriot_sail_cosim_dpi.cc

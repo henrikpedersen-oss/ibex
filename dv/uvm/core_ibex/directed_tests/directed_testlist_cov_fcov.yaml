@@ -1,0 +1,44 @@
+# Copyright lowRISC contributors.
+# Licensed under the Apache License, Version 2.0, see LICENSE for details.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Functional coverage closure: directed tests for covergroup bins (core_ibex_fcov_if.sv,
+# core_ibex_pmp_fcov_if.sv) that the full UVM regression left unhit, or hit only on some random
+# seeds (2026-10). Each test header names the bins it targets and where its expected values come
+# from. Bins that an existing targeted test should reach were added to that test instead
+# (cheriot_csethigh, cheriot_cseal_cunseal, cheriot_setbounds, cheriot_cap_readback).
+#
+# Configs are shared across all directed_testlist*.yaml files (directed_test_schema.py):
+# riscv-tests is defined in directed_testlist.yaml, cheriot-dv-tests in
+# directed_testlist_cheriot_traps.yaml. Both tests here run in RISC-V mode with the Spike cosim
+# on. +disable_spurious_dside_responses=1 for the reason given at the top of
+# directed_testlist.yaml.
+
+- test: cov_fcov_debug_tdata_read
+  desc: >
+    Read-only accesses to tselect, tdata1 and tdata2 in debug mode (one haltreq session):
+    tselect 0, tdata1 0x28001048 (type 2, dmode, action = enter debug mode, m, u, execute 0),
+    tdata2 0, then 0x5A5AA5A4 after a debug-mode write, then 0 again; tdata2 0 after dret.
+    Targets uarch_cg.csr_read_only_debug_cross {TDATA1, TDATA2} x debug mode, which riscv-dv's
+    debug ROM never reads. Expected values from ibex_cs_registers.sv gen_trigger_regs (Debug
+    Spec 0.13.2 5.2); Spike cosim on. Returns 0 on success; codes in the test header.
+  iterations: 1
+  test_srcs: cov_fcov_debug_tdata_read/cov_fcov_debug_tdata_read.S
+  config: cheriot-dv-tests
+  rtl_test: core_ibex_single_debug_pulse_test
+  sim_opts: "+disable_spurious_dside_responses=1 +require_signature_addr=1 +enable_debug_seq=1"
+
+- test: cov_fcov_pmp_mml_locked_wr
+  desc: >
+    mseccfg.MML = 1, RLB = 0: PMP entries 4-7 locked as MML_L, MML_RM, MML_WRM and MML_RM_RU
+    (A = OFF), region 0 a locked M-mode RX rule over the program. Seven writes of pmpcfg1, one
+    per executable MML configuration (XU, XRU, XWRU, XM_XU, XM, XRM, XRM_XU in every byte), are
+    all ignored: pmpcfg1 reads back unchanged after each (Privileged Spec 3.7.1 lock, Smepmp).
+    Fills every rlb = 0 bin of pmp_region_cg.pmp_wr_exec_region from a locked source, which the
+    riscv_epmp_* random tests reach only on some seeds. Spike cosim on. TEST_PASS / TEST_FAIL
+    with the failing check's code in TESTNUM (gp): 1-4 setup, 10-16 a write took effect,
+    0x100|code unexpected trap.
+  iterations: 1
+  test_srcs: cov_fcov_pmp_mml_locked_wr/cov_fcov_pmp_mml_locked_wr.S
+  config: riscv-tests
+  sim_opts: "+disable_spurious_dside_responses=1"

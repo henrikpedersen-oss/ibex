@@ -28,6 +28,9 @@ void cheriot_sail_cosim_init(const svBitVecVal *boot_addr);
 void cheriot_sail_cosim_null_gprs(void);
 // RAM size mapped at 0x80000000 by the next init (default 8 MiB, the TestRIG TB's data memory).
 void cheriot_sail_cosim_set_ram_size(const svBitVecVal *size);
+// Second region [base, base + size) mapped by the next init, in the platform's ROM segment
+// (writable, as RAM). Default none.
+void cheriot_sail_cosim_set_rom(const svBitVecVal *base, const svBitVecVal *size);
 
 // Advance the model by one retired instruction and compare CHERI/integer outputs.
 //
@@ -58,6 +61,10 @@ void cheriot_sail_cosim_cleanup(void);
 // Returns 0 on success, -1 (with an error recorded) if the model would not take it.
 int         cheriot_sail_cosim_take_interrupt(const svBitVecVal *mip);
 
+// 1 if the model, in its current state, would take an interrupt were these bits pending: one is
+// enabled in mie and mstatus.MIE is set (CHERIoT is M-mode only). Changes nothing.
+int         cheriot_sail_cosim_irq_would_take(const svBitVecVal *mip);
+
 // Return the Sail model's mtval value after the last step() (valid when that step was a trap).
 uint32_t    cheriot_sail_cosim_get_mtval(void);
 // Return the Sail model's mcause value after the last step() (valid when that step was a trap).
@@ -79,6 +86,16 @@ void cheriot_sail_cosim_write_mem_byte(const svBitVecVal *addr,
 // retired instruction, before cheriot_sail_cosim_step(), mirroring how
 // riscv_cosim_set_mcycle() feeds the same value into Spike.
 void cheriot_sail_cosim_set_mcycle(uint64_t mcycle);
+
+// Bench inputs of CHERIoT-Ibex's CSRs in the model's platform (spec GAP-CS-3). Call before
+// each cheriot_sail_cosim_step(), like set_mcycle:
+//   set_mhpmcounter:       mhpmcounter<idx> (idx 3..31) := value, the RVFI record's
+//                          {mhpmcountersh[idx-3], mhpmcounters[idx-3]}; unimplemented ones ignored
+//   set_ic_scr_key_valid:  cpuctrlsts.ic_scr_key_valid (bit 8), the RVFI record's value
+//   set_mcounteren_writable: the mcounteren_writable_i pin (default 1)
+void cheriot_sail_cosim_set_mhpmcounter(uint32_t idx, uint64_t value);
+void cheriot_sail_cosim_set_ic_scr_key_valid(svBit valid);
+void cheriot_sail_cosim_set_mcounteren_writable(svBit writable);
 
 // Fields of the RVFI execution packet produced by the last step(). The rd and
 // mem getters return 0 when the model reported no integer write / memory access.

@@ -1,0 +1,47 @@
+# Copyright lowRISC contributors.
+# Licensed under the Apache License, Version 2.0, see LICENSE for details.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Zcmp (cm.push/cm.pop/cm.popret/cm.popretz/cm.mvsa01/cm.mva01s) directed tests.
+#
+# riscv-dv generates no Zcmp in the regression, and the Spike cosim cannot pair the multiple
+# data-side accesses of one cm.push/cm.pop with the RTL's (GAP-RV-6 in
+# ibex_cheriot_verification_spec.md), so the Zcmp micro-sequencer in
+# ibex_compressed_decoder.sv was never executed. These programs check themselves against the
+# Zc specification and run with +disable_cosim=1.
+#
+# Configs are shared across all directed_testlist*.yaml files (directed_test_schema.py):
+# riscv-tests is defined in directed_testlist.yaml. RISC-V mode only: no +enable_cheriot_seq,
+# so cheriot_enable_i stays Off -- Zcmp is illegal in CHERIoT mode in the RTL.
+# +disable_spurious_dside_responses=1: an injected d-side bus error would fault a cm.push/pop
+# micro-op and land in the test's handler as an unexpected trap (code 2), which is not what
+# this test covers (see the note at the top of directed_testlist.yaml).
+#
+# Failure codes are reported as (code << 8) in a CORE_STATUS signature write before
+# TEST_FAIL, as in cheriot_illegal_rv_mode.
+
+- test: zcmp_push_pop_mv
+  desc: >
+    Every Zcmp instruction with cheriot_enable_i Off, self-checked against the Zc
+    specification (cosim off, GAP-RV-6). cm.push for every rlist 4..15 and every spimm 0..3
+    (rlist 4 and 15 with all four): sp, every saved word at its slot, no other register
+    changed, nothing written outside the saved slots. cm.pop, cm.popretz and cm.popret for
+    every kind x rlist and kind x spimm: sp, every listed register loaded, unlisted ones
+    untouched, a0 = 0 only for popretz, return to the popped ra for popret/popretz, no
+    store. Some of each behind a DIV (the cm.* waits in IF). cm.mvsa01 for all 56 r1s != r2s
+    pairs and cm.mva01s for all 64 pairs, three of each again with the first move's source
+    loaded just before (its load-use stall holds the second move). The reserved/unused encodings of quadrant 2
+    funct3 101 (push/pop forms with rlist 0..3, the 011 group with [6:5] = 00/10, other
+    [12:8]) trap with mcause 2, mepc at the instruction and mtval = its 16 bits, and change
+    no register or memory. Back-to-back push;push, pop;pop, push;popretz, mvsa01;mva01s and
+    push;mva01s;pop. Targets the Zcmp FSM and helper functions of
+    ibex_compressed_decoder.sv. Returns 0, else case*100+check, 2 (unexpected trap),
+    1 (liveness).
+  iterations: 1
+  test_srcs: zcmp_push_pop_mv/zcmp_push_pop_mv.S
+  config: riscv-tests
+  sim_opts: "+disable_cosim=1 +disable_spurious_dside_responses=1"
+  # Not hung: 220 cases at ~25 cycles per instruction (random bus latency). Every run since the
+  # load-use cases were added (2026-10-08) hit the riscv-tests config's 300 s, regression 163 at
+  # case 191 of then 219 (2026-10-09).
+  timeout_s: 1200

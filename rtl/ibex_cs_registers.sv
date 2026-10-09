@@ -251,6 +251,10 @@ module ibex_cs_registers import ibex_pkg::*, ibex_cheriot_pkg::*; #(
   // CSRs
   priv_lvl_e    priv_lvl_q, priv_lvl_d;
   status_t      mstatus_q, mstatus_d;
+  // CHERIoT is M-mode only: while it is enabled, MPP reads and acts as M whatever is stored, so a
+  // U value left from before the switch into CHERIoT mode can never take effect.
+  logic         cheriot_mode;
+  priv_lvl_e    mstatus_mpp;
   logic         mstatus_err;
   logic         mstatus_en;
   irqs_t        mie_q, mie_d;
@@ -370,14 +374,20 @@ module ibex_cs_registers import ibex_pkg::*, ibex_cheriot_pkg::*; #(
 
   logic [31:0] misa_value_masked;
 
-  // Set the X, I and E bits dynamically based on cheriot_enable_i.
-  // I must always be the complement of E.
+  assign cheriot_mode = (BaseIsa == BaseIsaRV32IorCHERIoT) && (cheriot_enable_i == IbexMuBiOn);
+  assign mstatus_mpp  = cheriot_mode ? PRIV_LVL_M : mstatus_q.mpp;
+
+  // Set the X, I, E and U bits dynamically based on cheriot_enable_i.
+  // I must always be the complement of E. CHERIoT mode has no User Mode.
   assign misa_value_masked = {MISA_VALUE[31:24],
                               // X
                               (BaseIsa == BaseIsaRV32IorCHERIoT)
                                 ? ((cheriot_enable_i == IbexMuBiOn) || (RV32BExtra != 0)) :
                                   MISA_VALUE[23],
-                              MISA_VALUE[22:9],
+                              MISA_VALUE[22:21],
+                              // U
+                              MISA_VALUE[20] & ~cheriot_mode,
+                              MISA_VALUE[19:9],
                               // I
                               (BaseIsa == BaseIsaRV32IorCHERIoT)
                                 ? (cheriot_enable_i != IbexMuBiOn) : MISA_VALUE[8],
@@ -434,7 +444,7 @@ module ibex_cs_registers import ibex_pkg::*, ibex_cheriot_pkg::*; #(
         csr_rdata_int                                                   = '0;
         csr_rdata_int[CSR_MSTATUS_MIE_BIT]                              = mstatus_q.mie;
         csr_rdata_int[CSR_MSTATUS_MPIE_BIT]                             = mstatus_q.mpie;
-        csr_rdata_int[CSR_MSTATUS_MPP_BIT_HIGH:CSR_MSTATUS_MPP_BIT_LOW] = mstatus_q.mpp;
+        csr_rdata_int[CSR_MSTATUS_MPP_BIT_HIGH:CSR_MSTATUS_MPP_BIT_LOW] = mstatus_mpp;
         csr_rdata_int[CSR_MSTATUS_MPRV_BIT]                             = mstatus_q.mprv;
         csr_rdata_int[CSR_MSTATUS_TW_BIT]                               = mstatus_q.tw;
       end
@@ -740,7 +750,7 @@ module ibex_cs_registers import ibex_pkg::*, ibex_cheriot_pkg::*; #(
 
     mstack_en      = 1'b0;
     mstack_d.mpie  = mstatus_q.mpie;
-    mstack_d.mpp   = mstatus_q.mpp;
+    mstack_d.mpp   = mstatus_mpp;
     mstack_epc_d   = mepc_q;
     mstack_cause_d = mcause_q;
 
@@ -769,8 +779,10 @@ module ibex_cs_registers import ibex_pkg::*, ibex_cheriot_pkg::*; #(
               mprv: csr_wdata_int[CSR_MSTATUS_MPRV_BIT],
               tw:   csr_wdata_int[CSR_MSTATUS_TW_BIT]
           };
-          // Convert illegal values to U-mode
-          if ((mstatus_d.mpp != PRIV_LVL_M) && (mstatus_d.mpp != PRIV_LVL_U)) begin
+          // Convert illegal values to U-mode (M in CHERIoT mode, which has no U-mode)
+          if (cheriot_mode) begin
+            mstatus_d.mpp = PRIV_LVL_M;
+          end else if ((mstatus_d.mpp != PRIV_LVL_M) && (mstatus_d.mpp != PRIV_LVL_U)) begin
             mstatus_d.mpp = PRIV_LVL_U;
           end
         end
@@ -799,8 +811,10 @@ module ibex_cs_registers import ibex_pkg::*, ibex_cheriot_pkg::*; #(
         CSR_DCSR: begin
           dcsr_d = csr_wdata_int;
           dcsr_d.xdebugver = XDEBUGVER_STD;
-          // Change to PRIV_LVL_U if software writes an unsupported value
-          if ((dcsr_d.prv != PRIV_LVL_M) && (dcsr_d.prv != PRIV_LVL_U)) begin
+          // Change to PRIV_LVL_U if software writes an unsupported value (M in CHERIoT mode)
+          if (cheriot_mode) begin
+            dcsr_d.prv = PRIV_LVL_M;
+          end else if ((dcsr_d.prv != PRIV_LVL_M) && (dcsr_d.prv != PRIV_LVL_U)) begin
             dcsr_d.prv = PRIV_LVL_U;
           end
 
@@ -934,15 +948,15 @@ module ibex_cs_registers import ibex_pkg::*, ibex_cheriot_pkg::*; #(
       end // csr_save_cause_i
 
       csr_restore_dret_i: begin // DRET
-        priv_lvl_d = dcsr_q.prv;
+        priv_lvl_d = cheriot_mode ? PRIV_LVL_M : dcsr_q.prv;
       end // csr_restore_dret_i
 
       csr_restore_mret_i: begin // MRET
-        priv_lvl_d     = mstatus_q.mpp;
+        priv_lvl_d     = mstatus_mpp;
         mstatus_en     = 1'b1;
         mstatus_d.mie  = mstatus_q.mpie; // re-enable interrupts
 
-        if (mstatus_q.mpp != PRIV_LVL_M) begin
+        if (mstatus_mpp != PRIV_LVL_M) begin
           mstatus_d.mprv = 1'b0;
         end
 
@@ -962,7 +976,7 @@ module ibex_cs_registers import ibex_pkg::*, ibex_cheriot_pkg::*; #(
         end else begin
           // otherwise just set mstatus.MPIE/MPP
           mstatus_d.mpie = 1'b1;
-          mstatus_d.mpp  = PRIV_LVL_U;
+          mstatus_d.mpp  = cheriot_mode ? PRIV_LVL_M : PRIV_LVL_U;
         end
       end // csr_restore_mret_i
 
@@ -982,7 +996,7 @@ module ibex_cs_registers import ibex_pkg::*, ibex_cheriot_pkg::*; #(
   // Send current priv level to the decoder
   assign priv_mode_id_o = priv_lvl_q;
   // Load/store instructions must factor in MPRV for PMP checking
-  assign priv_mode_lsu_o = mstatus_q.mprv ? mstatus_q.mpp : priv_lvl_q;
+  assign priv_mode_lsu_o = mstatus_q.mprv ? mstatus_mpp : priv_lvl_q;
 
   // CSR operation logic
   always_comb begin

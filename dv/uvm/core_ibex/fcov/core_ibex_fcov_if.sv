@@ -10,7 +10,12 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
     // instantiates when ICache == 0. The bind passes ibex_core's ICache through.
     parameter bit ICache = 1'b0,
     // With the branch target ALU jumps never stall in ID; the bind passes ibex_core's value
-    parameter bit BranchTargetALU = 1'b0
+    parameter bit BranchTargetALU = 1'b0,
+    // Which configuration this core is: with BaseIsaRV32IorCHERIoT ibex_top puts TRVK between
+    // ibex_core and the data bus and ibex_core has the cheriot_disable_err alert latch; with
+    // BaseIsaRV32I neither exists. The bind should pass ibex_core's BaseIsa through; the default
+    // is the configuration this bench builds (opentitan, TestRIG).
+    parameter base_isa_e BaseIsa = BaseIsaRV32IorCHERIoT
 ) (
   input clk_i,
   input rst_ni,
@@ -39,10 +44,17 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
   // CHERIoT-specific ports (connected via bind .* from ibex_core internals)
   input ibex_mubi_t          cheriot_enable_i,
   input logic [31:0]         branch_target_ex,
-  input cheriot_op_t            cheriot_operator
+  input cheriot_op_t            cheriot_operator,
+  // REQ_BCK_06 alert latch (ibex_core.sv gen_cheriot_enable_check); tied to 0 in RV32I configs
+  input logic                cheriot_disable_err
 );
   `include "dv_fcov_macros.svh"
   import uvm_pkg::*;
+
+  localparam bit CheriotIsa = (BaseIsa == BaseIsaRV32IorCHERIoT);
+  // cp_obi_handshake value {0, req, gnt} that this configuration cannot produce: gnt without req
+  // with TRVK in front of the core, else the 3-bit value no bin lists (see the coverpoint)
+  localparam logic [2:0] GntNoReqUnreach = CheriotIsa ? 3'b001 : 3'b100;
 
   typedef enum {
     InstrCategoryALU,
@@ -437,6 +449,10 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
   // V2S Related Probes for Top-Level
   logic rf_glitch_err;
   logic lockstep_glitch_err;
+  // Register-file ECC errors as the lockstep shadow core detects them (gen_regfile_ecc
+  // rf_ecc_err_*_id & instr_valid_id), driven by core_ibex_tb_top.sv when SecureIbex = 1
+  logic rf_ecc_err_a_shdw;
+  logic rf_ecc_err_b_shdw;
 
   logic imem_single_cycle_response, dmem_single_cycle_response;
 
@@ -528,7 +544,11 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
 
     cp_mprv: coverpoint cs_registers_i.mstatus_q.mprv;
 
-    cp_ls_error_exception: coverpoint load_store_unit_i.fcov_ls_error_exception;
+    // Qualified the way the core qualifies the LSU error (ibex_core.sv g_check_mem_response,
+    // lsu_resp_err): with SecureIbex the bench's spurious d-side responses carry a random error
+    // bit the core drops, and counting them filled bins a real error cannot reach
+    cp_ls_error_exception: coverpoint load_store_unit_i.fcov_ls_error_exception &
+                                      wb_stage_i.lsu_resp_err_i;
     cp_ls_pmp_exception: coverpoint load_store_unit_i.fcov_ls_pmp_exception;
 
     cp_branch_taken: coverpoint id_stage_i.fcov_branch_taken;
@@ -567,8 +587,11 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
     cp_dummy_instr_id_stage: coverpoint if_stage_i.dummy_instr_id_o;
     cp_dummy_instr_wb_stage: coverpoint wb_stage_i.dummy_instr_wb_o;
 
-    `DV_FCOV_EXPR_SEEN(rf_a_ecc_err, fcov_rf_ecc_err_a_id)
-    `DV_FCOV_EXPR_SEEN(rf_b_ecc_err, fcov_rf_ecc_err_b_id)
+    // The main core is built with RegFileECC = 0 (ibex_top.sv), so its fcov_rf_ecc_err_*_id are
+    // tied to 0; the register-file ECC check runs in the lockstep shadow core only, where fcov is
+    // off. core_ibex_tb_top.sv drives these probes from the shadow core (see rf_ecc_err_a_shdw).
+    `DV_FCOV_EXPR_SEEN(rf_a_ecc_err, rf_ecc_err_a_shdw)
+    `DV_FCOV_EXPR_SEEN(rf_b_ecc_err, rf_ecc_err_b_shdw)
 
     `DV_FCOV_EXPR_SEEN(icache_ecc_err, if_stage_i.icache_ecc_error_o)
 
@@ -704,12 +727,13 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
                                      (id_stage_i.controller_i.fcov_debug_single_step_taken) {
       // Not certain if InstrCategoryOtherIllegal can occur. Put it in illegal_bins for now and
       // revisit if any issues are seen
+      // DRet: a step is taken only outside debug mode (ibex_controller.sv do_single_step_d), where
+      // dret is illegal_dret_insn and categorised PrivIllegal (ibex_id_stage.sv). That is what
+      // [Debug Spec v1.0.0-STABLE, p.95] "dret is an instruction which only has meaning while
+      // Debug Mode" means for Ibex: stepping over a dret is covered by the PrivIllegal bin, and
+      // the DRet category itself cannot be sampled here.
       illegal_bins illegal =
-        {InstrCategoryOther, InstrCategoryNone, InstrCategoryOtherIllegal
-         // [Debug Spec v1.0.0-STABLE, p.95]
-         // > dret is an instruction which only has meaning while Debug Mode
-         // We want to step over this to at-least specify how the Ibex does behave.
-         //
+        {InstrCategoryOther, InstrCategoryNone, InstrCategoryOtherIllegal, InstrCategoryDRet
          // [Debug Spec v1.0.0-STABLE, p.50]
          // > If the instruction being stepped over is wfi and would normally stall the hart,
          // > then instead the instruction is treated as nop.
@@ -809,7 +833,16 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
 
     // InstrCategoryCSRAccess in U mode is legal: cycle/instret/hpmcounterN(h) reads are permitted
     // when the matching mcounteren bit is set (ibex_cs_registers.sv), so it is a bin to cover.
-    priv_mode_instr_cross: cross cp_priv_mode_id, cp_id_instr_category;
+    priv_mode_instr_cross: cross cp_priv_mode_id, cp_id_instr_category {
+      // MRET in U-mode is illegal_umode_insn, categorised PrivIllegal (ibex_id_stage.sv); it is
+      // covered by cp_mret_in_umode
+      illegal_bins umode_mret = binsof(cp_priv_mode_id) intersect {PRIV_LVL_U} &&
+                                binsof(cp_id_instr_category) intersect {InstrCategoryMRet};
+      // CHERI encodings decode only in CHERIoT mode, which is M-only (MPP reads M,
+      // ibex_cs_registers.sv); U-mode needs the pin raised in U-mode, which the bench never does
+      ignore_bins umode_cheri = binsof(cp_priv_mode_id) intersect {PRIV_LVL_U} &&
+                                binsof(cp_id_instr_category) intersect {InstrCategoryCheri};
+    }
 
     priv_mode_irq_cross: cross cp_priv_mode_id, cp_interrupt_taken, cs_registers_i.mstatus_q.mie {
       // No interrupt would be taken in M-mode when its mstatus.MIE = 0 unless it's an NMI
@@ -840,6 +873,23 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
                                                  InstrCategoryStore, InstrCategoryCSRAccess,
                                                  InstrCategoryCheri} &&
          binsof(cp_stall_type_id) intersect {IdStallTypeLdHz});
+
+      // An outstanding access keeps mult_en/div_en off (ibex_id_stage.sv instr_executing), so a
+      // waiting MUL/DIV raises stall_multdiv, and Instr takes priority over Mem in id_stall_type
+      illegal_bins muldiv_mem =
+        binsof(cp_id_instr_category) intersect {InstrCategoryMul, InstrCategoryDiv} &&
+        binsof(cp_stall_type_id) intersect {IdStallTypeMem};
+
+      // With BranchTargetALU jumps (FENCE.I decodes as a jump) stay in FIRST_CYCLE and never
+      // stall; without it JumpBtalu/FenceIBtalu select InstrCategoryOther, an illegal bin anyway
+      illegal_bins btalu_jump_instr =
+        binsof(cp_id_instr_category) intersect {JumpBtalu, FenceIBtalu} &&
+        binsof(cp_stall_type_id) intersect {IdStallTypeInstr};
+
+      // No instruction in ID means no stall type (id_stall_type is gated by instr_valid_i)
+      illegal_bins none_stall =
+        binsof(cp_id_instr_category) intersect {InstrCategoryNone} &&
+        !binsof(cp_stall_type_id) intersect {IdStallTypeNone};
     }
 
     wb_reg_no_load_hz_instr_cross: cross cp_id_instr_category, cp_wb_reg_no_load_hz {
@@ -917,13 +967,40 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
       ignore_bins div_always_unstalled =
         binsof(instr_unstalled_last) intersect {1'b0} &&
         binsof(cp_id_instr_category_last) intersect {InstrCategoryDiv};
+      // An illegal instruction leaves ID through FLUSH, and unstalling there needs an Instr stall
+      // in DECODE: only the illegal_reg_16 branch with data-independent timing has one, the open
+      // RTL finding in tech-notes/rtl_todo.md (ibex_decoder.sv clears branch_in_dec for
+      // illegal_insn only). A hit is that defect
+      illegal_bins illegal_unstall_nmi =
+        binsof(cp_nmi_taken) intersect {1'b1} && binsof(instr_unstalled_last) intersect {1'b1} &&
+        binsof(cp_id_instr_category_last) intersect {InstrCategoryUncompressedIllegal};
     }
 
-    debug_instruction_cross: cross cp_debug_mode, cp_id_instr_category;
+    debug_instruction_cross: cross cp_debug_mode, cp_id_instr_category {
+      // Outside debug mode dret is illegal_dret_insn, categorised PrivIllegal (ibex_id_stage.sv)
+      illegal_bins dret_outside_debug =
+        binsof(cp_debug_mode) intersect {1'b0} &&
+        binsof(cp_id_instr_category) intersect {InstrCategoryDRet};
+    }
 
     debug_entry_if_instr_cross: cross cp_debug_entry_if, instr_unstalled_last,
-      cp_id_instr_category_last;
-    pipe_flush_instr_cross: cross cp_pipe_flush, instr_unstalled, cp_id_instr_category;
+      cp_id_instr_category_last {
+      // Entry from FLUSH needs enter_debug_mode_prio_q, masked by ~debug_mode_q while DRET is in
+      // ID (ibex_controller.sv); otherwise DRET's last cycle is a FLUSH, which never unstalls
+      // (no register reads, and a Mem stall clears in the cycle that allows FLUSH)
+      ignore_bins dret_unstalled =
+        binsof(instr_unstalled_last) intersect {1'b1} &&
+        binsof(cp_id_instr_category_last) intersect {InstrCategoryDRet};
+    }
+    pipe_flush_instr_cross: cross cp_pipe_flush, instr_unstalled, cp_id_instr_category {
+      // These raise no ID exception (CHERIoT load/store faults are WB errors), so FLUSH with one in
+      // ID is a WB exception, which kills it (instr_kill) and keeps it stalled (Mem or Instr);
+      // None unstalled follows a flush state, where WB is empty and cannot start a FLUSH
+      ignore_bins killed_by_wb_exc =
+        binsof(cp_pipe_flush) intersect {1'b1} && binsof(instr_unstalled) intersect {1'b1} &&
+        binsof(cp_id_instr_category) intersect {InstrCategoryMul, InstrCategoryDiv,
+          InstrCategoryLoad, InstrCategoryStore, InstrCategoryNone};
+    }
 
     exception_stall_instr_cross: cross cp_ls_pmp_exception, cp_ls_error_exception,
       cp_id_instr_category, cp_stall_type_id, instr_unstalled, cp_irq_pending, cp_debug_req {
@@ -1011,6 +1088,22 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
       illegal_bins none_stall_illegal =
         binsof(cp_id_instr_category) intersect {InstrCategoryNone} &&
         !binsof(cp_stall_type_id) intersect {IdStallTypeNone};
+
+      // A real LSU error reports while the instruction behind the access is in FIRST_CYCLE and
+      // killed by wb_exception (ibex_id_stage.sv instr_kill): a load/store keeps stall_mem (its
+      // lsu_req is gated off, so no lsu_req_done), a MUL/DIV keeps stall_multdiv (not enabled)
+      illegal_bins err_no_stall_illegal =
+        binsof(cp_ls_error_exception) intersect {1'b1} &&
+        binsof(cp_id_instr_category) intersect {InstrCategoryLoad, InstrCategoryStore,
+                                                 InstrCategoryMul, InstrCategoryDiv} &&
+        binsof(cp_stall_type_id) intersect {IdStallTypeNone};
+
+      // ID empties after a stall only through flush_id, and no flushing state is entered while
+      // WB waits on a response (ibex_controller.sv DECODE -> FLUSH needs ready_wb_i)
+      illegal_bins err_none_unstalled_illegal =
+        binsof(cp_ls_error_exception) intersect {1'b1} &&
+        binsof(cp_id_instr_category) intersect {InstrCategoryNone} &&
+        binsof(instr_unstalled) intersect {1'b1};
     }
 
     csr_read_only_priv_cross: cross cp_csr_read_only, cp_priv_mode_id;
@@ -1031,8 +1124,9 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
     dummy_instr_config_cross: cross cp_dummy_instr_type, cp_dummy_instr_mask
                                 iff (cs_registers_i.dummy_instr_en_o);
 
-    rf_ecc_err_cross: cross fcov_rf_ecc_err_a_id, fcov_rf_ecc_err_b_id
-                                iff (id_stage_i.instr_valid_i);
+    // Shadow-core probes (see cp_rf_a_ecc_err); they already include the shadow core's
+    // instr_valid_id, which runs LockstepOffset cycles behind this core's instr_valid_i
+    rf_ecc_err_cross: cross rf_ecc_err_a_shdw, rf_ecc_err_b_shdw;
 
     // Each stage sees a debug request while executing a dummy instruction.
     debug_req_dummy_instr_if_stage_cross: cross cp_debug_req, cp_dummy_instr_if_stage;
@@ -1421,7 +1515,11 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
 
     // CGET_* field selector when CGET_FIELD is executing
     cp_cheri_cget_field: coverpoint g_cheriot_ex.u_ibex_cheriot_ex.cheriot_cap_field_sel_i
-      iff (cheriot_operator.CGET_FIELD && g_cheriot_ex.u_ibex_cheriot_ex.cheriot_exec_id_i);
+      iff (cheriot_operator.CGET_FIELD && g_cheriot_ex.u_ibex_cheriot_ex.cheriot_exec_id_i) {
+      // CGetOffset is not present in CHERIoT (ISA chap-cheri-riscv.tex, no Sail instruction): the
+      // decoder no longer selects CFIELD_OFFSET, rs2 = 6 is illegal (ibex_decoder.sv)
+      illegal_bins offset = {CFIELD_OFFSET};
+    }
 
     // ------------------------------------------------------------------
     // PCC coverage
@@ -1480,12 +1578,14 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
 
     cp_cheri_cs1_sealed_tagged_cross: cross cp_cheri_cs1_tag, cp_cheri_cs1_sealed;
 
-    cp_cheri_cs1_cor: coverpoint {cheriot_get_base_correction(g_cheriot_ex.u_ibex_cheriot_ex.rf_fullcap_a.cap_cor),
-                                  cheriot_get_top_correction(g_cheriot_ex.u_ibex_cheriot_ex.rf_fullcap_a.cap_cor)} {
-      bins bin0 = {3'b000};
-      bins bin1 = {3'b001};
-      bins bin3 = {3'b100};
-      bins bin5 = {3'b111};
+    // Bound corrections, from cap_cor directly ({top_hi ^ addr_hi, addr_hi}, ibex_cheriot_pkg.sv
+    // cheriot_get_top/base_correction). The 4-bit {base, top} correction was compared with 3-bit
+    // constants, and two of the four bins asked for a base correction of +1, which does not exist.
+    cp_cheri_cs1_cor: coverpoint g_cheriot_ex.u_ibex_cheriot_ex.rf_fullcap_a.cap_cor {
+      bins bin0 = {2'b00};  // top 0,  base 0
+      bins bin1 = {2'b10};  // top +1, base 0
+      bins bin3 = {2'b01};  // top 0,  base -1
+      bins bin5 = {2'b11};  // top -1, base -1
     }
 
     cp_cheri_cs1_top: coverpoint g_cheriot_ex.u_ibex_cheriot_ex.rf_fullcap_a.top {
@@ -1586,12 +1686,12 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
 
     cp_cheri_cs2_sealed: coverpoint g_cheriot_ex.u_ibex_cheriot_ex.rf_fullcap_b.otype != 0;
 
-    cp_cheri_cs2_cor: coverpoint {cheriot_get_base_correction(g_cheriot_ex.u_ibex_cheriot_ex.rf_fullcap_b.cap_cor),
-                                  cheriot_get_top_correction(g_cheriot_ex.u_ibex_cheriot_ex.rf_fullcap_b.cap_cor)} {
-      bins bin0 = {3'b000};
-      bins bin1 = {3'b001};
-      bins bin3 = {3'b100};
-      bins bin5 = {3'b111};
+    // As cp_cheri_cs1_cor
+    cp_cheri_cs2_cor: coverpoint g_cheriot_ex.u_ibex_cheriot_ex.rf_fullcap_b.cap_cor {
+      bins bin0 = {2'b00};  // top 0,  base 0
+      bins bin1 = {2'b10};  // top +1, base 0
+      bins bin3 = {2'b01};  // top 0,  base -1
+      bins bin5 = {2'b11};  // top -1, base -1
     }
 
     cp_cheri_cs2_top: coverpoint g_cheriot_ex.u_ibex_cheriot_ex.rf_fullcap_b.top {
@@ -1692,12 +1792,12 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
       bins bin[] = {[0:7]};
     }
 
-    cp_cheri_cd_cor: coverpoint {cheriot_get_base_correction(g_cheriot_ex.u_ibex_cheriot_ex.result_cap_o.cap_cor),
-                                 cheriot_get_top_correction(g_cheriot_ex.u_ibex_cheriot_ex.result_cap_o.cap_cor)} {
-      bins bin0 = {3'b000};
-      bins bin1 = {3'b001};
-      bins bin3 = {3'b100};
-      bins bin5 = {3'b111};
+    // As cp_cheri_cs1_cor
+    cp_cheri_cd_cor: coverpoint g_cheriot_ex.u_ibex_cheriot_ex.result_cap_o.cap_cor {
+      bins bin0 = {2'b00};  // top 0,  base 0
+      bins bin1 = {2'b10};  // top +1, base 0
+      bins bin3 = {2'b01};  // top 0,  base -1
+      bins bin5 = {2'b11};  // top -1, base -1
     }
 
     cp_cheri_cd_top: coverpoint g_cheriot_ex.u_ibex_cheriot_ex.result_cap_o.top {
@@ -1806,14 +1906,17 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
     cp_cheri_scr_read_only: coverpoint g_cheriot_ex.u_ibex_cheriot_ex.csr_addr_o
       iff (fcov_cheri_scr_read_only) {
       bins good[] = {[28:31]};
-      bins bad    = {[0:23]};
+      // illegal_scr_addr forces csr_access_o = 0 (ibex_cheriot_ex.sv CCSR_RW); the illegal-SCR
+      // attempt itself is covered by cp_cheri_scr_addr
+      illegal_bins bad = {[0:23], 27};
       ignore_bins ignore = {[24:26]};
     }
 
     cp_cheri_scr_write: coverpoint g_cheriot_ex.u_ibex_cheriot_ex.csr_addr_o
       iff (fcov_cheri_scr_write) {
       bins good[] = {[28:31]};
-      bins bad    = {[0:23]};
+      // illegal_scr_addr forces csr_op_en_raw = 0 (ibex_cheriot_ex.sv CCSR_RW)
+      illegal_bins bad = {[0:23], 27};
       ignore_bins ignore = {[24:26]};
     }
 
@@ -1873,16 +1976,21 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
     // cap_clrperm_t is three bits in this tree -- {CTAG[2], SD_LM[1], GL_LG[0]}, see
     // ibex_cheriot_pkg.sv. ibex-private had a four-bit field with a reserved bit, and the
     // ported version both read a [3:0] slice that does not exist and marked bit 2 as
-    // reserved. Bit 2 is CTAG here: the revocation tag-clear, a legal and security-relevant
-    // outcome. All three bits are independently driven (ibex_cheriot_ex.sv:262), so every
-    // encoding below is legal and none warrants an illegal_bins.
+    // reserved. Bit 2 is CTAG here: the tag-clear for an authority without MC. The three bits are
+    // ~MC, ~LM and ~LG of the authority (ibex_cheriot_ex.sv CLOAD_CAP), and they are not
+    // independent: cheriot_expand_perms gives LM and LG only to the MRW, MRO and EXE formats, all
+    // of which have MC (ibex_cheriot_pkg.sv), so an authority without MC also lacks LM and LG.
     cp_cheri_clc_clrperm: coverpoint load_store_unit_i.resp_lc_clrperm_q[2:0]
       iff (~load_store_unit_i.data_we_q & load_store_unit_i.lsu_resp_valid_o) {
-      bins none  = {3'b000};  // capability loaded unmodified
-      bins gl_lg = {3'b001};  // GL and LG cleared (authorising cap lacks LG)
-      bins sd_lm = {3'b010};  // SD and LM cleared (authorising cap lacks LM)
-      bins ctag  = {3'b100};  // tag cleared (authorising cap lacks MC)
-      bins mixed[] = {3'b011, 3'b101, 3'b110, 3'b111};
+      bins none        = {3'b000};  // capability loaded unmodified
+      bins gl_lg       = {3'b001};  // GL and LG cleared (authorising cap lacks LG)
+      bins sd_lm       = {3'b010};  // SD and LM cleared (authorising cap lacks LM)
+      // both: an MRW, MRO or EXE format authority with LM and LG both clear (an MWO one has no LD
+      // and the CLC faults instead)
+      bins sd_lm_gl_lg = {3'b011};
+      bins ctag        = {3'b111};  // tag cleared (no MC, hence no LM and no LG either)
+      // CTAG without both LM and LG cleared: no permission format has LM or LG without MC
+      illegal_bins ctag_without_lm_lg = {3'b100, 3'b101, 3'b110};
     }
 
     // ------------------------------------------------------------------
@@ -1980,9 +2088,18 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
       bins case2 = {3'd2};
     }
 
-    cp_cheri_cjal_bound: coverpoint fcov_cheri_cjal_bound {
+    // Sampled only for an executing CJAL outside debug mode: unqualified, it compared PCC with
+    // branch_target_o (0 by default) on every cycle. Outside debug mode an instruction is fetched
+    // only if PCC.base <= PC and PC + 2 <= PCC.top (ibex_if_stage.sv base_ok/hdrm_ge2), and PCC
+    // changes only through a flush, so PCC length >= 2; these values need a shorter PCC, or length
+    // 2 with an odd target (targets are even)
+    cp_cheri_cjal_bound: coverpoint fcov_cheri_cjal_bound
+      iff (cheriot_pmode & cheriot_operator.CJAL &
+           g_cheriot_ex.u_ibex_cheriot_ex.cheriot_exec_id_i & ~debug_mode) {
       `FCOV_BOUND_CASE_BINS
       `FCOV_EVEN_TARGET_IGNORE
+      ignore_bins pcc_len_lt2 =
+        {9'h00a, 9'h011, 9'h012, 9'h021, 9'h031, 9'h0a1, 9'h10a, 9'h112};
     }
 
     cp_cheri_cjalr_bound: coverpoint fcov_cheri_cjalr_bound {
@@ -1990,9 +2107,16 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
       `FCOV_EVEN_TARGET_IGNORE
     }
 
-    cp_cheri_branch_bound: coverpoint fcov_cheri_branch_bound {
+    // Sampled only for a taken conditional branch outside debug mode, as cp_instr_branch (it
+    // compared PCC with branch_target_ex on every cycle); pcc_len_lt2 as for cp_cheri_cjal_bound
+    cp_cheri_branch_bound: coverpoint fcov_cheri_branch_bound
+      iff (cheriot_pmode & id_stage_i.instr_executing & ~debug_mode &
+           (id_stage_i.instr_rdata_i[6:0] == ibex_pkg::OPCODE_BRANCH) &
+           id_stage_i.branch_decision_i) {
       `FCOV_BOUND_CASE_BINS
       `FCOV_EVEN_TARGET_IGNORE
+      ignore_bins pcc_len_lt2 =
+        {9'h00a, 9'h011, 9'h012, 9'h021, 9'h031, 9'h0a1, 9'h10a, 9'h112};
     }
 
     cp_cheri_clsc_bound: coverpoint fcov_cheri_clsc_bound {
@@ -2014,11 +2138,16 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
     cp_cheri_setbounds_cases: coverpoint fcov_cheri_setbounds {
       wildcard ignore_bins ignore0 = {5'b???11};
       wildcard ignore_bins ignore1 = {5'b?11??};
+      // 5, 6, 9 need top33 < base32, which makes the 33-bit length > 2^32, so b4 (a 32-bit
+      // request <= length) is always set (fcov_setbounds_cases_fn)
+      ignore_bins top_lt_base_b4_clear = {5'd5, 5'd6, 5'd9};
     }
 
     cp_cheri_setboundsimm_cases: coverpoint fcov_cheri_setboundsimm {
       wildcard ignore_bins ignore0 = {5'b???11};
       wildcard ignore_bins ignore1 = {5'b?11??};
+      // As cp_cheri_setbounds_cases
+      ignore_bins top_lt_base_b4_clear = {5'd5, 5'd6, 5'd9};
     }
 
     cp_cheri_rs2_req_len: coverpoint g_cheriot_ex.u_ibex_cheriot_ex.rf_rdata_b {
@@ -2043,8 +2172,10 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
       iff (g_cheriot_ex.u_ibex_cheriot_ex.cheriot_exec_id_i) {
       bins bin1 = {1'b1};
     }
+    // Not in debug mode: the PCC fetch bounds check is off there (ibex_if_stage.sv), so the PC
+    // need not lie inside PCC, which the ignore_bins of cheriot_cauipcc_cross rely on
     cp_instr_cauipcc: coverpoint cheriot_operator.CAUIPCC
-      iff (g_cheriot_ex.u_ibex_cheriot_ex.cheriot_exec_id_i) {
+      iff (g_cheriot_ex.u_ibex_cheriot_ex.cheriot_exec_id_i & ~debug_mode) {
       bins bin1 = {1'b1};
     }
     cp_instr_cincaddrimm: coverpoint cheriot_operator.CINC_ADDR_IMM
@@ -2175,6 +2306,18 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
       // fcov_repr_cases() returns case0 for E = 24, so case1/case2 cannot be sampled
       ignore_bins e24_nonrepr_c1 = binsof(cp_cheri_pcc_exp.bin2) && binsof(cp_cheri_cd_pcc_repr_cases.case1);
       ignore_bins e24_nonrepr_c2 = binsof(cp_cheri_pcc_exp.bin2) && binsof(cp_cheri_cd_pcc_repr_cases.case2);
+      // Increment 0: cd.addr == PC, and outside debug mode an AUIPCC executes only with
+      // PCC.base <= PC < PCC.top <= base + 2^(E+9) (ibex_if_stage.sv fetch check), so case0
+      ignore_bins inc0_nonrepr_c1 = binsof(cp_cheri_imm20.bin1) && binsof(cp_cheri_cd_pcc_repr_cases.case1);
+      ignore_bins inc0_nonrepr_c2 = binsof(cp_cheri_imm20.bin1) && binsof(cp_cheri_cd_pcc_repr_cases.case2);
+      // AUIPCC adds imm20 << 11 to a PC inside PCC: a non-zero multiple of 2 KiB never stays in
+      // E = 0's 512 B region
+      ignore_bins e0_imm_repr_b2 = binsof(cp_cheri_pcc_exp.bin0) && binsof(cp_cheri_imm20.bin2) && binsof(cp_cheri_cd_pcc_repr_cases.case0);
+      ignore_bins e0_imm_repr_b3 = binsof(cp_cheri_pcc_exp.bin0) && binsof(cp_cheri_imm20.bin3) && binsof(cp_cheri_cd_pcc_repr_cases.case0);
+      ignore_bins e0_imm_repr_b4 = binsof(cp_cheri_pcc_exp.bin0) && binsof(cp_cheri_imm20.bin4) && binsof(cp_cheri_cd_pcc_repr_cases.case0);
+      ignore_bins e0_imm_repr_b5 = binsof(cp_cheri_pcc_exp.bin0) && binsof(cp_cheri_imm20.bin5) && binsof(cp_cheri_cd_pcc_repr_cases.case0);
+      // imm20 = 0x80000 adds -2^30, larger than any E <= 14 region (at most 2^23)
+      ignore_bins e14_m2p30_repr = binsof(cp_cheri_pcc_exp.bin1) && binsof(cp_cheri_imm20.bin3) && binsof(cp_cheri_cd_pcc_repr_cases.case0);
     }
 
     cheriot_cincaddrimm_cross: cross cp_cheri_cs1_tag, cp_cheri_cd_cs1_repr_cases,
@@ -2305,8 +2448,40 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
 
     cheriot_cjalr_cross0: cross cp_cheri_cs1_tag, cp_cheri_cs1_otype,
       cp_cheri_rd_regaddr, cp_cheri_mstatus_mie, cp_cheri_imm12, cp_instr_cjalr;
+    // The illegal_bins are 172 bins no cs1 can produce (tech-notes/fcov_closure_2026-10-07.md;
+    // gen_cjalr_det.py -v lists the same set as "unreachable <group>"). The target is
+    // {(addr + imm)[31:1], 1'b0} (ibex_cheriot_ex.sv:522), and imm = -2048 needs
+    // addr - target in {2048, 2049}.
     cheriot_cjalr_cross1: cross cp_cheri_cs1_tag, cp_cheri_cs1_perm_ex,
-      cp_cheri_cjalr_bound, cp_cheri_imm12, cp_instr_cjalr;
+      cp_cheri_cjalr_bound, cp_cheri_imm12, cp_instr_cjalr {
+      // An odd room needs an odd top33, so E = 0 and addr is in [base, base + 512): the target
+      // is within 512 bytes of addr.
+      illegal_bins m2048_oddroom = binsof(cp_cheri_imm12.bin3) &&
+        binsof(cp_cheri_cjalr_bound) intersect {9'h010, 9'h011, 9'h030, 9'h031, 9'h050, 9'h051,
+                                                9'h070, 9'h071, 9'h110, 9'h130, 9'h150, 9'h170};
+      // Target at the base with room 1..7: base and top are multiples of 2^E, so E <= 2 and
+      // addr - base < 2^(E+9) <= 2048.
+      illegal_bins m2048_atbase_short = binsof(cp_cheri_imm12.bin3) &&
+        binsof(cp_cheri_cjalr_bound) intersect {9'h012, 9'h022, 9'h032, 9'h042, 9'h052, 9'h062,
+                                                9'h072, 9'h0a2, 9'h0c2, 9'h0e2, 9'h112, 9'h122,
+                                                9'h132, 9'h142, 9'h152, 9'h162, 9'h172};
+      // top33 = 2^32 with E < 24 needs base <= addr <= 2^32 - 1, and the target is 2^32 - 2/4/6,
+      // so imm is in [-5, 1]; for room 2 (0x0a1, 0x0a2), base >= 2^32 - 2 limits imm to [-1, 1].
+      illegal_bins top32_last_bytes = binsof(cp_cheri_cjalr_bound) intersect {9'h0a1, 9'h0c1, 9'h0e1} &&
+        (binsof(cp_cheri_imm12.bin2) || binsof(cp_cheri_imm12.bin3));
+      illegal_bins top32_last2_neg = binsof(cp_cheri_cjalr_bound) intersect {9'h0a1, 9'h0a2} &&
+        binsof(cp_cheri_imm12.bin4);
+      // A tagged capability with top - base <= 7 has E = 0 (CSetBounds picks e = 0 below 512)
+      // and keeps addr in [base, base + 512), so a target below the base needs imm in
+      // [-518, 0]. Untagged raw metadata reaches these, hence the tag = 1 rows only.
+      illegal_bins tag_below_short = binsof(cp_cheri_cs1_tag) intersect {1'b1} &&
+        binsof(cp_cheri_cjalr_bound) intersect {9'h011, 9'h021, 9'h031, 9'h041, 9'h051, 9'h061,
+                                                9'h071} &&
+        (binsof(cp_cheri_imm12.bin2) || binsof(cp_cheri_imm12.bin3));
+      // A tagged zero-length capability has E = 0 too; untagged E >= 3 metadata reaches these.
+      illegal_bins tag_zerolen_m2048 = binsof(cp_cheri_cs1_tag) intersect {1'b1} &&
+        binsof(cp_cheri_cjalr_bound) intersect {9'h00a, 9'h10a} && binsof(cp_cheri_imm12.bin3);
+    }
 
     // -- CLC/CSC load/store crosses --
     cheriot_clc_cross0: cross cp_cheri_cs1_tag, cp_cheri_cs1_sealed,
@@ -2425,7 +2600,12 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
     }
 
     // -- Tag clearing cross --
-    cheriot_cs1cd_tag_cross: cross cp_cheri_cs1_tag, cp_cheri_cd_tag, cp_instr_cget_field;
+    cheriot_cs1cd_tag_cross: cross cp_cheri_cs1_tag, cp_cheri_cd_tag, cp_instr_cget_field {
+      // CGET_FIELD drives result_cap_o = NULL_CAP (ibex_cheriot_ex.sv): the integer result is never
+      // tagged, whatever cs1 (REQ_TAG_06)
+      illegal_bins cget_cd_tagged = binsof(cp_instr_cget_field.bin1) &&
+                                    binsof(cp_cheri_cd_tag) intersect {1'b1};
+    }
 
     // ------------------------------------------------------------------
     // Instruction / error / interrupt sequence crosses
@@ -2477,14 +2657,9 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
       bins bin1 = {1'b1};
     }
 
-    // Taken branch × PCC bounds check — exercises in-/out-of-bounds jump targets
-    cheriot_instr_branch_cross: cross cp_cheri_branch_bound, cp_instr_branch {
-      // Outside debug mode a branch executes only if PCC.base <= PC and PC + len <= PCC.top
-      // (ibex_if_stage.sv bound check; Sail inCapBounds(PCC, pc, 2)), so PCC length >= 2. These
-      // values need a shorter PCC, or length 2 with an odd target (targets are even)
-      ignore_bins pcc_len_lt2 = binsof(cp_cheri_branch_bound) intersect
-        {9'h00a, 9'h011, 9'h012, 9'h021, 9'h031, 9'h0a1, 9'h10a, 9'h112};
-    }
+    // Taken branch × PCC bounds check — exercises in-/out-of-bounds jump targets. The PCC length
+    // >= 2 exclusion (pcc_len_lt2, Sail inCapBounds(PCC, pc, 2)) is in cp_cheri_branch_bound.
+    cheriot_instr_branch_cross: cross cp_cheri_branch_bound, cp_instr_branch;
 
     // ------------------------------------------------------------------
     // Gap coverpoints — spec names standardised, implementations below
@@ -2763,13 +2938,47 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
                             WAIT_RVALID_MIS_GNTS_DONE};
     }
 
+    // REQ_BCK_06: cheriot_enable_i leaves On (cheriot_pmode reads the pin itself) while a
+    // capability access waits for the grant of its first word, the change the pin contract forbids
+    // (directed test cheriot_enable_on_off). The core holds CHERIoT mode for the access in flight
+    // (ibex_core.sv cheriot_enable_ex), so the LSU keeps the request raised and goes on to the
+    // second word. The CTX_WAIT_GNT1 -> IDLE exit, which abandoned a CSC and dropped a raised
+    // request (OBI), was removed with that fix. Its own coverpoint: cp_lsu_fsm is crossed below,
+    // and a transition bin does not belong in a cross.
+    // A sample the iff skips does not reset the transition history, so the illegal bin can fire
+    // falsely without the RTL exit: CTX_WAIT_GNT1 sampled with the pin Off, then the pin back On
+    // (GNT2/RESP/IDLE unsampled), then Off again in IDLE, i.e. any Off->On->Off sequence, a reset
+    // in the middle of the CSC included. The pin contract forbids the return to On
+    // (CheriotEnableOneWaySwitch), and cheriot_enable_on_off keeps the pin Off once lowered.
+    cp_lsu_ctx_abort: coverpoint load_store_unit_i.ls_fsm_cs iff (~cheriot_pmode) {
+      bins         ctx_gnt1_held  = (CTX_WAIT_GNT1 => CTX_WAIT_GNT2);
+      illegal_bins ctx_gnt1_abort = (CTX_WAIT_GNT1 => IDLE);
+    }
+
+    // REQ_BCK_06: the alert latch ibex_core.sv gen_cheriot_enable_check sets when the pin was On
+    // in the previous cycle and is not On now (Off or an invalid encoding), cleared only by
+    // rst_ni; it feeds alert_major_internal_o. The latch exists in CHERIoT configs only.
+    cp_cheriot_disable_err: coverpoint cheriot_disable_err iff (CheriotIsa) {
+      bins clear = {1'b0};
+      bins set   = {1'b1};
+    }
+
     // gnt asserted with req low is not illegal on OBI — an always-ready slave
-    // may hold gnt high — so it is covered rather than excluded.
-    cp_obi_handshake: coverpoint {data_req_o, data_gnt_i} {
-      bins quiet         = {2'b00};
-      bins gnt_no_req    = {2'b01};
-      bins backpressured = {2'b10};   // request outstanding, grant withheld
-      bins accepted      = {2'b11};
+    // may hold gnt high — so it is covered rather than excluded. It cannot reach ibex_core in a
+    // CHERIoT config, though: there ibex_top connects data_gnt_i to TRVK's upstream_gnt_o, the
+    // ready_o of stream_fork u_stream_fork_us2ds (ibex_trvk.sv) whose valid_i is the core's
+    // data_req_o, and stream_fork.sv drives ready_o = 0 whenever valid_i = 0, in READY and in
+    // WAITING alike, whatever the bus does. In RV32I configs ibex_top assigns trvk_gnt =
+    // data_gnt_i and the bench's +dmem_gnt_when_idle_pct knob produces it, so it stays a bin.
+    // The bin is ignored, not illegal: the same covergroup is built in every config.
+    // A leading constant 0 widens the value to 3 bits so that the ignore has a value to name in
+    // both configs: with TRVK it is gnt_no_req itself, without TRVK the unreachable 3'b100.
+    cp_obi_handshake: coverpoint {1'b0, data_req_o, data_gnt_i} {
+      bins quiet         = {3'b000};
+      bins gnt_no_req    = {3'b001};
+      bins backpressured = {3'b010};   // request outstanding, grant withheld
+      bins accepted      = {3'b011};
+      ignore_bins gnt_no_req_trvk = {GntNoReqUnreach};
     }
 
     // Is this a capability access?  Distinguishes a stalled CLC/CSC from a
@@ -2793,12 +3002,32 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
       bins beat2_stalled         = binsof(cp_lsu_fsm.ctx_wait_gnt2) &&
                                    binsof(cp_obi_handshake.backpressured) &&
                                    binsof(cp_is_cap.capability_access);
+      // CTX_WAIT_RESP never requests (ibex_load_store_unit.sv): the response stall is req low
       bins resp_stalled          = binsof(cp_lsu_fsm.ctx_wait_resp) &&
-                                   binsof(cp_obi_handshake.backpressured) &&
+                                   binsof(cp_obi_handshake.quiet) &&
                                    binsof(cp_is_cap.capability_access);
       // A capability access cannot be in the RV32-only misaligned states.
       ignore_bins cap_in_rv32_states = binsof(cp_lsu_fsm.rv32_states) &&
                                        binsof(cp_is_cap.capability_access);
+      // gnt without req never reaches the core with TRVK in front of it (cp_obi_handshake), so its
+      // four rows (idle x 2, rv32_states, ctx_wait_resp) go with it in CHERIoT configs
+      ignore_bins gnt_no_req_trvk = binsof(cp_obi_handshake) intersect {GntNoReqUnreach};
+      // CTX_WAIT_GNT1/GNT2 drive data_req_o = 1 until granted, and the PMP_D gate stays forced off
+      // while the access is in flight, also if cheriot_enable_i leaves On (ibex_core.sv
+      // cheriot_enable_ex, REQ_BCK_06): req low there drops a raised request (OBI)
+      illegal_bins no_req_in_ctx_gnt =
+        (binsof(cp_lsu_fsm.ctx_wait_gnt1) || binsof(cp_lsu_fsm.ctx_wait_gnt2)) &&
+        (binsof(cp_obi_handshake.quiet) || binsof(cp_obi_handshake.gnt_no_req));
+      // CTX_WAIT_RESP drives data_req_o = 0 (ibex_load_store_unit.sv)
+      illegal_bins req_in_ctx_wait_resp =
+        binsof(cp_lsu_fsm.ctx_wait_resp) &&
+        (binsof(cp_obi_handshake.backpressured) || binsof(cp_obi_handshake.accepted));
+      // The CLC/CSC stays in ID until the LSU is back in IDLE (lsu_req_done), and ID keeps seeing
+      // CHERIoT mode until then (cheriot_enable_ex), so lsu_is_cap_i is 1 in every CTX state
+      illegal_bins int_in_ctx_states =
+        (binsof(cp_lsu_fsm.ctx_wait_gnt1) || binsof(cp_lsu_fsm.ctx_wait_gnt2) ||
+         binsof(cp_lsu_fsm.ctx_wait_resp)) &&
+        binsof(cp_is_cap.integer_access);
     }
   endgroup
 
@@ -2993,10 +3222,14 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
   // Its edge bins are therefore at -2/0 (cp_rep_auipcc_edge), and the odd-distance edge bins are
   // ignored for it in rep_op_edge_cross.
   //
-  // No illegal_bins: the window formula is the RTL's implementation, not the architecture's
-  // definition (CHERIoT-Sail: the bounds decode the same with the new address). Whether the
-  // outcome is right is for the cosim / TestRIG to judge against Sail; this says which edges were
-  // exercised. Representability could not be mutated in the Sonata mutation check (the check is
+  // The window formula is the RTL's implementation, not the architecture's definition
+  // (CHERIoT-Sail: the bounds decode the same with the new address); checked against Sail
+  // getCapBoundsBits (cheri_cap_common.sail), the two agree. Whether the outcome is right is in
+  // general for the cosim / TestRIG to judge against Sail; this says which edges were exercised.
+  // The illegal_bins are the edge outcomes both definitions rule out for every input (a tag kept
+  // past the window or on a sealed source, a tag cleared at the base or the last address), so
+  // they also check that this window matches the RTL's. Representability could not be mutated in
+  // the Sonata mutation check (the check is
   // inside a package function), and CHERI-C intcap tests one address in one window, so without
   // this group nothing shows whether these edges are reached at all.
   logic               fcov_rep_valid, fcov_rep_tag_out, fcov_rep_sealed, fcov_rep_outside;
@@ -3071,34 +3304,40 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
         iff (fcov_rep_valid & ~fcov_rep_sealed & (fcov_rep_eclass != 2'd3)) {
       bins d[] = {[-10:10]};
     }
-    // The tag outcome at the edges, as the core produced it (both outcomes binned; which one is
-    // right is the reference model's call).
+    // The tag outcome at the edges, as the core produced it. Below the base the outcome is binned
+    // both ways (the reference model's call); at the base the new address equals the base, so the
+    // bounds decode unchanged and the tag is kept (ibex_cheriot_pkg.sv cheriot_set_address: zero
+    // distance from the base; Sail setCapAddr, capBoundsEqual).
     cp_rep_lo_edge: coverpoint {fcov_rep_d_lo == -1, fcov_rep_d_lo == 0, fcov_rep_tag_out}
         iff (fcov_rep_valid & ~fcov_rep_sealed) {
       bins below_cleared = {3'b100};
       bins below_kept    = {3'b101};
-      bins base_cleared  = {3'b010};
+      illegal_bins base_cleared = {3'b010};
       bins base_kept     = {3'b011};
     }
+    // E < 24: the last address of the window (distance 2^(9+E) - 1 from the base) is
+    // representable and the first past it is not (ibex_cheriot_pkg.sv repr_mask; Sail window
+    // [base, base + 2^(9+E)))
     cp_rep_hi_edge: coverpoint {fcov_rep_d_hi == -1, fcov_rep_d_hi == 0, fcov_rep_tag_out}
         iff (fcov_rep_valid & ~fcov_rep_sealed & (fcov_rep_eclass != 2'd3)) {
-      bins last_cleared  = {3'b100};
+      illegal_bins last_cleared = {3'b100};
       bins last_kept     = {3'b101};
       bins past_cleared  = {3'b010};
-      bins past_kept     = {3'b011};
+      illegal_bins past_kept    = {3'b011};
     }
     // A sealed capability loses its tag on any address change, representable or not
     // (CSetAddr/CIncAddr/CIncAddrImm: clearTagIfSealed; AUICGP: isCapSealed(c3); PCC is never
-    // sealed, so AUIPCC never samples this).
+    // sealed, so AUIPCC never samples this). The RTL clears it through clr_sealed
+    // (ibex_cheriot_ex.sv); a kept tag would break sealing.
     cp_rep_sealed_out: coverpoint fcov_rep_tag_out iff (fcov_rep_valid & fcov_rep_sealed) {
       bins cleared = {1'b0};
-      bins kept    = {1'b1};
+      illegal_bins kept = {1'b1};
     }
     // The same for AUICGP alone (cheri_insts.sail:86).
     cp_rep_auicgp_sealed_out: coverpoint fcov_rep_tag_out
         iff (fcov_rep_valid & fcov_rep_sealed & (fcov_rep_op == 3'd4)) {
       bins cleared = {1'b0};
-      bins kept    = {1'b1};
+      illegal_bins kept = {1'b1};
     }
     // New address inside or outside the representable window.
     cp_rep_outside: coverpoint fcov_rep_outside iff (fcov_rep_valid & ~fcov_rep_sealed) {
@@ -3114,17 +3353,19 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
       bins hi_minus2 = {3'd5};
       bins hi_past   = {3'd6};
     }
-    // AUIPCC edge outcomes at the even distances it can reach.
+    // AUIPCC edge outcomes at the even distances it can reach. AUIPCC never clears for a seal
+    // (SETADDR_PCC_ARITH), so the tag follows representability alone: kept at the base and two
+    // below the window's end, cleared past it (as cp_rep_lo_edge / cp_rep_hi_edge).
     cp_rep_auipcc_edge: coverpoint {fcov_rep_edge, fcov_rep_tag_out}
         iff (fcov_rep_valid & (fcov_rep_op == 3'd3)) {
       bins lo_minus2_cleared = {4'b010_0};
       bins lo_minus2_kept    = {4'b010_1};
-      bins lo_base_cleared   = {4'b011_0};
+      illegal_bins lo_base_cleared   = {4'b011_0};
       bins lo_base_kept      = {4'b011_1};
-      bins hi_minus2_cleared = {4'b101_0};
+      illegal_bins hi_minus2_cleared = {4'b101_0};
       bins hi_minus2_kept    = {4'b101_1};
       bins hi_past_cleared   = {4'b110_0};
-      bins hi_past_kept      = {4'b110_1};
+      illegal_bins hi_past_kept      = {4'b110_1};
     }
 
     rep_lo_edge_cross: cross cp_rep_eclass, cp_rep_lo_dist;
@@ -3167,8 +3408,8 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
   //                     store kind and with whether the store faults (a faulting store must not
   //                     update) and whether the core updated mshwm
   //   cp_hwm_split      the second half of a misaligned store, which the ISA does not count
-  //                     (only the lowest byte's address is compared); its update bin shows the
-  //                     core updating on it
+  //                     (only the lowest byte's address is compared); an update on it is an
+  //                     illegal bin
   logic        fcov_hwm_csr, fcov_hwm_csr_is_b, fcov_hwm_csr_wr;
   logic        fcov_hwm_store, fcov_hwm_split, fcov_hwm_store_err, fcov_hwm_set;
   logic [1:0]  fcov_hwm_pos;      // 0 below mshwmb, 1 inside, 2 at/above mshwm, 3 empty window
@@ -3247,13 +3488,23 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
     cp_hwm_store_set: coverpoint fcov_hwm_set iff (fcov_hwm_store);
     hwm_store_kind_cross: cross cp_hwm_store_pos, cp_hwm_store_kind;
     hwm_store_err_cross: cross cp_hwm_store_pos, cp_hwm_store_err;
-    // Both outcomes binned: inside & ~err must update, everything else must not; which is right
-    // is checked by the cosim against Sail and by cheriot_mshwm.
-    hwm_store_set_cross: cross cp_hwm_store_pos, cp_hwm_store_set;
+    // Inside & ~err must update, everything else must not; whether an inside store updated is
+    // checked by the cosim against Sail and by cheriot_mshwm. An update outside the window cannot
+    // be binned: csr_mshwm_set_o is the window compare itself, on the same lsu_addr_o, mshwmb and
+    // mshwm in the same cycle (ibex_cheriot_ex.sv), so set implies in_window.
+    hwm_store_set_cross: cross cp_hwm_store_pos, cp_hwm_store_set {
+      illegal_bins set_outside_window =
+        (binsof(cp_hwm_store_pos.below) || binsof(cp_hwm_store_pos.above) ||
+         binsof(cp_hwm_store_pos.empty)) &&
+        binsof(cp_hwm_store_set) intersect {1'b1};
+    }
     cp_hwm_split: coverpoint {(fcov_hwm_pos == 2'd1), fcov_hwm_set} iff (fcov_hwm_split) {
       bins outside_no_update = {2'b00};
       bins inside_no_update  = {2'b10};
-      bins inside_update     = {2'b11};
+      // Only a store's start address counts (ISA stack high-water mark, Sail cheri_addr_checks.sail
+      // ext_check_phys_mem_write): csr_mshwm_set_o is gated with ~addr_incr_req_i
+      // (ibex_cheriot_ex.sv), so the second half never updates
+      illegal_bins inside_update = {2'b11};
     }
   endgroup
 
@@ -3439,7 +3690,7 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
       bins cheri_opcode  = {4'd0};
       bins load          = {4'd1};    // includes CLC (ld)
       bins store         = {4'd2};    // includes CSC (sd)
-      bins csr           = {4'd6};    // includes mshwm/mshwmb/cdbg_ctrl
+      bins csr           = {4'd6};    // includes mshwm/mshwmb
       bins compressed    = {4'd9};    // includes c.clc/c.csc/c.clcsp/c.cscsp
       bins auicgp        = {4'd11};
     }

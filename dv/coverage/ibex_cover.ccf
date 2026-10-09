@@ -45,9 +45,31 @@ deselect_coverage -betfs -module prim_secded_inv_64_57_dec...
 deselect_coverage -betfs -module prim_secded_inv_39_32_dec...
 deselect_coverage -betfs -module prim_secded_inv_64_57_enc...
 deselect_coverage -betfs -module prim_secded_inv_39_32_enc...
+deselect_coverage -betfs -module prim_secded_inv_28_22_dec...
+deselect_coverage -betfs -module prim_secded_inv_28_22_enc...
+deselect_coverage -betfs -module prim_secded_pkg
 
 // Black-box DV CDC module.
 deselect_coverage -betfs -module prim_cdc_rand_delay
+
+// DV code bound into ibex_top -- the functional-coverage interfaces -- and the testbench's push-pull
+// agent package: not design code. Their covergroups are still collected; only their own code,
+// assertions and (for the package) the agent's covergroups are left out. These were IMC exclusions
+// (waivers/coverage_waivers_xlm.tcl), and IMC reports excluding an item that has hits as an error,
+// *E,EREXCE, in every merge (25 on 2026-10-08), so they are kept out of the model here instead.
+deselect_coverage -betfs -module core_ibex_fcov_if...
+deselect_coverage -betfs -module core_ibex_pmp_fcov_if...
+deselect_coverage -betfs -module core_ibex_trvk_fcov_if...
+deselect_coverage -assert -module core_ibex_fcov_if...
+deselect_coverage -assert -module core_ibex_pmp_fcov_if...
+deselect_coverage -assert -module core_ibex_trvk_fcov_if...
+deselect_coverage -covergroup -module push_pull_agent_pkg
+
+// RVFI ports (the retirement trace for the cosim and TestRIG, not a silicon interface) and the
+// hard-wired hart_id_i / boot_addr_i inputs: no toggle scoring. Same reason as above (they were an
+// IMC exclusion of signals the testbench toggles). The path resolves to
+// ibex/dv/coverage/ in every build: each sets dv_root to <ibex>/vendor/lowrisc_ip/dv.
+set_toggle_excludefile -nolog ${dv_root}/../../../dv/coverage/ibex_cover_toggle_excl
 
 // csr_assert_fpv is an auto-generated csr read assertion module. So only assertion coverage is
 // meaningful to collect.
@@ -68,7 +90,5 @@ select_coverage -toggle -module prim_count
 select_coverage -toggle -module prim_esc_sender
 select_coverage -toggle -module prim_esc_receiver
 select_coverage -toggle -module prim_onehot_check
-select_coverage -toggle -module prim_prince
-select_coverage -toggle -module prim_lfsr
-select_coverage -toggle -module prim_secded_inv_64_57_dec
-select_coverage -toggle -module prim_secded_inv_39_32_dec
+// prim_prince, prim_lfsr and the prim_secded_* blocks get no port toggles either: they were also
+// excluded in IMC ("verified elsewhere"), which raised *E,EREXCE for the toggled ports.

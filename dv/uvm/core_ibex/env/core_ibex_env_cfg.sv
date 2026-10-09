@@ -14,8 +14,26 @@ class core_ibex_env_cfg extends uvm_object;
   bit                           enable_nested_irq;
   bit                           enable_debug_seq;
   bit                           enable_cheriot_seq;
+  // +cheriot_enable_on_write=<hex addr>: start with cheriot_enable_i Off and raise it once the
+  // program writes to <addr> (cheriot_enable_delay cycles later) -- the mid-run 0->1 transition that
+  // enable_cheriot_seq, which raises it before the first fetch, cannot produce. 0 = not used.
+  bit[31:0]                     cheriot_enable_on_write;
+  int unsigned                  cheriot_enable_delay = 6;
+  // +cheriot_disable_on_write=<hex addr>: the reverse, which the pin contract forbids (once On,
+  // cheriot_enable_i stays On until reset): once the program writes to <addr>, slow the d-side
+  // grants to cheriot_disable_gnt_delay cycles and lower the pin while a CSC waits for the grant of
+  // its first word (LSU CTX_WAIT_GNT1; the LSU must hold the request until granted and complete the
+  // CSC). The core must then raise alert_major_internal_o within cheriot_disable_alert_window cycles
+  // (core_ibex_base_test::watch_cheriot_disable_trigger), and the program continues in RISC-V mode
+  // without a trap. 0 = not used.
+  bit[31:0]                     cheriot_disable_on_write;
+  int unsigned                  cheriot_disable_gnt_delay = 40;
+  int unsigned                  cheriot_disable_alert_window = 100;
   bit                           disable_fetch_enable_seq;
   bit                           disable_cosim;
+  // +cosim_off=1: no co-simulation at all, neither Spike nor a Sail model is stepped. For
+  // self-checking tests whose stimulus no model can follow (the real debug module, DM=1).
+  bit                           cosim_off;
   bit[31:0]                     max_interval;
   bit                           require_signature_addr;
   string                        signature_addr_str;
@@ -51,8 +69,14 @@ class core_ibex_env_cfg extends uvm_object;
     `uvm_field_int(enable_nested_irq, UVM_DEFAULT)
     `uvm_field_int(enable_debug_seq, UVM_DEFAULT)
     `uvm_field_int(enable_cheriot_seq, UVM_DEFAULT)
+    `uvm_field_int(cheriot_enable_on_write, UVM_DEFAULT)
+    `uvm_field_int(cheriot_enable_delay, UVM_DEFAULT)
+    `uvm_field_int(cheriot_disable_on_write, UVM_DEFAULT)
+    `uvm_field_int(cheriot_disable_gnt_delay, UVM_DEFAULT)
+    `uvm_field_int(cheriot_disable_alert_window, UVM_DEFAULT)
     `uvm_field_int(disable_fetch_enable_seq, UVM_DEFAULT)
     `uvm_field_int(disable_cosim, UVM_DEFAULT)
+    `uvm_field_int(cosim_off, UVM_DEFAULT)
     `uvm_field_int(max_interval, UVM_DEFAULT)
     `uvm_field_int(require_signature_addr, UVM_DEFAULT)
     `uvm_field_int(signature_addr, UVM_DEFAULT)
@@ -71,8 +95,14 @@ class core_ibex_env_cfg extends uvm_object;
     void'($value$plusargs("enable_nested_irq=%0d", enable_nested_irq));
     void'($value$plusargs("enable_debug_seq=%0d", enable_debug_seq));
     void'($value$plusargs("enable_cheriot_seq=%0d", enable_cheriot_seq));
+    void'($value$plusargs("cheriot_enable_on_write=%h", cheriot_enable_on_write));
+    void'($value$plusargs("cheriot_enable_delay=%0d", cheriot_enable_delay));
+    void'($value$plusargs("cheriot_disable_on_write=%h", cheriot_disable_on_write));
+    void'($value$plusargs("cheriot_disable_gnt_delay=%0d", cheriot_disable_gnt_delay));
+    void'($value$plusargs("cheriot_disable_alert_window=%0d", cheriot_disable_alert_window));
     void'($value$plusargs("disable_fetch_enable_seq=%0d", disable_fetch_enable_seq));
     void'($value$plusargs("disable_cosim=%0d", disable_cosim));
+    void'($value$plusargs("cosim_off=%0d", cosim_off));
     void'($value$plusargs("max_interval=%0d", max_interval));
     void'($value$plusargs("require_signature_addr=%0d", require_signature_addr));
     void'($value$plusargs("signature_addr=%s", signature_addr_str));

@@ -12,11 +12,11 @@
 
 int riscv_cosim_step(Cosim *cosim, const svBitVecVal *write_reg,
                      const svBitVecVal *write_reg_data, const svBitVecVal *pc,
-                     svBit sync_trap, svBit suppress_reg_write) {
+                     svBit intr, svBit sync_trap, svBit suppress_reg_write, svBit more_ops) {
   assert(cosim);
 
-  return cosim->step(write_reg[0], write_reg_data[0], pc[0], sync_trap,
-                     suppress_reg_write)
+  return cosim->step(write_reg[0], write_reg_data[0], pc[0], intr, sync_trap,
+                     suppress_reg_write, more_ops)
              ? 1
              : 0;
 }
@@ -34,10 +34,11 @@ void riscv_cosim_set_nmi(Cosim *cosim, svBit nmi) {
   cosim->set_nmi(nmi);
 }
 
-void riscv_cosim_set_nmi_int(Cosim *cosim, svBit nmi_int) {
+void riscv_cosim_set_nmi_int(Cosim *cosim, svBit nmi_int,
+                             const svBitVecVal *mtval) {
   assert(cosim);
 
-  cosim->set_nmi_int(nmi_int);
+  cosim->set_nmi_int(nmi_int, mtval[0]);
 }
 void riscv_cosim_set_debug_req(Cosim *cosim, svBit debug_req) {
   assert(cosim);
@@ -57,6 +58,13 @@ void riscv_cosim_set_csr(Cosim *cosim, const int csr_id,
   assert(cosim);
 
   cosim->set_csr(csr_id, (uint32_t)csr_val[0]);
+}
+
+void riscv_cosim_get_csr(Cosim *cosim, const int csr_id,
+                         svBitVecVal *csr_val) {
+  assert(cosim);
+
+  csr_val[0] = (svBitVecVal)cosim->get_csr(csr_id);
 }
 
 void riscv_cosim_set_ic_scr_key_valid(Cosim *cosim, svBit valid) {

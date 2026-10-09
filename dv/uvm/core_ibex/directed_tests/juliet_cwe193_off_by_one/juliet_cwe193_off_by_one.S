@@ -7,133 +7,213 @@
 # =============================================================================
 # CWE-193 (NIST Juliet Test Suite): Off-by-One Error.
 #
-# In C without CHERIoT:
 #   char buf[16];
-#   for (int i = 0; i <= 16; i++) buf[i] = 0;  ← writes one past the end
+#   for (int i = 0; i <= 16; i++) buf[i] = 0;   // i == 16 writes past the end
 #
-# In CHERIoT:
-#   CHERI bounds are half-open intervals [base, top).  The cursor value equal
-#   to 'top' is OUTSIDE the valid range — it is the first address past the end.
-#   When CIncAddr moves the cursor to exactly the top address, the tag is
-#   cleared immediately.  The "i == 16" iteration is blocked in hardware.
+# CHERI bounds are half-open, [base, top). A cursor AT top is the ordinary C
+# one-past-the-end pointer and is legal to form: CHERIoT-Sail (cheri_insts.sail
+# CIncAddr -> incCapAddr) clears the tag only if the new address is
+# unrepresentable, and for this capability (E = 0) the representable window is
+# [base, base + 512), so cursor = top keeps tag 1. The off-by-one is stopped at
+# the DEREFERENCE: the byte store at top fails inCapBounds(cap, top, 1)
+# (top + 1 > top) and raises a CHERI bounds violation (CapEx_BoundsViolation =
+# 0x01); the byte store at top-1 (buf[15]) passes.
 #
-# This test creates a 16-byte buffer capability at 0x80080000 and probes the
-# boundary precisely:
+# The buffer is in .data, followed by a guard word, not at a fixed address:
+# 0x80080000 is the bottom of the stack/TLS area, and this test really stores.
+# buf = area[0..15]; area[16..19] is the guard word the off-by-one would hit.
 #
-#   Test 1 (tag = 1 after CSetBounds(16))
-#     After csetaddr+csetbounds, cursor=0x80080000=base, top=0x80080010.
-#     The cursor is at the first byte of the buffer (in-bounds) → tag=1.
-#     This is the baseline: the allocation is valid.
+# How each check can fail
+# -----------------------
+#   Test 1  CSetBounds(&area, 16): tag = 1.  CSetBounds cleared the tag.
+#   Test 2  CIncAddr(+16), cursor = top: tag STILL 1.
+#           Fails if CIncAddr clears the tag on reaching top (a [base, top)
+#           check) instead of on leaving the representable window.
+#   Test 7  ...and CGetAddr = &area + 16: the cursor really is at top.
+#   Test 3  Fresh capability, CIncAddr(+15), cursor = top-1: tag = 1.
+#   Test 8  sb through that cursor (buf[15]) did NOT trap (control: the last
+#           element is writable). Fails if the top check is off by one the
+#           other way, which would also make the deliberate fault meaningless.
+#   Test 9  ...and area[15] now holds the stored byte.
+#   Tests 4-6  mstatus.MIE = 1, mcause = 0, mip = 0 -- checked here, before
+#           the deliberate fault, because taking a trap clears MIE and sets
+#           mcause.
+#   Test 10 sb through the cursor-at-top capability (buf[16]) traps (reaching
+#           the next instruction means it did not). Fails if the rv32 LSU top
+#           check (ibex_cheriot_ex.sv check_rv32: chkaddr > top33 - 1) accepts
+#           an access starting at top.
+#   Test 11 mcause = 28 (CHERI fault).
+#   Test 12 mtval = (10 << 5) | 0x01 = 0x141: bounds violation against the
+#           authority c10.
+#   Test 13 MEPCC address = the faulting sb.
+#   Test 14 The guard word area[16..19] still holds its seed: the denied store
+#           wrote nothing.
+#   Test 15 Any other trap (setup, controls, interrupt checks): the generic
+#           test-local vector was entered. mcause/mtval in the trace say why.
 #
-#   Test 2 (tag = 0 after CIncAddr(+16) — cursor exactly at top)
-#     CIncAddr(+16) moves the cursor to 0x80080000+16 = 0x80080010 = top.
-#     CHERI bounds exclude top, so cursor=top is out-of-bounds → tag=0.
-#     This is the off-by-one access: one step past the end is denied.
+# Trap handling
+# -------------
+# As in cheriot_revoke_basic / juliet_cwe131_fault / cheriot_perm_lc_sc:
+# crt_cheriot.S's trap_entry cannot return under CHERIoT, so MTCC is pointed
+# at 4-byte-aligned test-local vectors that jump straight to a label. A vector
+# does no memory or CSR access and never executes mret.
 #
-#   Test 3 (tag = 1 after fresh CSetBounds(16)+CIncAddr(+15))
-#     A fresh 16-byte cap starting at 0x80080000 is derived.  CIncAddr(+15)
-#     gives cursor=0x8008000F = top-1, which IS within [base, top) → tag=1.
-#     This confirms that the last valid byte (index 15) is accessible, and
-#     only the element at index 16 (= top) is denied.
+# Register use: ca0 = buf capability, ca1 = full-range MTDC capability to the
+# area (seeding and read-back). ca0/ca1 are never an integer destination after
+# setup -- aN and caN are the same register. Integer scratch is t0, t1, t2
+# only (c6 is the MTCC install scratch, as in crt). No x16-x31.
 #
-#   Tests 4-6 (interrupt state — no interrupt expected)
-#     Machine-mode interrupts are enabled at the start of the test.
-#     Test 4: mstatus.MIE still = 1.
-#     Test 5: mcause = 0.
-#     Test 6: mip = 0.
+# Returns 0 on success, else the failing test number (1-15).
 #
-# Verification:
-#   Two independent layers catch a faulty DUT:
-#
-#   1. Cosim (Spike vs ibex RTL, per instruction step):
-#      cgettag writes to a0; Spike and RTL are compared after every step.
-#      If the tag is not cleared at cursor=top, or is wrongly cleared at
-#      cursor=top-1, Spike and the DUT diverge immediately.
-#
-#   2. Self-check (bne against expected 0 or 1):
-#      main() returns non-zero on any failure; UVM marks FAILED.
-#
-# Adapted from Juliet C Test Suite CWE193_Off_by_One_Error (NIST/NSA).
+# Encodings (Sail encdec, opcode 0x5B; cross-checked against
+# cheriot_perm_lc_sc.S):
+#   cspecialr  ca0, mtdc     = .word 0x03D0055B  (CSpecialRW, SCR 29)
+#   cspecialr  ca1, mtdc     = .word 0x03D005DB
+#   csetaddr   ca0, ca0, t0  = .word 0x2055055B  (funct7=0x10)
+#   csetaddr   ca1, ca1, t0  = .word 0x205585DB
+#   csetbounds ca0, ca0, t0  = .word 0x1055055B  (funct7=0x08)
+#   cincaddr   ca0, ca0, t0  = .word 0x2255055B  (funct7=0x11)
+#   cgettag    t0, ca0       = .word 0xFE4502DB  (funct7=0x7F, rs2=0x04)
+#   cgetaddr   t0, ca0       = .word 0xFEF502DB  (rs2=0x0F)
+#   cspecialr  ct1, mepcc    = .word 0x03F0035B  (SCR 31)
+#   cgetaddr   t1, ct1       = .word 0xFEF3035B
+# Trap-vector install (from crt_cheriot.S, c6/t0):
+#   cspecialr  c6, mtcc      = .word 0x03C0035B
+#   csetaddr   c6, c6, t0    = .word 0x2053035B
+#   cspecialw  mtcc, c6      = .word 0x03C3005B
 # =============================================================================
-#
-# Instruction encodings (rd=a0=x10, cs1=ca0=x10, rs2=a1=x11 unless noted):
-#
-#   cspecialr ca0, mtdc   [funct7=0x01, rs2=29, rs1=x0, rd=x10]:
-#     (0x01<<25)|(29<<20)|(0<<15)|(0<<12)|(10<<7)|0x5B = 0x03D0055B
-#
-#   csetaddr ca0, ca0, a1 [funct7=0x10, rs2=x11, rs1=x10, rd=x10]:
-#     (0x10<<25)|(11<<20)|(10<<15)|(0<<12)|(10<<7)|0x5B = 0x20B5055B
-#
-#   csetbounds ca0, ca0, a1 [funct7=0x08, rs2=x11, rs1=x10, rd=x10]:
-#     (0x08<<25)|(11<<20)|(10<<15)|(0<<12)|(10<<7)|0x5B = 0x10B5055B
-#
-#   cgettag a0, ca0 [funct7=0x7F, rs2=4, rs1=x10, rd=x10]:
-#     (0x7F<<25)|(4<<20)|(10<<15)|(0<<12)|(10<<7)|0x5B = 0xFE45055B
-#
-#   cincaddr ca0, ca0, a1 [funct7=0x11, rs2=x11, rs1=x10, rd=x10]:
-#     (0x11<<25)|(11<<20)|(10<<15)|(0<<12)|(10<<7)|0x5B = 0x22B5055B
-#
-# Tests:
-#   1. cgettag after csetbounds(16) = 1     (cursor at base, valid).
-#   2. cgettag after cincaddr(+16) = 0      (cursor at top, OOB — off-by-one).
-#   3. cgettag after fresh cap + cincaddr(+15) = 1 (top-1 is still valid).
-#   4. mstatus.MIE = 1.
-#   5. mcause = 0.
-#   6. mip = 0.
 
-.globl main
-main:
-    # Enable machine-mode interrupts for the duration of this test.
-    csrsi   mstatus, 8              # set mstatus.MIE (bit 3)
+# Point MTCC at a test-local vector. Clobbers t0 and c6 (t1).
+.macro SET_TRAP_VECTOR label
+    la      t0, \label
+    .word   0x03C0035B              # cspecialr c6, mtcc
+    .word   0x2053035B              # csetaddr  c6, c6, t0
+    .word   0x03C3005B              # cspecialw mtcc, c6
+.endm
 
-    # Derive a bounded 16-byte capability at 0x80080000 from MTDC.
-    .word   0x03D0055B              # cspecialr ca0, mtdc  (full-range data cap)
-    li      a1, 0x80080000
-    .word   0x20B5055B              # csetaddr ca0, ca0, a1  (cursor → 0x80080000)
-    li      a1, 16
-    .word   0x10B5055B              # csetbounds ca0, ca0, a1  ([0x80080000, 0x80080010))
-
-    # ── Test 1: bounded cap valid (cursor=base is in-bounds) ─────────────────
-    .word   0xFE45055B              # cgettag a0, ca0
-    li      a1, 1
-    bne     a0, a1, .Lfail_test1
-
-    # ── Test 2: CIncAddr(+16) → cursor = top → tag cleared (off-by-one) ──────
-    # cursor = 0x80080000 + 16 = 0x80080010 = top.
-    # [base, top) excludes top: cursor=top is out-of-bounds → tag=0.
-    li      a1, 16
-    .word   0x22B5055B              # cincaddr ca0, ca0, a1  (cursor → top)
-    .word   0xFE45055B              # cgettag a0, ca0
-    bne     a0, x0, .Lfail_test2   # tag must be 0
-
-    # ── Test 3: fresh cap + CIncAddr(+15) → cursor = top-1 → tag=1 ──────────
-    # Rederive the 16-byte capability and advance to the LAST valid byte.
+# ca0 <- 16-byte capability [&area, &area+16), cursor at base. Clobbers t0.
+.macro MAKE_BUF16
     .word   0x03D0055B              # cspecialr ca0, mtdc
-    li      a1, 0x80080000
-    .word   0x20B5055B              # csetaddr ca0, ca0, a1
-    li      a1, 16
-    .word   0x10B5055B              # csetbounds ca0, ca0, a1
-    li      a1, 15
-    .word   0x22B5055B              # cincaddr ca0, ca0, a1  (cursor → 0x8008000F)
-    .word   0xFE45055B              # cgettag a0, ca0
-    li      a1, 1
-    bne     a0, a1, .Lfail_test3   # top-1 is in-bounds: tag must be 1
+    la      t0, area
+    .word   0x2055055B              # csetaddr  ca0, ca0, t0
+    li      t0, 16
+    .word   0x1055055B              # csetbounds ca0, ca0, t0
+.endm
 
-    # ── Interrupt state verification (no interrupt expected) ───────────────────
-    csrr    a0, mstatus
-    andi    a1, a0, 8
-    beq     a1, x0, .Lfail_test4
-    csrr    a0, mcause
-    bne     a0, x0, .Lfail_test5
-    csrr    a0, mip
-    bne     a0, x0, .Lfail_test6
+    .text
+    .globl main
+
+# Test-local trap vectors: no memory access, no CSR access, no mret.
+.balign 4
+.Lvec_unexpected:
+    j       .Lfail_test15
+.balign 4
+.Lvec_ctl_store:
+    j       .Lfail_test8
+.balign 4
+.Lvec_expected:
+    j       .Ltrap_taken
+
+main:
+    csrsi   mstatus, 8              # set mstatus.MIE (bit 3)
+    SET_TRAP_VECTOR .Lvec_unexpected
+
+    # ── Setup: full-range capability to the area; seed buf[12..15] and guard ──
+    la      t0, area
+    .word   0x03D005DB              # cspecialr ca1, mtdc
+    .word   0x205585DB              # csetaddr  ca1, ca1, t0   -> &area
+    sw      zero, 12(a1)            # buf[12..15] = 0
+    li      t1, 0x5A5A5A5A
+    sw      t1, 16(a1)              # guard word area[16..19]
+
+    # ── Test 1: the 16-byte buffer capability is valid ────────────────────────
+    MAKE_BUF16
+    .word   0xFE4502DB              # cgettag t0, ca0 (t0: keep ca0 intact)
+    li      t1, 1
+    bne     t0, t1, .Lfail_test1
+
+    # ── Test 2: cursor = top keeps tag = 1 (one-past-the-end is legal) ────────
+    li      t0, 16
+    .word   0x2255055B              # cincaddr ca0, ca0, t0   (cursor -> top)
+    .word   0xFE4502DB              # cgettag t0, ca0
+    bne     t0, t1, .Lfail_test2    # t1 = 1
+
+    # ── Test 7: the cursor is &area + 16 ──────────────────────────────────────
+    .word   0xFEF502DB              # cgetaddr t0, ca0
+    la      t2, area + 16
+    bne     t0, t2, .Lfail_test7
+
+    # ── Test 3: fresh capability, cursor = top-1 keeps tag = 1 ────────────────
+    MAKE_BUF16
+    li      t0, 15
+    .word   0x2255055B              # cincaddr ca0, ca0, t0   (cursor -> top-1)
+    .word   0xFE4502DB              # cgettag t0, ca0
+    bne     t0, t1, .Lfail_test3    # t1 = 1
+
+    # ── Tests 8-9: control -- buf[15] (last element) is writable ──────────────
+    SET_TRAP_VECTOR .Lvec_ctl_store # test 8: a trap here is a failure
+    li      t2, 0xA5
+    sb      t2, 0(a0)               # buf[15] = 0xA5: in bounds
+    SET_TRAP_VECTOR .Lvec_unexpected
+    lbu     t1, 15(a1)              # read back through the full-range cap
+    bne     t1, t2, .Lfail_test9
+
+    # ── Tests 4-6: interrupt state, before the deliberate fault ───────────────
+    csrr    t1, mstatus
+    andi    t1, t1, 8
+    beqz    t1, .Lfail_test4
+    csrr    t1, mcause
+    bnez    t1, .Lfail_test5
+    csrr    t1, mip
+    bnez    t1, .Lfail_test6
+
+    # ── Tests 10-14: buf[16] = x traps with a bounds violation ────────────────
+    MAKE_BUF16
+    li      t0, 16
+    .word   0x2255055B              # cincaddr ca0, ca0, t0   (cursor -> top)
+    SET_TRAP_VECTOR .Lvec_expected
+    li      t2, 0xEE
+
+.Lstore_denied:
+    sb      t2, 0(a0)               # DENIED: buf[16], the byte at top
+    j       .Lfail_test10           # reached only if the store did not trap
+
+.Ltrap_taken:
+    SET_TRAP_VECTOR .Lvec_unexpected
+    csrr    t1, mcause
+    li      t2, 28                  # CHERI fault
+    bne     t1, t2, .Lfail_test11
+    csrr    t1, mtval
+    li      t2, 0x141               # (10 << 5) | 0x01: bounds violation, c10
+    bne     t1, t2, .Lfail_test12
+    .word   0x03F0035B              # cspecialr ct1, mepcc
+    .word   0xFEF3035B              # cgetaddr  t1, ct1
+    la      t2, .Lstore_denied
+    bne     t1, t2, .Lfail_test13
+    lw      t1, 16(a1)              # guard word through the full-range cap
+    li      t2, 0x5A5A5A5A
+    bne     t1, t2, .Lfail_test14   # must still hold the seed
 
     li      a0, 0
     ret
 
-.Lfail_test1: li a0, 1; ret
-.Lfail_test2: li a0, 2; ret
-.Lfail_test3: li a0, 3; ret
-.Lfail_test4: li a0, 4; ret
-.Lfail_test5: li a0, 5; ret
-.Lfail_test6: li a0, 6; ret
+.Lfail_test1:  li a0, 1;  ret
+.Lfail_test2:  li a0, 2;  ret
+.Lfail_test3:  li a0, 3;  ret
+.Lfail_test4:  li a0, 4;  ret
+.Lfail_test5:  li a0, 5;  ret
+.Lfail_test6:  li a0, 6;  ret
+.Lfail_test7:  li a0, 7;  ret
+.Lfail_test8:  li a0, 8;  ret
+.Lfail_test9:  li a0, 9;  ret
+.Lfail_test10: li a0, 10; ret
+.Lfail_test11: li a0, 11; ret
+.Lfail_test12: li a0, 12; ret
+.Lfail_test13: li a0, 13; ret
+.Lfail_test14: li a0, 14; ret
+.Lfail_test15: li a0, 15; ret
+
+    .data
+    .balign 8
+area:                               # buf = area[0..15]; area[16..19] = guard word
+    .space  24

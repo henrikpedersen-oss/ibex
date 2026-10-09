@@ -238,7 +238,11 @@ function ext_check_xret_priv (p : Privilege) : Privilege -> bool =
 function ext_fail_xret_priv () : unit -> unit = 
   handle_cheri_pcc_exception(CapEx_AccessSystemRegsViolation)
 
-function ext_check_CSR (csrno : bits(12), p : Privilege, isWrite : bool) -> bool = 
+function ext_check_CSR (csrno : bits(12), p : Privilege, isWrite : bool) -> bool =
+  /* Local, GAP-CS-3: reads of Ibex's hpmcounter3-31(h) need no ASR, as the CHERIoT ISA's CSR
+   * allowlist (archdoc chap-cheri-riscv.tex, "hpmcounter(h) Read-Only") and the RTL
+   * (ibex_decoder.sv:780-798) say. The model had no such counters before. */
+  if ibex_csr_read_without_asr(csrno) & not(isWrite) then true else
   if not(pcc_access_system_regs()) then match (csrno) {
     /* CSR allow list in absence of access system registers */
     0xB00 => not(isWrite), // mcycle

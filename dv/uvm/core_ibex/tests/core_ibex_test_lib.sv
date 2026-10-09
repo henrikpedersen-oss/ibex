@@ -263,64 +263,71 @@ class core_ibex_rf_addr_intg_test extends core_ibex_base_test;
     vseq.start(env.vseqr);
     clk_vif.wait_n_clks(rnd_delay);
 
-    `uvm_info(`gfn, $sformatf("Reading value of %s", glitch_path), UVM_LOW)
-    `DV_CHECK_FATAL(uvm_hdl_read(glitch_path, orig_val));
-    `uvm_info(`gfn, $sformatf("Read %x", orig_val), UVM_LOW)
-
     // Disable TB assertion for alerts.
     `DV_ASSERT_CTRL_REQ("tb_no_alerts_triggered", 1'b0)
 
     ecc_alert_path = $sformatf("%s.%s", shdw_ecc_path, err_signals[ctrl_signal_idx]);
 
-    // Try each address bit in turn rather than a single random one.
-    //
-    // Glitching the read address aliases one register's data onto another
-    // register's check bits, which only produces a non-zero syndrome if the two
-    // registers hold DIFFERENT data. Identical data gives identical check bits
-    // and no error -- physically undetectable, not an RTL defect.
-    //
-    // The old code picked one random bit and asserted the error must fire, so a
-    // pass was luck. Checked against the DUT trace for all five failing seeds in
-    // the 2026-09-23 regression and the aliased pair held identical data every
-    // time (21577 x21/x23 both 0, 244 x11/x9 both 0, 30629 x2/x18 both 0, 30639
-    // x9/x25 both 0x80000000, 5642 x28/x30 both 0) -- 5 of 5. Note two of those
-    // force the MAIN regfile, so this is not shadow-specific.
-    //
-    // Reading the register contents directly to pre-select a good pair would be
-    // fragile here: the opentitan config is BaseIsaRV32IorCHERIoT, so x0-x15 and
-    // x16-x31 live in two different generate branches of
-    // ibex_register_file_ff.sv. Probing for a detectable glitch avoids depending
-    // on either path, and asks the question we actually care about: is an
-    // address glitch detectable at all right now?
+    // Early in the program most registers still hold their reset value 0, so every alias
+    // can be undetectable (seed 23332: x11/x19/x25/x26/x27/x31 all unwritten). Retry later
+    // rather than fail; a run that never finds a detectable glitch still fails below.
     ecc_err = 0;
-    for (bit_idx = 0; bit_idx < 5; bit_idx++) begin
-      glitch_val = orig_val;
-      glitch_val[bit_idx] = ~glitch_val[bit_idx];
+    for (int attempt = 0; attempt < 10 && !(|ecc_err); attempt++) begin
+      if (attempt > 0) clk_vif.wait_n_clks(500);
 
-      `uvm_info(`gfn, $sformatf("Forcing %s to value 'h%0x (bit %0d)",
-                                glitch_path, glitch_val, bit_idx), UVM_LOW)
-      `DV_CHECK_FATAL(uvm_hdl_force(glitch_path, glitch_val));
+      `uvm_info(`gfn, $sformatf("Reading value of %s", glitch_path), UVM_LOW)
+      `DV_CHECK_FATAL(uvm_hdl_read(glitch_path, orig_val));
+      `uvm_info(`gfn, $sformatf("Read %x", orig_val), UVM_LOW)
 
-      // Determine how long it takes until the error gets noticed.
-      if (trgt_core_idx == 0) begin
-        // When we are faulting the main core RF, it takes lockstep_delay until we detect the
-        // fault. This is because the shadow core ECC checker is responsible for detecting the
-        // fault.
-        clk_vif.wait_n_clks(lockstep_delay);
-      end else begin
-        // When we are faulting the shadow core RF, the fault is immediately detected.
-        #1step;
+      // Try each address bit in turn rather than a single random one.
+      //
+      // Glitching the read address aliases one register's data onto another
+      // register's check bits, which only produces a non-zero syndrome if the two
+      // registers hold DIFFERENT data. Identical data gives identical check bits
+      // and no error -- physically undetectable, not an RTL defect.
+      //
+      // The old code picked one random bit and asserted the error must fire, so a
+      // pass was luck. Checked against the DUT trace for all five failing seeds in
+      // the 2026-09-23 regression and the aliased pair held identical data every
+      // time (21577 x21/x23 both 0, 244 x11/x9 both 0, 30629 x2/x18 both 0, 30639
+      // x9/x25 both 0x80000000, 5642 x28/x30 both 0) -- 5 of 5. Note two of those
+      // force the MAIN regfile, so this is not shadow-specific.
+      //
+      // Reading the register contents directly to pre-select a good pair would be
+      // fragile here: the opentitan config is BaseIsaRV32IorCHERIoT, so x0-x15 and
+      // x16-x31 live in two different generate branches of
+      // ibex_register_file_ff.sv. Probing for a detectable glitch avoids depending
+      // on either path, and asks the question we actually care about: is an
+      // address glitch detectable at all right now?
+      for (bit_idx = 0; bit_idx < 5; bit_idx++) begin
+        glitch_val = orig_val;
+        glitch_val[bit_idx] = ~glitch_val[bit_idx];
+
+        `uvm_info(`gfn, $sformatf("Forcing %s to value 'h%0x (bit %0d)",
+                                  glitch_path, glitch_val, bit_idx), UVM_LOW)
+        `DV_CHECK_FATAL(uvm_hdl_force(glitch_path, glitch_val));
+
+        // Determine how long it takes until the error gets noticed.
+        if (trgt_core_idx == 0) begin
+          // When we are faulting the main core RF, it takes lockstep_delay until we detect the
+          // fault. This is because the shadow core ECC checker is responsible for detecting the
+          // fault.
+          clk_vif.wait_n_clks(lockstep_delay);
+        end else begin
+          // When we are faulting the shadow core RF, the fault is immediately detected.
+          #1step;
+        end
+
+        `DV_CHECK_FATAL(uvm_hdl_read(ecc_alert_path, ecc_err))
+        if (|ecc_err) break;
+
+        // Undetectable with this bit -- the aliased register holds the same data.
+        // Release and try the next one.
+        `uvm_info(`gfn, $sformatf(
+                  "No ECC error for bit %0d (aliased register holds identical data); trying next",
+                  bit_idx), UVM_LOW)
+        `DV_CHECK_FATAL(uvm_hdl_release(glitch_path))
       end
-
-      `DV_CHECK_FATAL(uvm_hdl_read(ecc_alert_path, ecc_err))
-      if (|ecc_err) break;
-
-      // Undetectable with this bit -- the aliased register holds the same data.
-      // Release and try the next one.
-      `uvm_info(`gfn, $sformatf(
-                "No ECC error for bit %0d (aliased register holds identical data); trying next",
-                bit_idx), UVM_LOW)
-      `DV_CHECK_FATAL(uvm_hdl_release(glitch_path))
     end
 
     // Every address bit aliased onto a register holding identical data. That is
@@ -642,11 +649,9 @@ class core_ibex_icache_intg_test extends core_ibex_base_test;
           // alert_minor_o (ibex_core.sv:1337) adds no register -- so the main
           // core responds in the cycle of the force, not the next one.
           //
-          // However, uvm_hdl_force schedules the update through the PLI.  In
-          // Xcelium, downstream always_comb/assign blocks re-evaluate in the
-          // next delta cycle, not in the same PLI callback.  Without the #0
-          // below, uvm_hdl_read("u_ibex_core.icache_ecc_error") observes the
-          // pre-force value (0) and the check fails for every seed.
+          // However, uvm_hdl_force schedules the update through the PLI, and a
+          // read straight after it observes the pre-force value (0).  A #0 is
+          // not enough in Xcelium either: it failed on 15/15 seeds.
           //
           // alert_minor_o is not used here because it ORs in the lockstep shadow
           // core's delayed response (ibex_top.sv:1373); the shadow core reacts
@@ -655,19 +660,27 @@ class core_ibex_icache_intg_test extends core_ibex_base_test;
           // main core's T+1 state -- an unrelated comparison.
           force_data($sformatf("ic_data_rdata[%0d]", way_idx), data_rdata);
 
-          // Allow Xcelium to propagate the force through the combinational chain:
-          //   ic_data_rdata_i -> hit_data_ecc_ic1 -> data_err_ic1 ->
-          //   ecc_err_ic1 -> icache_ecc_error
-          // A single #0 advances to the next delta and gives all always_comb /
-          // assign blocks one pass to settle before the read below.
-          #0;
+          // We are at a negedge (wait_n_clks), so a quarter period crosses no
+          // clock edge: the registered lookup_valid/tag_hit read above still hold,
+          // and the combinational ECC chain has fully settled on the forced data.
+          #((clk_vif.clk_period_ps / 4) * 1ps);
 
           // Check the main core's own alert, not the OR with the lockstep shadow.
           alert_minor = read_data("u_ibex_core.icache_ecc_error");
           `DV_CHECK_EQ_FATAL(alert_minor, exp_alert_minor)
 
-          // Release force and complete task.
+          // Hold the corrupt data to the next falling edge, across the rising one: released
+          // within the quarter period, the error was never there at a clock edge, so the icache
+          // never acted on it (treat as a miss, refetch) and uarch_cg.cp_icache_ecc_err, sampled
+          // on the rising edge, was never hit. A lookup of this way in the next cycle also sees
+          // the flipped bit, a single-bit error SECDED always detects, so it misses as well.
+          clk_vif.wait_n_clks(1);
+
+          // Release force. The lockstep shadow core sees the corrupt data LockstepOffset (1)
+          // cycles later and raises its own minor alert then: wait for it to pass before
+          // returning, which re-enables NoAlertsTriggered.
           release_force($sformatf("ic_data_rdata[%0d]", way_idx));
+          clk_vif.wait_n_clks(4);
           return;
         end
       end else begin
@@ -903,6 +916,21 @@ class core_ibex_debug_intr_basic_test extends core_ibex_base_test;
             end
           end
         join_none
+        // Stop checking at the end-of-test handshake, as core_ibex_directed_test does. An irq
+        // raised just before the test program's final ecall is not taken before it: the ecall
+        // enters the exception handler, whose HANDLING_EXCEPTION status write the pending
+        // check_next_core_status(HANDLING_IRQ) then reads as a failure of a test that has passed.
+        wait (test_done === 1'b1);
+        // disable below can kill processes that are running sequences. As a result they never
+        // stop and the simulation never ends. So wait for all sequences to stop before doing the
+        // disable.
+        vseq.wait_for_stop();
+        disable fork;
+        // Each killed check_next_core_status/wait_for_csr_write/wait_ret leaves its objection
+        // raised (irq and debug checkers can both be mid-check); run_phase holds the last one.
+        while (cur_run_phase != null && cur_run_phase.get_objection_count(this) > 1) begin
+          cur_run_phase.drop_objection(this);
+        end
       end
     join_none
   endtask
@@ -1735,7 +1763,12 @@ class core_ibex_debug_wfi_test extends core_ibex_directed_test;
 
   virtual task check_stimulus();
     forever begin
-      wait (dut_vif.dut_cb.wfi === 1'b1);
+      // A wfi that retires before this loop starts (it starts 50 clocks after core setup) leaves
+      // no pulse to see, and the core then sleeps until woken: seeds 23327/23329 hung this way.
+      // core_sleep is only raised by a WFI once the core is running, so accept it directly.
+      if (dut_vif.dut_cb.core_sleep !== 1'b1) begin
+        wait (dut_vif.dut_cb.wfi === 1'b1);
+      end
       wait (dut_vif.dut_cb.core_sleep === 1'b1);
       clk_vif.wait_clks($urandom_range(100));
       send_debug_stimulus(init_operating_mode, "Core did not jump into debug mode from WFI state");
@@ -1995,6 +2028,105 @@ class core_ibex_mem_error_test extends core_ibex_directed_test;
 
 endclass
 
+// Memory errors with interrupts and debug requests on top: the bus/PMP error injection of
+// core_ibex_mem_error_test plus the irq/debug generators of
+// core_ibex_assorted_traps_interrupts_debug_test. Targets the irq_pending/debug_req bins of
+// uarch_cg.exception_stall_instr_cross, which neither test reaches on its own. Independent
+// generators rarely have a request pending in the cycle an error arrives, so raise_on_dside_error()
+// also raises an interrupt or a debug request the moment a data-side bus error is decided: the
+// access is then outstanding, the core cannot take the request before the response (an interrupt
+// or debug entry waits for ID to drain), and the request is pending when the error is reported.
+class core_ibex_mem_error_traps_test extends core_ibex_mem_error_test;
+
+  debug_new_seq debug_new_seq_h;
+  irq_new_seq   irq_new_seq_h;
+
+  // Error-synchronised debug requests per test (each one runs the debug program).
+  int unsigned  err_sync_debug_max = 20;
+
+  `uvm_component_utils(core_ibex_mem_error_traps_test)
+  `uvm_component_new
+
+  // On each data-side bus error: half the time an interrupt pulse, a quarter of the time a debug
+  // request pulse (up to err_sync_debug_max), otherwise nothing, so errors without a pending
+  // request stay in the mix.
+  virtual task raise_on_dside_error();
+    int unsigned n_dbg = 0;
+    forever begin
+      @(vseq.data_intf_seq.error_armed);
+      randcase
+        2: fork
+          begin
+            irq_new_seq irq_sync_h = irq_new_seq::type_id::create("irq_sync_h");
+            irq_sync_h.iteration_modes = SingleRun;
+            irq_sync_h.zero_delay_pct = 100;
+            irq_sync_h.min_delay = 50;
+            irq_sync_h.max_delay = 300;
+            irq_sync_h.no_nmi = 1'b1;  // see send_stimulus()
+            irq_sync_h.start(env.vseqr.irq_seqr);
+          end
+        join_none
+        1: if (n_dbg < err_sync_debug_max) begin
+          n_dbg++;
+          fork
+            begin
+              dut_vif.dut_cb.debug_req <= 1'b1;
+              clk_vif.wait_clks($urandom_range(20, 200));
+              dut_vif.dut_cb.debug_req <= 1'b0;
+            end
+          join_none
+        end
+        1: ;
+      endcase
+    end
+  endtask
+
+  virtual task send_stimulus();
+    `DV_CHECK_FATAL(cfg.require_signature_addr, "+require_signature_addr=1 is mandatory for this test.")
+
+    irq_new_seq_h   = irq_new_seq::type_id::create("irq_new_seq_h", this);
+    debug_new_seq_h = debug_new_seq::type_id::create("debug_new_seq_h", this);
+
+    irq_new_seq_h.iteration_modes = InfiniteRuns;
+    irq_new_seq_h.stimulus_delay_cycles_min = 300;
+    irq_new_seq_h.stimulus_delay_cycles_max = 1500;
+    irq_new_seq_h.zero_delay_pct = 10;
+    // No NMIs, as in core_ibex_irq_traps_test: Ibex takes an NMI with MIE=0, and the riscv-dv trap
+    // handlers are not NMI-reentrant. An NMI between the kernel-stack decrement and the end of the
+    // register save overlaps the two frames; the outer handler restores a clobbered sp, its pushes
+    // then land on .text and the program runs the overwritten code, which the DUT (ICache, no
+    // fence.i) and Spike legally see differently (riscv_mem_error_traps_test 28607, 2026-10-09).
+    // cp_irq_pending also counts ordinary pending interrupts with MIE=0, so the targeted
+    // exception_stall_instr_cross bins stay reachable.
+    irq_new_seq_h.no_nmi = 1'b1;
+    debug_new_seq_h.iteration_modes = MultipleRuns;
+    debug_new_seq_h.iteration_cnt_max = 10;
+    debug_new_seq_h.pulse_length_cycles_min = 3000;
+    debug_new_seq_h.pulse_length_cycles_max = 5000;
+    debug_new_seq_h.stimulus_delay_cycles_min = 5000;
+    debug_new_seq_h.stimulus_delay_cycles_max = 8000;
+    debug_new_seq_h.zero_delay_pct = 0;
+
+    `uvm_info(`gfn, "Running core_ibex_mem_error_traps_test", UVM_LOW)
+    fork
+      vseq.start(env.vseqr);
+      begin
+        wait_for_core_setup();
+        clk_vif.wait_clks(50);
+        // check_stimulus() is what starts the memory error injection in
+        // core_ibex_mem_error_test; the base send_stimulus() calls it, this override must too.
+        fork
+          check_stimulus();
+          debug_new_seq_h.start(env.vseqr.irq_seqr);
+          irq_new_seq_h.start(env.vseqr.irq_seqr);
+          raise_on_dside_error();
+        join_none
+      end
+    join_any
+  endtask
+
+endclass
+
 // U-mode mstatus.tw test class
 class core_ibex_umode_tw_test extends core_ibex_directed_test;
 
@@ -2110,6 +2242,594 @@ class core_ibex_assorted_traps_interrupts_debug_test extends core_ibex_directed_
 
 endclass
 
+// Interrupts only, as stimulus (no per-interrupt checks): core_ibex_assorted_traps_interrupts_debug_test
+// without its debug-request generator. For random-PMP programs: Ibex exempts the debug module
+// address range from PMP in debug mode and Spike does not, so a random PMP configuration that
+// denies execute on the debug ROM makes every debug entry a cosim mismatch (riscv_pmp_traps_test
+// seeds 1 and 3, 2026-10-04).
+class core_ibex_irq_traps_test extends core_ibex_assorted_traps_interrupts_debug_test;
+
+  `uvm_component_utils(core_ibex_irq_traps_test)
+  `uvm_component_new
+
+  virtual task send_stimulus();
+    `DV_CHECK_FATAL(cfg.require_signature_addr, "+require_signature_addr=1 is mandatory for this test.")
+
+    irq_new_seq_h = irq_new_seq::type_id::create("irq_new_seq_h", this);
+    irq_new_seq_h.iteration_modes = InfiniteRuns;
+    irq_new_seq_h.stimulus_delay_cycles_min = 300;
+    irq_new_seq_h.stimulus_delay_cycles_max = 1500;
+    irq_new_seq_h.zero_delay_pct = 10;
+    // No NMIs: Ibex takes an NMI even with MIE=0, and the riscv-dv trap handlers are not
+    // NMI-reentrant. An NMI between the kernel-stack decrement and the end of the register save
+    // overlaps the two frames; the outer handler then restores clobbered registers and a stray
+    // store patches .text (riscv_pmp_traps_test 24870, 24886, 2026-10-06). NMIs are covered by
+    // riscv_nmi_at_exc_test and the NMI tests with their own handlers.
+    irq_new_seq_h.no_nmi = 1'b1;
+
+    `uvm_info(`gfn, "Running core_ibex_irq_traps_test", UVM_LOW)
+    fork
+      vseq.start(env.vseqr);
+      begin
+        // Not wait_for_core_setup(): with a random PMP configuration the program can trap during
+        // its own initialisation, so the first signature write is an exception status (8), not
+        // INITIALIZED, and the handshake check fails (riscv_pmp_traps_test, 17 of 50 seeds,
+        // 2026-10-04). riscv_pmp_full_random_test never checks that handshake either. Start the
+        // interrupts after a fixed delay instead, well past the program's setup code.
+        clk_vif.wait_clks(2000);
+        fork
+          irq_new_seq_h.start(env.vseqr.irq_seqr);
+        join_none
+      end
+    join_any
+  endtask
+
+endclass
+
+// NMIs while an excepting instruction is in ID: ECALL, EBREAK (exception, no debug section) or an
+// illegal instruction. An interrupt is taken only with ID empty, ahead of the instruction there,
+// so an NMI pending while such an instruction waits in ID is taken with that instruction as the
+// last category -- the nmi = 1 bins of uarch_cg.interrupt_taken_instr_cross that random NMIs
+// reach only by chance. The NMI is raised the cycle the instruction is seen in ID; when the
+// instruction leaves ID before the NMI arrives it is an ordinary random NMI. Stimulus only, as
+// core_ibex_irq_traps_test: the cosim checks every trap.
+class core_ibex_nmi_at_exc_test extends core_ibex_irq_traps_test;
+
+  `uvm_component_utils(core_ibex_nmi_at_exc_test)
+  `uvm_component_new
+
+  // ECALL, EBREAK, C.EBREAK or an illegal instruction is in ID.
+  function bit excepting_in_id();
+    if (!instr_vif.instr_cb.valid_id) return 1'b0;
+    if (dut_vif.illegal_instr) return 1'b1;
+    if (instr_vif.instr_cb.is_compressed_id) return instr_vif.instr_cb.instr_compressed_id == 16'h9002;
+    return instr_vif.instr_cb.instr_id inside {32'h0000_0073, 32'h0010_0073};
+  endfunction
+
+  virtual task nmi_at_exc();
+    forever begin
+      clk_vif.wait_clks(1);
+      if (!excepting_in_id()) continue;
+      // One in two: the rest keep excepting instructions without an NMI in the mix.
+      if ($urandom_range(0, 1)) begin
+        nmi_pulse_seq nmi_h = nmi_pulse_seq::type_id::create("nmi_h");
+        nmi_h.iteration_modes = SingleRun;
+        nmi_h.zero_delay_pct = 100;
+        nmi_h.min_delay = 20;
+        nmi_h.max_delay = 100;
+        nmi_h.start(env.vseqr.irq_seqr);
+      end
+      // Past this instruction and its trap before looking again.
+      clk_vif.wait_clks(50);
+    end
+  endtask
+
+  virtual task send_stimulus();
+    `DV_CHECK_FATAL(cfg.require_signature_addr, "+require_signature_addr=1 is mandatory for this test.")
+
+    irq_new_seq_h = irq_new_seq::type_id::create("irq_new_seq_h", this);
+    irq_new_seq_h.iteration_modes = InfiniteRuns;
+    irq_new_seq_h.stimulus_delay_cycles_min = 1000;
+    irq_new_seq_h.stimulus_delay_cycles_max = 3000;
+    irq_new_seq_h.zero_delay_pct = 10;
+    irq_new_seq_h.no_nmi = 1'b1;
+
+    `uvm_info(`gfn, "Running core_ibex_nmi_at_exc_test", UVM_LOW)
+    fork
+      vseq.start(env.vseqr);
+      begin
+        clk_vif.wait_clks(2000);
+        fork
+          irq_new_seq_h.start(env.vseqr.irq_seqr);
+          nmi_at_exc();
+        join_none
+      end
+    join_any
+  endtask
+
+endclass
+
+// Raises (raise = 1) or drops (raise = 0) irq_nm_i and leaves the maskable lines alone, so a timer
+// that irq_timer_hold_seq holds stays as it is. core_ibex_stall_events_test holds an NMI with it
+// until the core takes it.
+class nmi_level_seq extends uvm_sequence #(irq_seq_item);
+
+  `uvm_object_utils(nmi_level_seq)
+  `uvm_object_new
+
+  bit raise;
+
+  virtual task body();
+    irq_seq_item irq;
+    irq = irq_seq_item::type_id::create("irq");
+    irq.drive_maskable = 1'b0;
+    start_item(irq);
+    `DV_CHECK_RANDOMIZE_WITH_FATAL(irq, num_of_interrupt == int'(raise); irq_nm == raise;)
+    finish_item(irq);
+    get_response(irq);
+  endtask
+
+endclass
+
+// Debug requests, NMIs, a held timer interrupt and fetch-enable drops raised at chosen pipeline
+// events (core_ibex_dut_probe_if), for the timing-dependent bins of uarch_cg that free-running
+// generators reach only by chance. A debug request or interrupt that is pending before an
+// instruction reaches ID halts IF, so ID is empty by the time a stall or fault is seen; these
+// triggers raise it while the instruction is already there. Every trigger is off unless its
+// plusarg is given:
+//   +dbg_on_stall_pct=<n>       an instruction stays in ID into the next cycle (id_instr_held):
+//                               debug_req from that next cycle on, n% of such cycles
+//   +dbg_on_pmp_err_pct=<n>     a PMP-blocked data access reports its error next cycle
+//                               (lsu_pmp_err_next): debug_req in exactly the report cycle, the
+//                               first cycle of the next instruction in ID
+//   +dbg_on_dside_err_pct=<n>   the d-side response sequence decides a bus error (error_armed, the
+//                               cycle after the grant): debug_req from that cycle on
+//   +dbg_after_flush_pct=<n>    a trap FLUSH holds a load/store stalled on memory in ID (FLUSH and
+//   +nmi_after_flush_pct=<n>    id_stall_mem): debug_req or an NMI pulse that arrives in the second
+//                               DECODE cycle after it, while ID is still empty, so the entry sees
+//                               category None just unstalled
+//   +fetch_off_on_stall_pct=<n> an instruction stays in ID: fetch_enable_i off for 1-4 cycles, IF
+//                               idle while ID holds it
+//   +irq_timer_on_wfi=1         the first WFI seen in ID raises irq_timer_i and holds it high to the
+//                               end; the program masks it with mie / mstatus.MIE from then on
+//   +dbg_req_on_write=<hex>     every store to <hex> raises a debug request (a program doorbell)
+//   +dbg_gap_min/max=<n>        quiet cycles after a debug exit before the next triggered request
+//                               (default 20 / 200)
+//   +gnt_trig_lo/hi=<hex>       a data-side grant of a word in [lo, hi] (the bus monitor's address
+//                               phase, so independent of how long the access then takes) acts on
+//                               the bits of its offset from lo, which the program chooses:
+//                               0x10 debug_req from the cycle after the grant (the first cycle of
+//                               the next instruction in ID); 0x20 an NMI from the second cycle after
+//                               it, held until the core takes it (IRQ_TAKEN), then dropped; 0x40
+//                               fetch_enable_i off from the second cycle after it for
+//                               +gnt_fetch_off_cycles (default 40). Combine with +dside_bus_err_lo/hi
+//                               over part of the window for faulting triggers.
+//   +mem_mode_on_write=<hex>    a store of V to <hex> sets the memory agents' timing for later
+//                               accesses: V[7:0] = 0 the run's own data-side delays, 1 no data-side
+//                               delays, n in 2..29 data-side responses n to 2n+4 cycles after the
+//                               grant; V[8] = 1 no instruction-side delays, 0 the run's own;
+//                               V[23:16] = m in 2..125 instead: instruction-side responses m to
+//                               2m+4 cycles apart (the response driver serves them in order, each
+//                               delay counted from the one before), so the core waits at least m
+//                               cycles for every fetched word. Takes effect after that store's
+//                               response.
+//   With +gnt_trig_lo/hi and +mem_mode_on_write the program times the event against its own
+//   instructions, so these triggers are not held back by the start-up rule below.
+// With +irq_timer_on_wfi or +dbg_req_on_write the program is one that sets itself up first (its
+// debug handler's registers, PMP), so the stall and fetch-off triggers, the only ones a start-up
+// can produce, are held off until the first WFI in ID or the first doorbell write, whichever
+// comes first. Without either plusarg they run from reset. The WFI that +irq_timer_on_wfi serves
+// is also left alone by them until the core has slept on it: a debug request while it waits in
+// ID would send FLUSH to DBG_TAKEN_IF instead of WAIT_SLEEP, and lose the irq_wfi_cross
+// enter_sleep bin the timer interrupt is raised for.
+// Checks: every debug request raised is taken, debug mode within +dbg_entry_timeout cycles
+// (default 2000) -- a halt request must halt the hart (RISC-V Debug Spec 4.1); and every trigger
+// that is enabled fired at least once, as a trigger that never fired means the program never
+// produced its event and none of the bins it is for could be reached. The program checks the rest
+// (directed_tests/pmp_fault_hazard).
+class core_ibex_stall_events_test extends core_ibex_base_test;
+
+  `uvm_component_utils(core_ibex_stall_events_test)
+  `uvm_component_new
+
+  int unsigned dbg_on_stall_pct;
+  int unsigned dbg_on_pmp_err_pct;
+  int unsigned dbg_on_dside_err_pct;
+  int unsigned dbg_after_flush_pct;
+  int unsigned nmi_after_flush_pct;
+  int unsigned fetch_off_on_stall_pct;
+  bit          irq_timer_on_wfi;
+  bit [31:0]   dbg_req_on_write;
+  int unsigned dbg_gap_min = 20;
+  int unsigned dbg_gap_max = 200;
+  int unsigned dbg_entry_timeout = 2000;
+  bit [31:0]   gnt_trig_lo, gnt_trig_hi;
+  bit          gnt_trig_en;
+  int unsigned gnt_fetch_off_cycles = 40;
+  bit [31:0]   mem_mode_on_write;
+
+  // Debug requests raised, per trigger; NMI pulses; fetch-enable drops.
+  int unsigned n_dbg[string];
+  int unsigned n_nmi;
+  int unsigned n_fetch_off;
+  // Grants in the +gnt_trig window; NMIs held and fetch-enable drops they raised; mode changes.
+  int unsigned n_gnt_trig;
+  int unsigned n_gnt_nmi;
+  int unsigned n_gnt_fetch_off;
+  int unsigned n_mem_mode;
+  // The run's own memory-agent timing, restored by +mem_mode_on_write V[7:0] = 0 / V[8] = 0.
+  bit          dmem_zero_delays_orig, imem_zero_delays_orig;
+  int unsigned dmem_valid_min_orig, dmem_valid_max_orig;
+  int unsigned imem_valid_min_orig, imem_valid_max_orig;
+  bit          timer_raised;
+  bit          dbg_busy;
+  bit          nmi_busy;
+  bit          fetch_off_busy;
+  // Stall and fetch-off triggers enabled: from reset, or from the program's first WFI in ID or
+  // first doorbell write when +irq_timer_on_wfi / +dbg_req_on_write says it has a start-up.
+  bit          program_ready;
+  // The core has been in SLEEP: the WFI +irq_timer_on_wfi serves has reached it.
+  bit          wfi_slept;
+
+  uvm_tlm_analysis_fifo #(ibex_mem_intf_seq_item) doorbell_port;
+  // Data-side address phases (request and grant), for +gnt_trig_lo/hi.
+  uvm_tlm_analysis_fifo #(ibex_mem_intf_seq_item) dgnt_port;
+
+  virtual function void build_phase(uvm_phase phase);
+    super.build_phase(phase);
+    void'($value$plusargs("dbg_on_stall_pct=%0d", dbg_on_stall_pct));
+    void'($value$plusargs("dbg_on_pmp_err_pct=%0d", dbg_on_pmp_err_pct));
+    void'($value$plusargs("dbg_on_dside_err_pct=%0d", dbg_on_dside_err_pct));
+    void'($value$plusargs("dbg_after_flush_pct=%0d", dbg_after_flush_pct));
+    void'($value$plusargs("nmi_after_flush_pct=%0d", nmi_after_flush_pct));
+    void'($value$plusargs("fetch_off_on_stall_pct=%0d", fetch_off_on_stall_pct));
+    void'($value$plusargs("irq_timer_on_wfi=%0d", irq_timer_on_wfi));
+    void'($value$plusargs("dbg_req_on_write=%h", dbg_req_on_write));
+    void'($value$plusargs("dbg_gap_min=%0d", dbg_gap_min));
+    void'($value$plusargs("dbg_gap_max=%0d", dbg_gap_max));
+    void'($value$plusargs("dbg_entry_timeout=%0d", dbg_entry_timeout));
+    gnt_trig_en = $value$plusargs("gnt_trig_lo=%h", gnt_trig_lo) &&
+                  $value$plusargs("gnt_trig_hi=%h", gnt_trig_hi);
+    void'($value$plusargs("gnt_fetch_off_cycles=%0d", gnt_fetch_off_cycles));
+    void'($value$plusargs("mem_mode_on_write=%h", mem_mode_on_write));
+    if (dbg_gap_max < dbg_gap_min) dbg_gap_max = dbg_gap_min;
+    program_ready = !irq_timer_on_wfi && (dbg_req_on_write == 0);
+    doorbell_port = new("doorbell_port", this);
+    dgnt_port = new("dgnt_port", this);
+  endfunction
+
+  virtual function void connect_phase(uvm_phase phase);
+    super.connect_phase(phase);
+    if (dbg_req_on_write != 0 || mem_mode_on_write != 0) begin
+      env.data_if_response_agent.monitor.item_collected_port.connect(doorbell_port.analysis_export);
+    end
+    if (gnt_trig_en) begin
+      env.data_if_response_agent.monitor.addr_ph_port.connect(dgnt_port.analysis_export);
+    end
+  endfunction
+
+  function bit roll(int unsigned pct);
+    return (pct != 0) && ($urandom_range(99) < pct);
+  endfunction
+
+  function int unsigned n_dbg_of(string why);
+    return n_dbg.exists(why) ? n_dbg[why] : 0;
+  endfunction
+
+  // Raise debug_req. Called in the time step of a dut_cb clocking event, so the request is seen
+  // from the cycle that event starts. Nothing is raised while a request is in progress or the core
+  // is in debug mode.
+  task automatic request_debug(string why, output bit raised);
+    raised = 1'b0;
+    if (dbg_busy || dut_vif.dut_cb.debug_mode) return;
+    dbg_busy = 1'b1;
+    raised = 1'b1;
+    dut_vif.dut_cb.debug_req <= 1'b1;
+    n_dbg[why] = n_dbg_of(why) + 1;
+    fork
+      serve_debug_request(why);
+    join_none
+  endtask
+
+  // Hold the request until the core is in debug mode, then wait for the handler's dret and a quiet
+  // gap before the next request may be raised.
+  task automatic serve_debug_request(string why);
+    int unsigned waited = 0;
+    while (dut_vif.dut_cb.debug_mode !== 1'b1 && !test_done) begin
+      @(dut_vif.dut_cb);
+      if (++waited > dbg_entry_timeout) begin
+        `uvm_error(`gfn, $sformatf("debug_req (%0s) held for %0d cycles without debug mode entry",
+                                   why, dbg_entry_timeout))
+        break;
+      end
+    end
+    dut_vif.dut_cb.debug_req <= 1'b0;
+    while (dut_vif.dut_cb.debug_mode === 1'b1 && !test_done) @(dut_vif.dut_cb);
+    repeat ($urandom_range(dbg_gap_min, dbg_gap_max)) @(dut_vif.dut_cb);
+    dbg_busy = 1'b0;
+  endtask
+
+  // The stall and fetch-off triggers may act on the instruction held in ID: not before the program
+  // is ready, and not on the WFI the timer interrupt is for until the core has slept on it.
+  function bit stall_triggers_allowed();
+    if (!program_ready) return 1'b0;
+    if (irq_timer_on_wfi && !wfi_slept && dut_vif.dut_cb.wfi === 1'b1) return 1'b0;
+    return 1'b1;
+  endfunction
+
+  task automatic watch_pipeline();
+    bit raised;
+    forever begin
+      @(dut_vif.dut_cb);
+      if (test_done) return;
+      if (dut_vif.dut_cb.reset) continue;
+      if (dut_vif.dut_cb.ctrl_fsm_cs == ibex_pkg::SLEEP) wfi_slept = 1'b1;
+      if (dut_vif.dut_cb.lsu_pmp_err_next) begin
+        if (roll(dbg_on_pmp_err_pct)) request_debug("pmp_err", raised);
+      end else if (dut_vif.dut_cb.id_instr_held && stall_triggers_allowed()) begin
+        if (roll(dbg_on_stall_pct)) request_debug("stall", raised);
+        if (!fetch_off_busy && roll(fetch_off_on_stall_pct)) fetch_off();
+      end
+      if (dut_vif.dut_cb.ctrl_fsm_cs == ibex_pkg::FLUSH && dut_vif.dut_cb.id_stall_mem) begin
+        if (roll(dbg_after_flush_pct)) begin
+          fork after_flush_debug(); join_none
+        end else if (!nmi_busy && roll(nmi_after_flush_pct)) begin
+          fork after_flush_nmi(); join_none
+        end
+      end
+    end
+  endtask
+
+  // The FLUSH cycle has just ended and the first DECODE (ID empty) starts. A request seen there
+  // is taken with the flushed load/store as the last category, so raise it for the second DECODE
+  // cycle (1 in 4: the third, in case the handler's first instruction is not there yet).
+  task automatic after_flush_debug();
+    bit raised;
+    repeat (($urandom_range(3) == 0) ? 2 : 1) @(dut_vif.dut_cb);
+    request_debug("after_flush", raised);
+  endtask
+
+  // The irq agent drives on the falling edge after the next clock event, so a pulse started now is
+  // seen from the middle of the second DECODE cycle after the FLUSH (1 in 4: one cycle later). Two
+  // cycles long: taken there, or after the handler's first instruction, or not at all.
+  task automatic after_flush_nmi();
+    nmi_pulse_seq nmi_h;
+    nmi_busy = 1'b1;
+    if ($urandom_range(3) == 0) @(dut_vif.dut_cb);
+    nmi_h = nmi_pulse_seq::type_id::create("nmi_after_flush_h");
+    nmi_h.iteration_modes = SingleRun;
+    nmi_h.zero_delay_pct = 100;
+    nmi_h.min_delay = 2;
+    nmi_h.max_delay = 2;
+    n_nmi++;
+    nmi_h.start(env.vseqr.irq_seqr);
+    nmi_busy = 1'b0;
+  endtask
+
+  task automatic fetch_off();
+    fetch_off_busy = 1'b1;
+    n_fetch_off++;
+    dut_vif.dut_cb.fetch_enable <= ibex_pkg::IbexMuBiOff;
+    fork
+      begin
+        repeat ($urandom_range(1, 4)) @(dut_vif.dut_cb);
+        // After test_done the base test turns fetch off for good; leave it off.
+        if (!test_done) dut_vif.dut_cb.fetch_enable <= ibex_pkg::IbexMuBiOn;
+        fetch_off_busy = 1'b0;
+      end
+    join_none
+  endtask
+
+  // +gnt_trig offset bit 0x20: irq_nm_i from the second cycle after the grant (the irq agent drives
+  // on the falling edge after its next clock event), held until the core takes it, so it is taken
+  // at the first point it can be: with the triggering access's instruction or a later one waiting
+  // in ID, after they leave (the ID stage is empty when an interrupt is taken).
+  task automatic nmi_until_taken();
+    nmi_level_seq nmi_h;
+    int unsigned  waited = 0;
+    nmi_busy = 1'b1;
+    n_gnt_nmi++;
+    nmi_h = nmi_level_seq::type_id::create("nmi_gnt_raise_h");
+    nmi_h.raise = 1'b1;
+    nmi_h.start(env.vseqr.irq_seqr);
+    do begin
+      @(dut_vif.dut_cb);
+      if (++waited > dbg_entry_timeout) begin
+        `uvm_error(`gfn, $sformatf("NMI (+gnt_trig) held for %0d cycles without being taken",
+                                   dbg_entry_timeout))
+        break;
+      end
+    end while (dut_vif.dut_cb.ctrl_fsm_cs != ibex_pkg::IRQ_TAKEN && !test_done);
+    nmi_h = nmi_level_seq::type_id::create("nmi_gnt_drop_h");
+    nmi_h.raise = 1'b0;
+    nmi_h.start(env.vseqr.irq_seqr);
+    nmi_busy = 1'b0;
+  endtask
+
+  // +gnt_trig offset bit 0x40: fetch_enable_i off from the second cycle after the grant. One cycle
+  // later than debug_req, so that an instruction after the access that redirects the PC (a jump in
+  // the next cycle) still has its target looked up before fetching stops.
+  task automatic gnt_fetch_off();
+    fetch_off_busy = 1'b1;
+    n_gnt_fetch_off++;
+    @(dut_vif.dut_cb);
+    dut_vif.dut_cb.fetch_enable <= ibex_pkg::IbexMuBiOff;
+    repeat (gnt_fetch_off_cycles) @(dut_vif.dut_cb);
+    // After test_done the base test turns fetch off for good; leave it off.
+    if (!test_done) dut_vif.dut_cb.fetch_enable <= ibex_pkg::IbexMuBiOn;
+    fetch_off_busy = 1'b0;
+  endtask
+
+  // Wakes in the time step of the data monitor's clocking event for the grant, as dut_cb's, so a
+  // debug request raised here is seen from the cycle after the grant.
+  task automatic watch_gnt_trigger();
+    ibex_mem_intf_seq_item txn;
+    bit [31:0]             off;
+    bit                    raised;
+    forever begin
+      dgnt_port.get(txn);
+      if (test_done) return;
+      if (!(txn.addr inside {[gnt_trig_lo : gnt_trig_hi]})) continue;
+      off = txn.addr - gnt_trig_lo;
+      n_gnt_trig++;
+      if (off[4]) begin
+        request_debug("gnt", raised);
+        if (!raised) begin
+          `uvm_error(`gfn, $sformatf("+gnt_trig: grant of 0x%08h asks for a debug request, but one is still in progress",
+                                     txn.addr))
+        end
+      end
+      if (off[5]) begin
+        if (nmi_busy) begin
+          `uvm_error(`gfn, $sformatf("+gnt_trig: grant of 0x%08h asks for an NMI, but one is still held",
+                                     txn.addr))
+        end else begin
+          fork nmi_until_taken(); join_none
+        end
+      end
+      if (off[6]) begin
+        if (fetch_off_busy) begin
+          `uvm_error(`gfn, $sformatf("+gnt_trig: grant of 0x%08h asks for a fetch-enable drop, but one is in progress",
+                                     txn.addr))
+        end else begin
+          fork gnt_fetch_off(); join_none
+        end
+      end
+    end
+  endtask
+
+  task automatic watch_dside_errors();
+    bit raised;
+    forever begin
+      // Fires in the time step of the monitor's clocking event for the grant, as dut_cb's.
+      @(vseq.data_intf_seq.error_armed);
+      if (test_done) return;
+      if (roll(dbg_on_dside_err_pct)) request_debug("dside_err", raised);
+    end
+  endtask
+
+  task automatic raise_timer_on_wfi();
+    irq_timer_hold_seq timer_h;
+    do @(dut_vif.dut_cb); while (dut_vif.dut_cb.wfi !== 1'b1);
+    program_ready = 1'b1;
+    timer_h = irq_timer_hold_seq::type_id::create("irq_timer_hold_h");
+    timer_h.start(env.vseqr.irq_seqr);
+    timer_raised = 1'b1;
+    `uvm_info(`gfn, "WFI in ID: irq_timer_i raised and held", UVM_LOW)
+  endtask
+
+  // +mem_mode_on_write: see the class header. The response sequence reads dmem_cfg / imem_cfg for
+  // every access it answers (ibex_mem_intf_response_seq, _driver), so this applies from the next
+  // one. Data-side response delays n..2n+4 keep every range of the sequence's delay distribution
+  // non-empty (valid_delay_min + 1 <= valid_delay_max / 2 - 1).
+  function automatic void set_mem_mode(bit [31:0] v);
+    n_mem_mode++;
+    unique case (v[7:0]) inside
+      8'd0: begin
+        dmem_cfg.zero_delays     = dmem_zero_delays_orig;
+        dmem_cfg.valid_delay_min = dmem_valid_min_orig;
+        dmem_cfg.valid_delay_max = dmem_valid_max_orig;
+      end
+      8'd1: begin
+        dmem_cfg.zero_delays     = 1'b1;
+      end
+      [8'd2:8'd29]: begin
+        dmem_cfg.zero_delays     = 1'b0;
+        dmem_cfg.valid_delay_min = v[7:0];
+        dmem_cfg.valid_delay_max = 2 * v[7:0] + 4;
+      end
+      default: begin
+        `uvm_fatal(`gfn, $sformatf("+mem_mode_on_write: data-side mode %0d is not 0, 1 or 2..29 (value 0x%08h)",
+                                   v[7:0], v))
+      end
+    endcase
+    unique case (v[23:16]) inside
+      8'd0: begin
+        imem_cfg.zero_delays     = v[8] ? 1'b1 : imem_zero_delays_orig;
+        imem_cfg.valid_delay_min = imem_valid_min_orig;
+        imem_cfg.valid_delay_max = imem_valid_max_orig;
+      end
+      [8'd2:8'd125]: begin
+        imem_cfg.zero_delays     = 1'b0;
+        imem_cfg.valid_delay_min = v[23:16];
+        imem_cfg.valid_delay_max = 2 * v[23:16] + 4;
+      end
+      default: begin
+        `uvm_fatal(`gfn, $sformatf("+mem_mode_on_write: instruction-side mode %0d is not 0 or 2..125 (value 0x%08h)",
+                                   v[23:16], v))
+      end
+    endcase
+    `uvm_info(`gfn, $sformatf("memory mode 0x%06h: dside zero_delays %0d, rvalid delay %0d..%0d; iside zero_delays %0d, rvalid delay %0d..%0d",
+                              v[23:0], dmem_cfg.zero_delays, dmem_cfg.valid_delay_min,
+                              dmem_cfg.valid_delay_max, imem_cfg.zero_delays,
+                              imem_cfg.valid_delay_min, imem_cfg.valid_delay_max), UVM_LOW)
+  endfunction
+
+  task automatic watch_doorbell();
+    ibex_mem_intf_seq_item txn;
+    bit                    raised;
+    forever begin
+      doorbell_port.get(txn);
+      if (txn.read_write != WRITE) continue;
+      if (mem_mode_on_write != 0 && txn.addr == mem_mode_on_write) begin
+        set_mem_mode(txn.data);
+        continue;
+      end
+      if (dbg_req_on_write == 0 || txn.addr != dbg_req_on_write) continue;
+      program_ready = 1'b1;
+      do begin
+        @(dut_vif.dut_cb);
+        if (test_done) return;
+        request_debug("doorbell", raised);
+      end while (!raised);
+    end
+  endtask
+
+  virtual task send_stimulus();
+    `uvm_info(`gfn, "Running core_ibex_stall_events_test", UVM_LOW)
+    dmem_zero_delays_orig = dmem_cfg.zero_delays;
+    dmem_valid_min_orig   = dmem_cfg.valid_delay_min;
+    dmem_valid_max_orig   = dmem_cfg.valid_delay_max;
+    imem_zero_delays_orig = imem_cfg.zero_delays;
+    imem_valid_min_orig   = imem_cfg.valid_delay_min;
+    imem_valid_max_orig   = imem_cfg.valid_delay_max;
+    fork
+      vseq.start(env.vseqr);
+      watch_pipeline();
+      if (dbg_on_dside_err_pct != 0) watch_dside_errors();
+      if (irq_timer_on_wfi) raise_timer_on_wfi();
+      if (dbg_req_on_write != 0 || mem_mode_on_write != 0) watch_doorbell();
+      if (gnt_trig_en) watch_gnt_trigger();
+    join_none
+  endtask
+
+  function void check_fired(string knob, int unsigned pct, int unsigned fired);
+    if (pct != 0 && fired == 0) begin
+      `uvm_error(`gfn, $sformatf("+%0s is set but its trigger never fired: the program never produced the event",
+                                 knob))
+    end
+  endfunction
+
+  virtual function void report_phase(uvm_phase phase);
+    super.report_phase(phase);
+    `uvm_info(`gfn, $sformatf("debug requests raised %p, NMI pulses %0d, fetch-enable drops %0d, timer raised %0d",
+                              n_dbg, n_nmi, n_fetch_off, timer_raised), UVM_LOW)
+    `uvm_info(`gfn, $sformatf("+gnt_trig grants %0d (NMIs held %0d, fetch-enable drops %0d), memory mode changes %0d",
+                              n_gnt_trig, n_gnt_nmi, n_gnt_fetch_off, n_mem_mode), UVM_LOW)
+    check_fired("gnt_trig_lo/hi", gnt_trig_en, n_gnt_trig);
+    check_fired("mem_mode_on_write", mem_mode_on_write != 0, n_mem_mode);
+    check_fired("dbg_on_stall_pct", dbg_on_stall_pct, n_dbg_of("stall"));
+    check_fired("dbg_on_pmp_err_pct", dbg_on_pmp_err_pct, n_dbg_of("pmp_err"));
+    check_fired("dbg_on_dside_err_pct", dbg_on_dside_err_pct, n_dbg_of("dside_err"));
+    check_fired("dbg_after_flush_pct", dbg_after_flush_pct, n_dbg_of("after_flush"));
+    check_fired("nmi_after_flush_pct", nmi_after_flush_pct, n_nmi);
+    check_fired("fetch_off_on_stall_pct", fetch_off_on_stall_pct, n_fetch_off);
+    check_fired("irq_timer_on_wfi", irq_timer_on_wfi, timer_raised);
+    check_fired("dbg_req_on_write", dbg_req_on_write != 0, n_dbg_of("doorbell"));
+  endfunction
+
+endclass
+
 class core_ibex_mcounteren_lock_test extends core_ibex_base_test;
   `uvm_component_utils(core_ibex_mcounteren_lock_test)
   `uvm_component_new
@@ -2148,5 +2868,284 @@ class core_ibex_mcounteren_lock_test extends core_ibex_base_test;
       end
     end
   endtask
+
+endclass
+
+// ---------------------------------------------------------------------------------------------
+// CHERIoT-mode trap, debug and memory-error tests. Each drives a self-checking directed program
+// in directed_tests/ (cheriot_irq_cheri, cheriot_debug_mode, cheriot_mem_err) that speaks the
+// riscv-dv signature handshake from a CHERIoT-correct trap handler.
+// ---------------------------------------------------------------------------------------------
+
+// Interrupts with cheriot_enable_i asserted (+enable_cheriot_seq=1, CHERIoT-Sail oracle on).
+//
+// Same flow as core_ibex_debug_intr_basic_test with +enable_irq_single_seq, with two changes:
+//  - Only timer, external and software interrupts. CHERIoT-Sail models neither NMI nor the ibex
+//    fast interrupts (its legalize_mie keeps only MEIE/MTIE/MSIE, and the scoreboard does not
+//    hand NMIs to the model), so either would make the oracle diverge rather than test anything.
+//  - mip is not read back by the handler. The CHERIoT-Sail DPI receives the DUT's pending bits
+//    only inside cheriot_sail_cosim_take_interrupt(), so a `csrr mip` reads the model's stale mip
+//    and mismatches. The interrupt identity is still checked through mcause, and that the line
+//    the agent raised is the one taken is checked against the agent's own transaction.
+class core_ibex_cheriot_irq_test extends core_ibex_debug_intr_basic_test;
+
+  `uvm_component_utils(core_ibex_cheriot_irq_test)
+  `uvm_component_new
+
+  int unsigned irqs_checked;
+
+  virtual function void build_phase(uvm_phase phase);
+    super.build_phase(phase);
+    if (!cfg.enable_cheriot_seq) begin
+      `uvm_fatal(`gfn, "core_ibex_cheriot_irq_test needs +enable_cheriot_seq=1")
+    end
+    if (cfg.enable_irq_nmi_seq || cfg.enable_nested_irq || cfg.enable_irq_multiple_seq) begin
+      `uvm_fatal(`gfn, {"core_ibex_cheriot_irq_test supports +enable_irq_single_seq only: ",
+                        "NMIs are not modelled by CHERIoT-Sail"})
+    end
+  endfunction
+
+  virtual task send_irq_stimulus(bit no_nmi = 1'b0, bit no_fast = 1'b0);
+    super.send_irq_stimulus(.no_nmi(1'b1), .no_fast(1'b1));
+  endtask
+
+  virtual task check_irq_handle();
+    // callee_id runs 150 loop iterations with MIE=0 (interrupt-disabling sentry): ~7.3k cycles
+    // at slow fetch latency before the IRQ can be taken, so 7500 timed out (seed 22756).
+    check_next_core_status(HANDLING_IRQ, "Core did not jump to the MTCC interrupt handler", 20000);
+    check_priv_mode(PRIV_LVL_M);
+    operating_mode = dut_vif.dut_cb.priv_mode;
+    wait_for_csr_write(CSR_MSTATUS, 5000);
+    mstatus = signature_data;
+    `DV_CHECK_EQ_FATAL(mstatus[12:11], PRIV_LVL_M, "mstatus.mpp is not M after the interrupt")
+    `DV_CHECK_EQ_FATAL(mstatus[7], 1'b1, "mstatus.mpie was not set to 1'b1 after entering handler")
+    `DV_CHECK_EQ_FATAL(mstatus[3], 1'b0, "mstatus.mie was not set to 1'b0 after entering handler")
+    check_mcause(1'b1, irq_id);
+    wait_for_csr_write(CSR_MIE, 5000);
+    mie = signature_data;
+    `DV_CHECK_EQ_FATAL(mie[irq_id], 1'b1,
+        $sformatf("mie[%0d] is not set, but core responded to corresponding interrupt", irq_id))
+    `DV_CHECK_EQ_FATAL(irq[irq_id], 1'b1,
+        $sformatf("core took interrupt %0d, which the agent did not raise (0x%0x)", irq_id, irq))
+    irqs_checked++;
+  endtask
+
+  virtual function void report_phase(uvm_phase phase);
+    super.report_phase(phase);
+    `uvm_info(`gfn, $sformatf("%0d CHERIoT-mode interrupts checked", irqs_checked), UVM_LOW)
+    if (irqs_checked == 0) begin
+      `uvm_error(`gfn, "No interrupt was taken and checked")
+    end
+  endfunction
+
+endclass
+
+// Debug mode with cheriot_enable_i asserted. Phase 1: one debug request, checked as in
+// send_debug_stimulus (IN_DEBUG_MODE, dcsr.prv, dcsr.cause = haltreq, dret); the program then
+// drives the deterministic ebreak/single-step/invalid-DEPCC scenarios itself. Phase 2 starts when
+// the program reports IN_MACHINE_MODE: random debug requests until the end of the test.
+class core_ibex_cheriot_debug_test extends core_ibex_directed_test;
+
+  `uvm_component_utils(core_ibex_cheriot_debug_test)
+  `uvm_component_new
+
+  virtual function void build_phase(uvm_phase phase);
+    super.build_phase(phase);
+    if (!cfg.enable_debug_seq || !cfg.require_signature_addr) begin
+      `uvm_fatal(`gfn, "core_ibex_cheriot_debug_test needs +enable_debug_seq=1 +require_signature_addr=1")
+    end
+  endfunction
+
+  virtual task check_stimulus();
+    send_debug_stimulus(init_operating_mode, "Core did not enter debug mode (CHERIoT mode)");
+    wait_for_core_status(IN_MACHINE_MODE);
+    `uvm_info(`gfn, "Program reached phase 2: starting random debug requests", UVM_LOW)
+    stress_debug();
+  endtask
+
+endclass
+
+// Bus and integrity errors with cheriot_enable_i asserted. The errors are injected by address
+// (the +{d,i}side_{bus,intg}_err_{lo,hi} windows of ibex_mem_intf_response_seq), so the program
+// alone decides which access sees one. Integrity errors raise alert_major_bus_o by design, so
+// NoAlertsTriggered is switched off and replaced by a narrower check: no minor or internal major
+// alert ever, and at least +cheriot_mem_err_min_bus_alerts (default 4, one per integrity probe in
+// cheriot_mem_err) bus-alert episodes.
+class core_ibex_cheriot_mem_err_test extends core_ibex_base_test;
+
+  `uvm_component_utils(core_ibex_cheriot_mem_err_test)
+  `uvm_component_new
+
+  int unsigned min_bus_alerts = 4;
+  int unsigned bus_alerts;
+  int unsigned other_alerts;
+
+  virtual task run_phase(uvm_phase phase);
+    void'($value$plusargs("cheriot_mem_err_min_bus_alerts=%0d", min_bus_alerts));
+    `DV_ASSERT_CTRL_REQ("tb_no_alerts_triggered", 1'b0)
+    fork
+      monitor_alerts();
+    join_none
+    super.run_phase(phase);
+  endtask
+
+  task monitor_alerts();
+    bit prev_bus;
+    forever begin
+      @(dut_vif.dut_cb);
+      if (dut_vif.dut_cb.alert_minor || dut_vif.dut_cb.alert_major_internal) begin
+        other_alerts++;
+      end
+      if (dut_vif.dut_cb.alert_major_bus && !prev_bus) bus_alerts++;
+      prev_bus = dut_vif.dut_cb.alert_major_bus;
+    end
+  endtask
+
+  virtual function void report_phase(uvm_phase phase);
+    super.report_phase(phase);
+    `uvm_info(`gfn, $sformatf("bus-alert episodes: %0d, other alert cycles: %0d",
+                              bus_alerts, other_alerts), UVM_LOW)
+    if (other_alerts != 0) begin
+      `uvm_error(`gfn, $sformatf("%0d cycles with a minor or internal major alert", other_alerts))
+    end
+    if (bus_alerts < min_bus_alerts) begin
+      `uvm_error(`gfn, $sformatf("Only %0d bus-alert episodes; every injected integrity error must raise alert_major_bus_o (expected >= %0d)",
+                                 bus_alerts, min_bus_alerts))
+    end
+  endfunction
+
+endclass
+
+// A trap taken while MTCC is untagged (directed_tests/cheriot_fatal_err_mtcc). The RTL records it
+// in the sticky cheriot_fatal_err_q (ibex_cs_registers.sv gen_scr: "fatal error condition
+// (unrecoverable, need external reset)") and raises alert_major_internal_o; the core is then stuck
+// re-trapping to the untagged MTCC and the program can never reach the signature handshake, so the
+// verdict is taken here. The program announces the trap with CORE_STATUS HANDLING_EXCEPTION;
+// from that point this test requires:
+//  - the first trap after the announcement is the program's ecall (mcause 11), within
+//    +cheriot_fatal_trap_timeout cycles, with alert_major_internal_o still low when it is taken;
+//  - alert_major_internal_o within +cheriot_fatal_alert_latency cycles of the trap, then held for
+//    +cheriot_fatal_hold_cycles cycles (sticky: nothing short of a reset clears it);
+//  - no alert of any kind before the announcement, and no minor or bus alert at any time.
+// It then ends the run (wait_for_custom_test_done, as core_ibex_mem_error_test does). The spec
+// leaves a trap through an untagged MTCC undefined (REQ_PER_03); the alert is the RTL's stated
+// design intent, checked here until the spec takes a position. NoAlertsTriggered is off for the
+// whole run, replaced by the checks above. The double-fault detector is off: every re-trap after
+// the first is a double fault by construction, and its fatal threshold would end the run first.
+class core_ibex_cheriot_fatal_err_test extends core_ibex_base_test;
+
+  `uvm_component_utils(core_ibex_cheriot_fatal_err_test)
+  `uvm_component_new
+
+  int unsigned trap_timeout  = 20000;
+  int unsigned alert_latency = 4;
+  int unsigned hold_cycles   = 2000;
+  bit          armed;
+  bit          checked;
+  int unsigned early_alert_cycles;
+  int unsigned other_alert_cycles;
+
+  virtual function void build_phase(uvm_phase phase);
+    super.build_phase(phase);
+    void'($value$plusargs("cheriot_fatal_trap_timeout=%0d", trap_timeout));
+    void'($value$plusargs("cheriot_fatal_alert_latency=%0d", alert_latency));
+    void'($value$plusargs("cheriot_fatal_hold_cycles=%0d", hold_cycles));
+    if (!cfg.enable_cheriot_seq && cfg.cheriot_enable_on_write == 0) begin
+      `uvm_fatal(`gfn, {"core_ibex_cheriot_fatal_err_test needs cheriot_enable_i On ",
+                        "(+enable_cheriot_seq=1 or +cheriot_enable_on_write)"})
+    end
+    cfg.enable_double_fault_detector = 1'b0;
+  endfunction
+
+  virtual task run_phase(uvm_phase phase);
+    `DV_ASSERT_CTRL_REQ("tb_no_alerts_triggered", 1'b0)
+    fork
+      monitor_alerts();
+    join_none
+    super.run_phase(phase);
+  endtask
+
+  task monitor_alerts();
+    forever begin
+      @(dut_vif.dut_cb);
+      if (dut_vif.dut_cb.reset) continue;
+      if (dut_vif.dut_cb.alert_minor || dut_vif.dut_cb.alert_major_bus) other_alert_cycles++;
+      if (dut_vif.dut_cb.alert_major_internal && !armed) early_alert_cycles++;
+    end
+  endtask
+
+  virtual task wait_for_custom_test_done();
+    bit                   trap_seen;
+    bit                   alert_up;
+    ibex_pkg::exc_cause_t cause;
+
+    wait_for_core_status(HANDLING_EXCEPTION);
+    armed = 1'b1;
+    `uvm_info(`gfn, "Program armed the trap through an untagged MTCC", UVM_LOW)
+
+    fork begin : isolation_fork
+      fork
+        begin
+          wait (dut_vif.csr_save_cause === 1'b1 && dut_vif.ctrl_fsm_cs == ibex_pkg::FLUSH);
+          trap_seen = 1'b1;
+        end
+        clk_vif.wait_clks(trap_timeout);
+      join_any
+      disable fork;
+    end join
+    if (!trap_seen) begin
+      `uvm_fatal(`gfn, $sformatf("No trap within %0d cycles of the program arming it",
+                                 trap_timeout))
+    end
+    cause = dut_vif.exc_cause;
+    if (cause != ibex_pkg::ExcCauseEcallMMode) begin
+      `uvm_error(`gfn, $sformatf({"First trap after arming has cause 0x%0x (irq_ext %0b, irq_int ",
+                                  "%0b), expected the program's ecall (11)"},
+                                 cause.lower_cause, cause.irq_ext, cause.irq_int))
+    end
+    if (dut_vif.alert_major_internal !== 1'b0) begin
+      `uvm_error(`gfn, "alert_major_internal_o was already high when the trap was taken")
+    end
+
+    for (int unsigned i = 0; i <= alert_latency; i++) begin
+      @(dut_vif.dut_cb);
+      if (dut_vif.dut_cb.alert_major_internal) begin
+        alert_up = 1'b1;
+        `uvm_info(`gfn, $sformatf("alert_major_internal_o raised %0d cycle(s) after the trap",
+                                  i + 1), UVM_LOW)
+        break;
+      end
+    end
+    if (!alert_up) begin
+      `uvm_error(`gfn, $sformatf({"Trap with an untagged MTCC: alert_major_internal_o not raised ",
+                                  "within %0d cycles (cheriot_fatal_err_q)"}, alert_latency))
+    end else begin
+      for (int unsigned i = 0; i < hold_cycles; i++) begin
+        @(dut_vif.dut_cb);
+        if (!dut_vif.dut_cb.alert_major_internal) begin
+          `uvm_error(`gfn, $sformatf({"alert_major_internal_o dropped %0d cycles after it was ",
+                                      "raised; the fatal error must hold until reset"}, i + 1))
+          break;
+        end
+      end
+    end
+    checked = 1'b1;
+    `uvm_info(`gfn, "Test done: fatal-error check on a trap through an untagged MTCC complete",
+              UVM_LOW)
+  endtask
+
+  virtual function void report_phase(uvm_phase phase);
+    super.report_phase(phase);
+    if (!checked) begin
+      `uvm_error(`gfn, "The run ended before the fatal-error check completed")
+    end
+    if (early_alert_cycles != 0) begin
+      `uvm_error(`gfn, $sformatf("alert_major_internal_o high for %0d cycles before the trap was armed",
+                                 early_alert_cycles))
+    end
+    if (other_alert_cycles != 0) begin
+      `uvm_error(`gfn, $sformatf("%0d cycles with a minor or bus alert", other_alert_cycles))
+    end
+  endfunction
 
 endclass

@@ -602,7 +602,7 @@ class pmp_ok_share_1_gen_class
     stream << "#if M_MODE_RWX";
     stream << "\n";
     stream << indent_str;
-    stream << "    asm volatile (\"csrw pmpaddr0, %0 \\n\" :: \"r\"((0x80000000 >> 2) | 0xfffff) : \"memory\");";
+    stream << "    asm volatile (\"csrw pmpaddr0, %0 \\n\" :: \"r\"((0x80000000 >> 2) | 0x1ffff) : \"memory\");";
     stream << "\n";
     stream << indent_str;
     stream << "    reg_t cfg0 = (PMP_R | PMP_W | PMP_X | PMP_NAPOT);";

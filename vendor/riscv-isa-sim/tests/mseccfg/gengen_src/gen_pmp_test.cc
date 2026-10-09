@@ -219,8 +219,37 @@ main()
                 }
             }
         } else {    // for invalid cfgs, start from 7
-            gen_class_2.set_addr_idx(7 + cur_files_count % (max_pmp - 7));
+            const int addr_idx = 7 + cur_files_count % (max_pmp - 7);
+            gen_class_2.set_addr_idx(addr_idx);
             gen_class_2.set_addr_offset(0x10000);
+
+            /*
+             * The skeleton locks PMP entries when MML is pre-set:
+             *
+             *     if (@pre_sec_mml:int@) {   // need to set L bit for M mode code access
+             *   #if M_MODE_RWX
+             *         cfg0 |= PMP_L;  cfg1 |= (PMP_L << 24);          // entries 0 and 7
+             *   #else
+             *         cfg1 |= ((PMP_L << 8) | (PMP_L << 16) | (PMP_L << 24));  // 5, 6 and 7
+             *   #endif
+             *     }
+             *
+             * Entry 7 is locked in BOTH branches. This else-branch picks its
+             * write-test target from 7 upwards, so when it picks 7 with MML set
+             * and RLB clear, the pmpaddr7 write is correctly ignored by the
+             * hardware -- a locked rule is immutable unless RLB permits bypass.
+             * pmpaddr_fail was never assigned in this branch, so the generated
+             * test expected the write to stick and reported TEST_FAIL when it
+             * did not.
+             *
+             * Observed on nyx 2026-09-24: 5 of the mml1 variants failed with
+             * ret=2 (expected_pmpaddr_fail != actual_pmpaddr_fail) while every
+             * mml0 sibling passed. Spike and Ibex agreed throughout -- zero
+             * cosim mismatches -- so the model was the test's, not the DUT's.
+             */
+            if (!pre_rlb && pre_mml && addr_idx == 7) {
+                pmpaddr_fail = 1;
+            }
             gen_class_2.set_cfg_idx((1 + cur_files_count % (max_pmp_cfg - 1)) * 2);   // for 2, 4, ..., 14
             gen_class_2.set_cfg_sub_idx((cur_files_count >> val) % 4);
             if (!pre_mml && (val & 0x3) == 0x2) { // b'00^10 = 10, RW=01

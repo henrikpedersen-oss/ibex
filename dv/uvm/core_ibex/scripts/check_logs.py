@@ -39,14 +39,24 @@ def compare_test_run(trr: TestRunResult) -> TestRunResult:
 
     # Process the Ibex trace to create a .csv
     # The format is suitable for ingestion by riscv-dv coverage collection
+    #
+    # A missing or empty trace is NOT failed here. Some tests legitimately retire
+    # no instructions: riscv_pc_intg_test forces pc_if_o, releases it, and ends
+    # at ~5020ns, so the tracer never emits a line and this raised
+    #   [FAILED]: Processing the ibex trace failed: Logfile ... not found
+    # against a simulation that had printed "--- RISC-V UVM TEST PASSED ---" with
+    # UVM_FATAL: 0. That cost two false failures in the 2026-09-23 regression.
+    #
+    # The UVM log is the authority on whether the test passed, so defer to it:
+    # remember the trace problem and only report it if the UVM log does not show
+    # a clean pass. A trace that is missing because the test died early will
+    # still be caught, because the UVM log will not be clean in that case.
+    trace_failure = None
     try:
         logger.debug(f"About to do Log processing: {trr.rtl_trace}")
         process_ibex_sim_log(trr.rtl_trace, trr.dir_test/'rtl_trace.csv')
     except (OSError, RuntimeError) as e:
-        trr.passed = False
-        trr.failure_mode = Failure_Modes.FILE_ERROR
-        trr.failure_message = f"[FAILED]: Processing the ibex trace failed: {e}\n"
-        return trr
+        trace_failure = e
 
     # Process the test's UVM log.
     # Report a failure if an issue is seen.
@@ -74,9 +84,22 @@ def compare_test_run(trr: TestRunResult) -> TestRunResult:
                 "---------------*LOG-EXTRACT*----------------\n" + \
                 "\n".join(uvm_log_lines) + "\n" + \
                 "--------------------------------------------\n"
+        if trace_failure is not None:
+            # The UVM log already failed this test; surface the trace problem
+            # too, since a missing trace often accompanies an early death and is
+            # a useful clue about how far the test got.
+            trr.failure_message += \
+                f"[NOTE]: the ibex trace could also not be processed: {trace_failure}\n"
         return trr
 
-    # If we got this far then the test has passed.
+    # If we got this far then the test has passed. A trace that could not be
+    # processed is reported but does not fail the test -- see the note above.
+    if trace_failure is not None:
+        logger.info(f"{trr.testdotseed}: simulation passed but the ibex trace could not "
+                    f"be processed ({trace_failure}). This is expected for tests "
+                    "that retire no instructions; no coverage will be collected "
+                    "for this run.")
+
     trr.passed = True
     return trr
 

@@ -93,8 +93,18 @@ interface core_ibex_pmp_fcov_if import ibex_pkg::*; #(
   assign csr_wdata_mseccfg_mmwp = cs_registers_i.csr_wdata_int[CSR_MSECCFG_MMWP_BIT];
   assign csr_wdata_mseccfg_mml = cs_registers_i.csr_wdata_int[CSR_MSECCFG_MML_BIT];
 
+  // As in core_ibex_fcov_if: the bind also lands in the lockstep shadow core, which would sample
+  // the same hits a few cycles late and double the denominator. Main core only.
+  function automatic bit fcov_in_shadow_core();
+    string path = $sformatf("%m");
+    for (int i = 0; i + 13 <= path.len(); i++) begin
+      if (path.substr(i, i + 12) == "u_shadow_core") return 1'b1;
+    end
+    return 1'b0;
+  endfunction
+
   initial begin
-    if (PMPEnable) begin
+    if (PMPEnable && !fcov_in_shadow_core()) begin
       void'($value$plusargs("enable_ibex_fcov=%d", en_pmp_fcov));
     end else begin
       en_pmp_fcov = 1'b0;
@@ -525,12 +535,14 @@ interface core_ibex_pmp_fcov_if import ibex_pkg::*; #(
     for (genvar c = 0; c < PMPNumChan; c++) begin : g_pmp_channel_access_check
       assign access_check_into_dm[c] = (g_pmp.pmp_req_addr[c][31:0] & ~DmAddrMask) == DmBaseAddr;
     end
+    // Each channel's attempt from its own check: the PMP_I and PMP_D indices were swapped, so the
+    // 'fetch' coverpoints counted loads/stores and the load/store ones counted fetches
     assign fcov_access_attempted_into_dm[PMP_I] =
-      access_check_into_dm[PMP_D] & data_req_out;
+      access_check_into_dm[PMP_I] & if_stage_i.if_id_pipe_reg_we;
     assign fcov_access_attempted_into_dm[PMP_I2] =
       access_check_into_dm[PMP_I2] & if_stage_i.if_id_pipe_reg_we;
     assign fcov_access_attempted_into_dm[PMP_D] =
-      access_check_into_dm[PMP_I] & if_stage_i.if_id_pipe_reg_we;
+      access_check_into_dm[PMP_D] & data_req_out;
 
     covergroup pmp_top_cg @(posedge clk_i);
       option.per_instance = 1;
@@ -610,9 +622,16 @@ interface core_ibex_pmp_fcov_if import ibex_pkg::*; #(
           bins sticky = binsof(cp_wdata_mml) intersect {0} && binsof(cp_mml) intersect {1};
       }
 
+      // The three nomatch crosses leave out an access to the Debug Module range in debug mode:
+      // ibex_pmp.sv debug_mode_allowed_access clears pmp_req_err_o for it whatever the regions and
+      // MMWP/MML say (Debug Spec A.2: the PMP must not disallow fetches, loads or stores to the DM
+      // range while in debug mode), so with no region matching it is M (or U after an mret in
+      // debug mode) x MMWP=1 x req_err=0, the illegal_*_allow bins. access_check_into_dm is the
+      // address compare alone, as in the RTL: the data channel is checked every cycle, request or
+      // not (directed test debug_dm_pmp).
       pmp_iside_nomatch_cross :
         cross cp_req_type_iside, cp_priv_lvl_iside, pmp_iside_req_err, cp_mmwp, cp_mml
-          iff (pmp_iside_nomatch) {
+          iff (pmp_iside_nomatch & ~(debug_mode & access_check_into_dm[PMP_I])) {
           // Will never see a successful exec access when execute is disallowed
           illegal_bins illegal_user_allow_exec =
             // In User mode - no match case, we should always deny
@@ -638,7 +657,7 @@ interface core_ibex_pmp_fcov_if import ibex_pkg::*; #(
 
       pmp_iside2_nomatch_cross :
         cross cp_req_type_iside2, cp_priv_lvl_iside2, pmp_iside2_req_err, cp_mmwp, cp_mml
-          iff (pmp_iside2_nomatch) {
+          iff (pmp_iside2_nomatch & ~(debug_mode & access_check_into_dm[PMP_I2])) {
           // Will never see a successful exec access when execute is disallowed
           illegal_bins illegal_user_allow_exec =
             // In User mode - no match case, we should always deny
@@ -664,7 +683,7 @@ interface core_ibex_pmp_fcov_if import ibex_pkg::*; #(
 
       pmp_dside_nomatch_cross :
         cross cp_req_type_dside, cp_priv_lvl_dside, pmp_dside_req_err, cp_mmwp, cp_mml
-          iff (pmp_dside_nomatch) {
+          iff (pmp_dside_nomatch & ~(debug_mode & access_check_into_dm[PMP_D])) {
 
           // Will never see a successful write/read access when it should be denied
           illegal_bins illegal_machine_allow_wr =
@@ -825,26 +844,30 @@ interface core_ibex_pmp_fcov_if import ibex_pkg::*; #(
           binsof(pmp_iside2_req_err) intersect {1'b0};
       }
 
+      // Crossed with the PMP result of the request itself (pmp_dside_req_err, same cycle as
+      // data_req_out), as the fetch crosses are: cp_ls_pmp_exception reports at the response, a
+      // cycle or more after the attempt is sampled, so its illegal_bins could never fire. The
+      // allow/deny bin names had fault_check inverted against the fetch crosses (1 = deny).
       dm_load_store_access_cross: cross
         dm_load_store_debug_mode_cp,
-        cp_ls_pmp_exception,
+        pmp_dside_req_err,
         pmp_dside_access_fault_check
       {
         // Loads/Stores should never fail the access check in debug mode
         illegal_bins dm_debug_mode_disallowed_load_store =
-          binsof(cp_ls_pmp_exception) intersect {1'b1} &&
+          binsof(pmp_dside_req_err) intersect {1'b1} &&
           binsof(dm_load_store_debug_mode_cp) intersect {1'b1};
 
         // Allowed loads/stores in debug mode may or may not override a denying PMP region.
         // Create a bin for each possibility.
         bins dm_debug_mode_pmp_allow_allowed_load_store =
           binsof(dm_load_store_debug_mode_cp) intersect {1'b1} &&
-          binsof(pmp_dside_access_fault_check) intersect {1'b1} &&
-          binsof(cp_ls_pmp_exception) intersect {1'b0};
+          binsof(pmp_dside_access_fault_check) intersect {1'b0} &&
+          binsof(pmp_dside_req_err) intersect {1'b0};
         bins dm_debug_mode_pmp_deny_allowed_load_store =
           binsof(dm_load_store_debug_mode_cp) intersect {1'b1} &&
-          binsof(pmp_dside_access_fault_check) intersect {1'b0} &&
-          binsof(cp_ls_pmp_exception) intersect {1'b0};
+          binsof(pmp_dside_access_fault_check) intersect {1'b1} &&
+          binsof(pmp_dside_req_err) intersect {1'b0};
       }
     endgroup
 

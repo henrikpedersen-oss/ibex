@@ -14,6 +14,31 @@
 
 ##########################################################
 
+# Why every CHERIoT test below carries +disable_spurious_dside_responses=1
+# ------------------------------------------------------------------------
+# core_ibex_vseq.sv's pre_body enables spurious d-side bus responses on a dice
+# roll -- cfg.spurious_response_pct = 20 in core_ibex_env_cfg.sv -- and disables
+# the tb_no_spurious_response assertion when it does. On such a seed the log
+# contains "Enabling spurious responses for this test".
+#
+# A spurious response corrupts an in-flight load and the core CORRECTLY takes a
+# load access fault. But crt_cheriot.S's trap_entry is still the unported RV32
+# handler, so the handler itself faults and the test dies in a double-fault
+# UVM_FATAL rather than reporting anything. wb_cheri_clc_csc passed at SEED=1 and
+# died at SEED=21618 on nothing but that roll.
+#
+# These are directed functional tests of specific datapaths; tolerating a
+# corrupted bus is not what any of them covers, so the stimulus is turned off
+# rather than papered over. Bus-fault behaviour needs its own test that owns a
+# working trap handler -- which is blocked on porting trap_entry to CHERIoT
+# (capability save/restore via csc/clc, MEPCC instead of mepc, and a handle_trap
+# that can return; the weak one in syscalls.c calls tohost_exit(1337)).
+#
+# NOTE: single sim_opts key per test -- YAML silently keeps the last duplicate,
+# so append to the existing string rather than adding a second sim_opts line.
+
+##########################################################
+
 - config: riscv-tests
   ld_script: link.ld
   includes: .
@@ -65,7 +90,7 @@
 
 # CHERIoT-aware C tests (capability SP init before _init).
 # Uses crt_cheriot.S instead of crt.S. After computing the integer SP, it
-# reads DDC into c2 (cspecialr c2, ddc) and points c2's cursor at the integer
+# reads MTDC into c2 (cspecialr c2, mtdc) and points c2's cursor at the integer
 # SP (csetaddr c2, c2, x2), so that _init's first c.cscsp store does not
 # fault. Only meaningful with +enable_cheriot_seq=1 (see sim_opts below),
 # which asserts cheriot_enable_i and brings up the CHERIoT-Sail cosim oracle
@@ -93,7 +118,7 @@
     capability tag = 0; (2) MTCC has tag = 1; (3) MTDC has tag = 1.
   iterations: 1
   test_srcs: cheriot_null_cap/cheriot_null_cap.S
-  sim_opts: "+enable_cheriot_seq=1"
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
   config: cheriot-c-tests
 
 - test: cheriot_cap_perms
@@ -108,7 +133,7 @@
     is set; (6) MTDC permit_store (bit 2) is set.
   iterations: 1
   test_srcs: cheriot_cap_perms/cheriot_cap_perms.S
-  sim_opts: "+enable_cheriot_seq=1"
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
   config: cheriot-c-tests
 
 - test: cheriot_cap_base
@@ -121,7 +146,7 @@
     (3) MScratchC base=0.
   iterations: 1
   test_srcs: cheriot_cap_base/cheriot_cap_base.S
-  sim_opts: "+enable_cheriot_seq=1"
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
   config: cheriot-c-tests
 
 - test: cheriot_mscratchc_seal
@@ -134,7 +159,7 @@
     (5) global set.
   iterations: 1
   test_srcs: cheriot_mscratchc_seal/cheriot_mscratchc_seal.S
-  sim_opts: "+enable_cheriot_seq=1"
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
   config: cheriot-c-tests
 
 - test: cheriot_cap_len
@@ -146,7 +171,7 @@
     0xFFFFFFFF; (2) MTDC length=0xFFFFFFFF; (3) MScratchC length=0xFFFFFFFF.
   iterations: 1
   test_srcs: cheriot_cap_len/cheriot_cap_len.S
-  sim_opts: "+enable_cheriot_seq=1"
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
   config: cheriot-c-tests
 
 - test: cheriot_cap_type
@@ -157,7 +182,7 @@
     (3) MScratchC type=0.
   iterations: 1
   test_srcs: cheriot_cap_type/cheriot_cap_type.S
-  sim_opts: "+enable_cheriot_seq=1"
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
   config: cheriot-c-tests
 
 - test: cheriot_cap_addr
@@ -168,7 +193,7 @@
     (3) MScratchC addr=0.
   iterations: 1
   test_srcs: cheriot_cap_addr/cheriot_cap_addr.S
-  sim_opts: "+enable_cheriot_seq=1"
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
   config: cheriot-c-tests
 
 - test: cheriot_intcap_arith
@@ -180,7 +205,7 @@
     (5) ori; (6) xori; (7) slli; (8) mul.
   iterations: 1
   test_srcs: cheriot_intcap_arith/cheriot_intcap_arith.S
-  sim_opts: "+enable_cheriot_seq=1"
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
   config: cheriot-c-tests
 
 - test: cheriot_andperm
@@ -192,19 +217,20 @@
     CAndPerm; (2) EX now clear; (3) GL still set.
   iterations: 1
   test_srcs: cheriot_andperm/cheriot_andperm.S
-  sim_opts: "+enable_cheriot_seq=1"
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
   config: cheriot-c-tests
 
 - test: cheriot_ccleartag
   desc: >
-    CClearTag (funct7=0x7F, rs2=0x0B) explicitly revokes a capability's tag
-    while preserving its address, the deliberate counterpart to the
-    automatic tag-clearing tested in cheriot_intcap_arith. Tests: (1) MTCC
-    tag=1 before CClearTag; (2) tag=0 after; (3) address unchanged (still 0)
-    after.
+    CClearTag (funct7=0x7F, rs2=0x0B) clears the tag and nothing else
+    (CHERIoT-Sail clearTag). On a copy of MTCC, whose cursor is trap_entry
+    (installed by crt_cheriot.S): (1) tag=1 before; (7) address before is
+    non-zero (precondition); (2) tag=0 after; (3) address after equals the
+    address before; (4)-(6) no interrupt. Results in t0/s0 so ca0 keeps the
+    capability. Returns 0 on success, else 1-7.
   iterations: 1
   test_srcs: cheriot_ccleartag/cheriot_ccleartag.S
-  sim_opts: "+enable_cheriot_seq=1"
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
   config: cheriot-c-tests
 
 - test: cheriot_cinc_addr
@@ -215,19 +241,22 @@
     unchanged (0); (3) tag still 1 (in-bounds).
   iterations: 1
   test_srcs: cheriot_cinc_addr/cheriot_cinc_addr.S
-  sim_opts: "+enable_cheriot_seq=1"
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
   config: cheriot-c-tests
 
 - test: cheriot_csetaddr
   desc: >
     CSetAddr (funct7=0x10) sets a capability's cursor to an absolute address
-    from an integer register (vs CIncAddr's relative offset). Tag preserved
-    iff the new address is in [base, top). Sets MTCC's cursor to 0x1000 then
-    back to 0. Tests: (1) cursor=0x1000; (2) base unchanged (0); (3) tag
-    still 1; (4) cursor resettable to 0.
+    from an integer register (vs CIncAddr's relative offset). Per
+    CHERIoT-Sail setCapAddr the tag is cleared iff cs1 is sealed or the new
+    address is unrepresentable (window [base, base + 2^(9+E))); MTCC is
+    full-range, so it is kept here. On one MTCC copy, no re-derivation: (1)
+    CSetAddr(0x1000) gives cursor 0x1000; (2) base still 0; (3) tag still 1;
+    (4) a second CSetAddr(0) gives cursor 0; (5)-(7) no interrupt. Results
+    in t0 so ca0 keeps the capability. Returns 0 on success, else 1-7.
   iterations: 1
   test_srcs: cheriot_csetaddr/cheriot_csetaddr.S
-  sim_opts: "+enable_cheriot_seq=1"
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
   config: cheriot-c-tests
 
 - test: cheriot_csub
@@ -238,7 +267,7 @@
     CSub(MTCC+16, MTCC)=16 after CIncAddr.
   iterations: 1
   test_srcs: cheriot_csub/cheriot_csub.S
-  sim_opts: "+enable_cheriot_seq=1"
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
   config: cheriot-c-tests
 
 - test: cheriot_setbounds
@@ -246,37 +275,37 @@
     CSetBounds (funct7=0x08) narrows a capability's bounds to
     [cursor, cursor+len). Tests: (1) CGetLen=256 after
     CSetBounds(MTDC,256); (2) CGetBase=0; (3) tag=1 (sub-region
-    contained in original bounds); (4) CGetAddr (cursor) unchanged.
+    contained in original bounds); (4) CGetAddr (cursor) unchanged;
+    (8-20) a tagged cs1 with its cursor above top (E = 2 at top+4, E = 24 at
+    0x91000000) gives an untagged result for requests 1, 7 and 0, with Sail
+    base/length; (21-24) the same with the E = 2 cursor at top and a request
+    of 3; (25-27) the E = 24 cursor above top with a request of 7; (28-31)
+    a sealed tagged E = 1 source with its cursor inside and a request of 0
+    gives an untagged result (Sail clearTagIfSealed), base = cursor, length 0;
+    (32-34) the E = 24 cursor above top with a request of 1; (35-42) a length-2
+    E = 0 source with its cursor above top and requests 3 and 7 (longer than
+    cs1): untagged, base = cursor, length = request (cheriot_csetbounds_cross1);
+    (43-45) the same source with a request of 5; (46-49) the E = 2 cursor at
+    top with a request of 2: untagged, base = cursor, length 2.
   iterations: 1
   test_srcs: cheriot_setbounds/cheriot_setbounds.S
-  sim_opts: "+enable_cheriot_seq=1"
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
   config: cheriot-c-tests
 
-# cheriot_cap_readback: KNOWN FAILING -- kept in the testlist deliberately so
-# a regression run surfaces the moment it starts passing. Register-limit bug
-# fixed and the fcov InstrCategoryLoadCorrect/StoreCorrect gap fixed
-# (REQ_CFI_07), but it still hits ibex_core.sv's NoMemResponseWithoutPendingAccess
-# assertion on the CSC response -- see tickets.md for the open RTL-timing
-# question. Repro: make uvm-test-xlm TEST=cheriot_cap_readback SEED=1 ITERATIONS=1 COVERAGE=0
 - test: cheriot_cap_readback
   desc: >
     Field-by-field CSC/CLC round-trip check: stores a capability (MTDC,
     then MTCC) to memory and reloads it, verifying tag/perm/base/len/
     addr/type are all preserved exactly, and that an integer store to
-    the same slot clears the tag on reload (revocation).
-    KNOWN FAILING on the third round-trip (MTCC): the CLC reads back an
-    all-zero capability. The earlier NoMemResponseWithoutPendingAccess
-    note is stale -- that was a false positive, fixed upstream by
-    0f40baf8. See tickets.md.
+    the same slot clears the tag on reload (revocation); round trips of
+    CSetBoundsExact caps at E = 1..14 (tag, length, base) and of
+    otype-14 and otype-15 sealed data caps (otype fields 6 and 7;
+    codes 20-83).
   iterations: 1
   test_srcs: cheriot_cap_readback/cheriot_cap_readback.S
   # NOTE: single sim_opts key only -- YAML silently keeps the last duplicate, so
   # a second `sim_opts:` here discards the first without warning.
-  # The +uvm_set_verbosity below is TEMPORARY (remove after diagnosis): the memory
-  # agent logs "Read Mem"/"Write Mem" at UVM_HIGH and "Read from uninitialized
-  # addr" at UVM_MEDIUM, but rtl_simulation.yaml hardcodes +UVM_VERBOSITY=UVM_LOW
-  # and UVM takes the first plusarg match, so raising it needs uvm_set_verbosity.
-  sim_opts: "+enable_cheriot_seq=1"
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
   config: cheriot-c-tests
 
 - test: cheriot_pcc
@@ -287,7 +316,7 @@
     permission (GL, bit 0).
   iterations: 1
   test_srcs: cheriot_pcc/cheriot_pcc.S
-  sim_opts: "+enable_cheriot_seq=1"
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
   config: cheriot-c-tests
 
 - test: cheriot_cincaddrimm
@@ -297,7 +326,7 @@
     (3) tag preserved (in-bounds increment on MTCC).
   iterations: 1
   test_srcs: cheriot_cincaddrimm/cheriot_cincaddrimm.S
-  sim_opts: "+enable_cheriot_seq=1"
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
   config: cheriot-c-tests
 
 - test: cheriot_setboundsimm
@@ -307,7 +336,7 @@
     (2) CGetBase=0; (3) tag=1; (4) CGetAddr (cursor) unchanged.
   iterations: 1
   test_srcs: cheriot_setboundsimm/cheriot_setboundsimm.S
-  sim_opts: "+enable_cheriot_seq=1"
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
   config: cheriot-c-tests
 
 - test: cheriot_setboundsexact
@@ -318,7 +347,7 @@
     (3) len=300 (not exactly representable) clears the tag.
   iterations: 1
   test_srcs: cheriot_setboundsexact/cheriot_setboundsexact.S
-  sim_opts: "+enable_cheriot_seq=1"
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
   config: cheriot-c-tests
 
 - test: cheriot_setboundsrndn
@@ -331,7 +360,7 @@
     request, proving the two take genuinely different datapaths.
   iterations: 1
   test_srcs: cheriot_setboundsrndn/cheriot_setboundsrndn.S
-  sim_opts: "+enable_cheriot_seq=1"
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
   config: cheriot-c-tests
 
 - test: cheriot_cap_high
@@ -344,7 +373,7 @@
     "high" word.
   iterations: 1
   test_srcs: cheriot_cap_high/cheriot_cap_high.S
-  sim_opts: "+enable_cheriot_seq=1"
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
   config: cheriot-c-tests
 
 - test: cheriot_cseal_cunseal
@@ -354,10 +383,24 @@
     dedicated sealing root with SE/US permission) as the sealing
     authority. Tests: (1)-(2) CSeal succeeds (tag=1, otype=1=
     OTYPE_SENTRY_II_FWD); (3) original cs1 untouched; (4)-(5) CUnseal
-    succeeds (tag=1, otype=0); (6) permissions preserved round-trip.
+    succeeds (tag=1, otype=0); (6) permissions preserved round-trip;
+    (10-24) CUnseal with an untagged, sealed, local data authority gives an
+    untagged, unsealed, non-global result for an integer, untagged sealed
+    local/global and tagged unsealed cs1; (25-52) CUnseal of an unsealed
+    cs1 with a tagged sealed authority (US 0 or 1), an untagged sealed one
+    with US = 1, and an untagged sealed global one: cd untagged, unsealed,
+    GL = cs1.GL & cs2.GL; (53-54) CSeal of MTCC with an untagged sealing
+    authority whose address is its base gives an untagged result; (55-58)
+    CUnseal of a tagged unsealed global cs1 with a tagged sealed authority
+    without US and GL: cd untagged, unsealed, GL 0; (59-61) CSeal of MTCC
+    with an untagged SE authority at address 13 inside its bounds, and with a
+    tagged non-SE authority whose address 4 is above its top: cd untagged;
+    (62-68) CUnseal of an untagged and a tagged unsealed global cs1 with an
+    untagged sealed authority with US and without GL: cd untagged, unsealed,
+    GL 0.
   iterations: 1
   test_srcs: cheriot_cseal_cunseal/cheriot_cseal_cunseal.S
-  sim_opts: "+enable_cheriot_seq=1"
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
   config: cheriot-c-tests
 
 - test: cheriot_cjalr_sentry
@@ -370,7 +413,213 @@
     sentry; (4) the callee actually executed.
   iterations: 1
   test_srcs: cheriot_cjalr_sentry/cheriot_cjalr_sentry.S
-  sim_opts: "+enable_cheriot_seq=1"
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
+  config: cheriot-c-tests
+
+# ── CHERIoT temporal safety ──────────────────────────────────────────────────
+# cheriot_revoke_basic covers tag clearing by integer stores and the fault on a
+# stale pointer. It runs with +revbm_mode=off (every lookup answered "live"); the
+# revoked verdict is covered by cheriot_revoke_load_barrier* further down.
+- test: cheriot_revoke_basic
+  desc: >
+    Integer stores revoke, stale pointers fault. CSC MTCC then CLC gives
+    tag=1 (also the TRVK not-revoked path); SW to the low word, SW to the high
+    word, SH and SB each clear the granule's tag; CSC of an untagged register
+    clears it too; a store to the neighbouring granule leaves this one tagged.
+    Then a scrubbed pointer is reloaded (tag=0, address intact) and an LW
+    through it must trap: mcause=28, mtval=0x1A2 (tag violation on c13),
+    MEPCC at the LW. Uses a test-local MTCC vector as juliet_cwe131_fault does.
+    Returns 0 on success, else the number of the failing check (1-18).
+  iterations: 1
+  test_srcs: cheriot_revoke_basic/cheriot_revoke_basic.S
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
+  config: cheriot-c-tests
+
+# ── CHERIoT RTOS-pattern capability tests ────────────────────────────────────
+# Instructions the CHERIoT RTOS relies on, exercised the way the RTOS uses them
+# (allocator sizing, check_pointer, capability spills). Expected values are
+# taken from the CHERIoT Sail model.
+- test: cheriot_rtos_clc_csc
+  desc: >
+    Capabilities survive a trip through memory. MTCC and a bounded,
+    permission-reduced object capability each come back from CSC/CLC tagged
+    and CSetEqualExact to the original (base and length also checked). An SW
+    to one slot clears its tag, the reloaded value carries the stored integer,
+    and the other slot stays tagged. Returns 0 on success, else 1-12.
+  iterations: 1
+  test_srcs: cheriot_rtos_clc_csc/cheriot_rtos_clc_csc.S
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
+  config: cheriot-c-tests
+
+- test: cheriot_rtos_cmove
+  desc: >
+    CMove copies every field. From a non-root source (bounded to
+    [0x80001230,+64), cursor +8, perms reduced) the copy keeps tag, perms,
+    base, length and address and is CSetEqualExact to the source; an untagged
+    source gives an untagged copy; a copy of MTCC keeps perms 0x1EB.
+    Returns 0 on success, else 1-12.
+  iterations: 1
+  test_srcs: cheriot_rtos_cmove/cheriot_rtos_cmove.S
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
+  config: cheriot-c-tests
+
+- test: cheriot_rtos_crrl
+  desc: >
+    CRRL and CRAM against the Sail model for lengths 16, 511, 512, 513, 1023
+    (exponent bump), 0x12345, 0x400000 (largest unsaturated exponent),
+    0x800001 (exponent saturates to 24), 0xFFFFFFFF (CRRL wraps to 0) and 0.
+    CRAM is all ones when no alignment is needed. Then the allocator recipe:
+    CSetBoundsExact on base & CRAM with length CRRL keeps the tag and gives the
+    expected bounds, and the unaligned base does not. Returns 0 on success,
+    else 1-27.
+  iterations: 1
+  test_srcs: cheriot_rtos_crrl/cheriot_rtos_crrl.S
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
+  config: cheriot-c-tests
+
+- test: cheriot_rtos_gettop
+  desc: >
+    CGetTop returns the decoded top, saturated: 0xFFFFFFFF for full range
+    (not 0), 512 and 1024 for [0,512) and [0,1024), 0x80001100 for a
+    non-zero base, unchanged after a cursor move and after CClearTag, and
+    0x80001202 when length 513 is rounded up. Returns 0 on success, else 1-10.
+  iterations: 1
+  test_srcs: cheriot_rtos_gettop/cheriot_rtos_gettop.S
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
+  config: cheriot-c-tests
+
+- test: cheriot_rtos_isequal
+  desc: >
+    CSetEqualExact compares every field. Equal: a CMove copy, the same
+    register twice, and a no-op CAndPerm(0xFFF). Not equal, each differing in
+    one field only: permissions, address, tag, bounds; plus MTCC against MTDC.
+    Returns 0 on success, else 1-11.
+  iterations: 1
+  test_srcs: cheriot_rtos_isequal/cheriot_rtos_isequal.S
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
+  config: cheriot-c-tests
+
+- test: cheriot_rtos_subset
+  desc: >
+    CTestSubset rd, cs1, cs2 is "cs2 subset of cs1" (Sail operand order).
+    Checks the order itself, the top, base and permission comparisons, a
+    strict interior subset of a bounded capability, self-subset, a tag
+    mismatch (0) and two untagged operands (1). Returns 0 on success, else
+    1-12.
+  iterations: 1
+  test_srcs: cheriot_rtos_subset/cheriot_rtos_subset.S
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
+  config: cheriot-c-tests
+
+- test: cheriot_perm_lc_sc
+  desc: >
+    CLC and CSC through an authority without MC (Permit_Load_Store_Capability,
+    CHERIoT's single load/store-capability permission; perms 0x25 GL SD LD).
+    CLC of a global and a local capability returns each with tag 0 and every
+    other field intact (address, perms, CSetEqualExact to CClearTag of the
+    original), with no exception. CSC of an untagged value succeeds and
+    writes it untagged. CSC of a tagged capability traps: mcause 28, mtval
+    0x175 (capcause 0x15 against c11), MEPCC at the CSC, target slot still
+    holds its old tagged value. Controls through the MTDC authority (0x7F)
+    keep the tag. Returns 0 on success, else 1-34.
+  iterations: 1
+  test_srcs: cheriot_perm_lc_sc/cheriot_perm_lc_sc.S
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
+  config: cheriot-c-tests
+
+- test: cheriot_seal_fail
+  desc: >
+    Sealing failure arms and sealed-capability immutability (REQ_SEL_01-04),
+    expected values from CHERIoT-Sail. CSeal gives tag 0, no trap, for an
+    untagged, sealed or SE-less cs2, cs2.address = cs2.top, a sealed cs1, and
+    an otype outside 1-7 (executable cs1) or 9-15 (data cs1), including values
+    whose low bits are legal; controls at otypes 1, 7, 9, 15 and the last
+    in-bounds address. CUnseal gives tag 0 for an untagged, sealed or US-less
+    cs2, an unsealed cs1, and an otype below base or at top; cs2.address is not
+    compared; GL = cs1.GL & cs2.GL. CIncAddr, CIncAddrImm, CSetAddr,
+    CSetBounds(Exact/Imm/RoundDown), AUICGP and CAndPerm on a sealed cap clear
+    the tag (CAndPerm keeps it for mask 0xFFF or only GL cleared), each with an
+    unsealed control. lw, sw, CLC and CSC through a data-sealed cap and a
+    sentry trap with capcause 0x03 against the authority, nothing written.
+    Returns 0 on success, else 1-136.
+  iterations: 1
+  test_srcs: cheriot_seal_fail/cheriot_seal_fail.S
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
+  config: cheriot-c-tests
+
+- test: cheriot_scr_faults
+  desc: >
+    System-register access without PCC.SR (REQ_PER_06, REQ_SCR_01,
+    REQ_EXC_04), expected values from CHERIoT-Sail. Runs from a PCC derived
+    with CAndPerm(MTCC, 0xF7F) and recovers through a test-local MTCC. Reads
+    of mcycle, minstret, mcycleh, minstreth (and csrrsi/csrrci with uimm 0)
+    are permitted; csrr mstatus, csrw mscratch, csrw mcycle, csrrs with rs1 !=
+    x0 and MRET give capcause 0x18 against PCC (mtval 0x418), with no side
+    effect; CSpecialRW on MTCC/MTDC/MScratchC/MEPCC gives 0x18 with mtval[10:5]
+    = 0x20 + scr (0x798, 0x7B8, 0x7D8, 0x7F8) and writes neither cd nor the
+    SCR. SCRs 1, 24 and 27, an undefined CSR and a write to mhartid are
+    illegal instructions (mcause 2) ahead of the SR check. Returns 0 on
+    success, else 1-87.
+  iterations: 1
+  test_srcs: cheriot_scr_faults/cheriot_scr_faults.S
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
+  config: cheriot-c-tests
+
+- test: cheriot_fetch_bounds
+  desc: >
+    PCC bounds at instruction fetch (REQ_BND_03/07, REQ_BRA_05/08,
+    REQ_CFI_05). Enters small exact CSetBoundsExact execute regions and
+    expects each fetch outside [base, top) to trap with mcause 28, mtval
+    0x401 (Bounds Violation against PCC), MEPCC.address = the faulting fetch
+    PC and MEPCC.tag = 0, with the out-of-bounds instruction not executed:
+    sequential fetch reaching Top; a 32-bit instruction whose second
+    half-word is past Top (both alignments, mepc = the instruction, not +2);
+    a 16-bit instruction ending exactly at Top executes (both alignments); a
+    taken BEQ past Top and a CJAL below Base retire and fault at the target;
+    CJALR to a capability whose address is its Top, and CJALR with imm -4 to
+    below Base, retire and fault at the target; MRET to a tagged MEPCC whose
+    address is its Top. Section 11 runs one taken branch per reachable
+    cp_cheri_branch_bound value (gen_branch_bounds.py): targets below, at, inside,
+    1..7 bytes under, at and above the top of exact small regions, and against PCC
+    [0x81000000, 2^32) and [0, 0x81000000) with code copied there; in-bounds
+    targets must run, the others fault at the target.
+    Section 12 (needs +far_code_windows=1) copies code to 0 and to 2^32 - 32
+    and runs the same checks for taken branches and CJALs to targets 2..6 bytes
+    under a top of 2^32, at a base of 0, 1..7 bytes under an odd top over a
+    base of 0 and at 0 / 2^32 - 2..6 under the root PCC (CJAL also at the base
+    of [0x81000000, 2^32), below it, at, above and 2..6 under the top of
+    [0, 0x81000000), under section 11's PCCs of length 2..7 and 7 bytes under
+    the top of a length-9 one and 2 bytes under the top of a length-8 one,
+    cp_cheri_cjal_bound 0x070 and 0x020), checking
+    the CJAL link; and AUIPCC from PCCs at both ends whose result wraps past
+    2^32 or 0, checking the address and the cleared tag. Section 13 is
+    section 10's MRET with an untagged MEPCC: the fetch at Top violates the
+    tag and the bounds, and must report the tag (mtval 0x402). Returns 0 on
+    success, else a section-coded failure.
+  iterations: 1
+  test_srcs: cheriot_fetch_bounds/cheriot_fetch_bounds.S
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1 +far_code_windows=1"
+  config: cheriot-c-tests
+
+- test: cheriot_cjalr_faults
+  desc: >
+    CJALR exception causes and priority (REQ_CFI_01/03, REQ_PER_03,
+    REQ_SEL_06/08), expected values from CHERIoT-Sail CJALR. Untagged cs1
+    gives capcause 0x02 against cs1, before seal and EX (also via c.jr);
+    data-sealed (otype 9, 15) and executable non-sentry (6, 7) cs1 give
+    0x03, before EX; tagged unsealed cs1 without EX gives 0x11 (also via
+    c.jalr). Sentry/register-pair rules: backward sentry for a call or tail
+    call, forward sentry otype 2 with cd = ct1, forward sentry or unsealed
+    cap as a return (cd = c0, cs1 = cra), and a sealed cs1 with imm != 0 all
+    give 0x03. mtval[9:5] = cs1, MEPCC at the CJALR and tagged, cd not
+    written. Controls: otype 1 sentry with cd = ct1 or c0 and an unsealed
+    cap with imm 4 jump. REQ_PER_03: an MTCC written without EX reads back
+    untagged (restored at once; trapping through it would livelock), and
+    MRET through an EX-less MEPCC faults at the fetch with 0x02 against PCC
+    (mtval 0x402). Returns 0 on success, else a section-coded failure.
+  iterations: 1
+  test_srcs: cheriot_cjalr_faults/cheriot_cjalr_faults.S
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
   config: cheriot-c-tests
 
 - test: empty
@@ -722,6 +971,68 @@
   iterations: 1
   test_srcs: u_mode_exec_test/u_mode_exec_test.S
   config: riscv-tests
+
+- test: cheriot_enable_transition
+  desc: >
+    cheriot_enable_i 0->1 while running (#827, REQ_BCK_05). Starts in RISC-V mode with the pin
+    Off, checks arithmetic, a load/store round trip and that auipc returns an untagged result;
+    writes to 0x80200000, after which the testbench raises the pin (+cheriot_enable_on_write);
+    then checks auipc decodes as CAUIPCC and returns a tagged capability. Self-checking, cosim
+    off: neither Spike nor CHERIoT-Sail models a pin that changes mid-run.
+  iterations: 1
+  test_srcs: cheriot_enable_transition/cheriot_enable_transition.S
+  config: riscv-tests
+  sim_opts: "+cheriot_enable_on_write=80200000 +disable_cosim=1 +disable_spurious_dside_responses=1"
+
+- test: cheriot_enable_on_off
+  desc: >
+    cheriot_enable_i 0->1, then 1->0 while a CSC waits for the grant of its first word (REQ_BCK_06).
+    As cheriot_enable_transition up to CHERIoT mode, plus a CSC/CLC round trip; then a write to
+    0x80200010, after which the testbench slows the d-side grants, lowers the pin while the next CSC
+    sits in LSU state CTX_WAIT_GNT1 (the LSU must hold the request until granted and complete the CSC), and
+    requires alert_major_internal_o within 100 cycles (+cheriot_disable_on_write,
+    core_ibex_base_test::watch_cheriot_disable_trigger). The 1->0 change breaks the pin contract of
+    REQ_BCK_05 on purpose; the testbench turns CheriotEnableOneWaySwitch off for it. The program then
+    continues in RISC-V mode without a trap. Cosim off: neither model has the pin.
+  iterations: 1
+  test_srcs: cheriot_enable_on_off/cheriot_enable_on_off.S
+  config: riscv-tests
+  sim_opts: >-
+    +cheriot_enable_on_write=80200000 +cheriot_disable_on_write=80200010 +disable_cosim=1
+    +disable_spurious_dside_responses=1
+
+# Raises the pin the same way as cheriot_enable_transition rather than using
+# cheriot-c-tests: CHERIoT-Sail (get_mtvec/get_xret_target, set_xret_target)
+# does not trap on mtvec/mepc where the CHERIoT ISA text and the RTL do, so
+# under +enable_cheriot_seq=1 its oracle would log errors on every probe, and
+# no plusarg disables only that oracle. See the test header.
+- test: cheriot_mtvec_mepc_access
+  desc: >
+    Legacy mtvec/mepc CSRs in CHERIoT mode (REQ_SCR_07), per the CHERIoT ISA
+    document: csrr, csrw, csrrw, csrrs, csrrc, csrrwi, csrrsi, csrrci and
+    csrrsi-with-0 on mtvec (0x305) and on mepc (0x341) each raise an illegal
+    instruction (mcause 2) at that pc, leave rd and MTCC unchanged, and a
+    write never redirects the trap vector. Boots in RISC-V mode, the bench
+    raises cheriot_enable_i on the write to 0x80200000; cosim off (see the
+    comment above). Returns 0 on success, else 1-8 or 10*probe + 1..5, 190-193.
+  iterations: 1
+  test_srcs: cheriot_mtvec_mepc_access/cheriot_mtvec_mepc_access.S
+  config: riscv-tests
+  sim_opts: "+cheriot_enable_on_write=80200000 +disable_cosim=1 +disable_spurious_dside_responses=1"
+
+- test: cheriot_bck_nocheck
+  desc: >
+    cheriot_enable_i Off (REQ_BCK_02, Off half): on the CHERIoT-capable build
+    with the pin never raised, lw/sw, lh/lhu/sh and lb/lbu/sb through integer
+    base registers (la-derived, loaded from memory, lui-only, and 2 KiB past
+    the target with a negative offset) complete with the right data and no
+    trap, where in CHERIoT mode each would be a tag violation. cgettag and a
+    funct3=3 load (CLC) are illegal instructions, showing the pin is Off.
+    Spike cosim. Returns 0 on success, else 1-17 in the CORE_STATUS word.
+  iterations: 1
+  test_srcs: cheriot_bck_nocheck/cheriot_bck_nocheck.S
+  config: riscv-tests
+  sim_opts: "+disable_spurious_dside_responses=1"
 
 # Test-suite: riscv-tests
 
@@ -7119,3 +7430,158 @@
   iterations: 1
   test_srcs: ../../../../vendor/riscv-isa-sim/tests/mseccfg/gengen_src/outputs/test_pmp_ok_share_1_r1_x1_cfgl1_typex1_umode1.c
   config: epmp-tests
+
+- test: cheriot_asr_counter_csr
+  desc: >
+    Counter CSRs must be readable while PCC lacks the access-system-registers
+    permission. ext_check_CSR() in the CHERIoT Sail model admits reads of
+    mcycle/minstret/mcycleh/minstreth and the unprivileged cycle/time/instret
+    shadows without ASR, and requires ASR only for writes. ibex_decoder.sv's
+    safe-list originally covered just 0xC00-0xC9F and omitted the four 0xB
+    machine-mode counters, so "csrr rd, mcycle" from a compartment without ASR
+    raised PermitAccessSystemRegistersViolation -- CHERIoT RTOS times every test
+    with that instruction and hung in an endless violation loop. CAndPerm is
+    monotone and the crt's exit path needs ASR, so the read is done inside a
+    CJALR excursion whose backward sentry restores the ASR-bearing PCC on
+    return. Tests: (1) the derived capability has SR clear; (2) it retains EX,
+    so the excursion is genuinely executable; (3) mcycle advances rather than
+    trapping while ASR is absent; (4) the excursion ran to completion; (5) ASR
+    is restored afterwards.
+  iterations: 1
+  test_srcs: cheriot_asr_counter_csr/cheriot_asr_counter_csr.S
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
+  config: cheriot-c-tests
+
+# ── TRVK revocation (REQ_TMP_01) ─────────────────────────────────────────────
+# These need the revocation plusargs (ibex_revbm_pkg.sv). The CHERIoT-Sail cosim
+# is given the same bitmap and checks every revoked CLC's tag on its own.
+- test: cheriot_revoke_load_barrier
+  desc: >
+    Revoked arm of the TRVK load barrier. A CLC of a capability whose base is in
+    a revoked granule returns tag 0, address and all other fields intact (bit
+    select, unaligned base, base not cursor, first and last bitmap words); the
+    neighbouring live granules keep the tag; bases out of TRVK's window (base 0,
+    one past, one below, each aliasing a revoked bit) are never revoked; SE/US/U0
+    capabilities are exempt but a sealed data capability is not; a bitmap
+    device error revokes the whole word and raises alert_major_bus (TB
+    assertions); back-to-back lookups each get their own verdict.
+    Returns 0 on success, else 1-38.
+  iterations: 1
+  test_srcs: cheriot_revoke_load_barrier/cheriot_revoke_load_barrier.S
+  sim_opts: >-
+    +enable_cheriot_seq=1 +disable_spurious_dside_responses=1
+    +revbm_mode=range +revbm_heap_base=80000000
+    +revbm_revoke_list=80018000:40,80018080:8,8001fff8:8,80000000:8
+    +revbm_err_list=80019000:100 +revbm_err_kind=dev
+  config: cheriot-c-tests
+
+- test: cheriot_revoke_load_barrier_intg
+  desc: >
+    cheriot_revoke_load_barrier with the error word answered with a flipped ECC
+    bit instead of trvk_revbm_err_i (TRVK's integrity-error revocation path,
+    cp_trvk_intg_error). Needs MemECC (SecureIbex=1); the responder stops the
+    run at time 0 otherwise. Returns 0 on success, else 1-38.
+  iterations: 1
+  test_srcs: cheriot_revoke_load_barrier/cheriot_revoke_load_barrier.S
+  sim_opts: >-
+    +enable_cheriot_seq=1 +disable_spurious_dside_responses=1
+    +revbm_mode=range +revbm_heap_base=80000000
+    +revbm_revoke_list=80018000:40,80018080:8,8001fff8:8,80000000:8
+    +revbm_err_list=80019000:100 +revbm_err_kind=intg
+  config: cheriot-c-tests
+
+- test: cheriot_revoke_load_barrier_rnd
+  desc: >
+    256 CLCs over bitmap words 0x180-0x187 against a per-seed random bitmap
+    (50% revoked, 10% error words), with random bitmap-port backpressure and
+    latency. The cosim checks each verdict; the program checks that a load is
+    either identical or identical-but-untagged, that both outcomes occurred,
+    that sealing capabilities over the same bases always keep the tag, and that
+    bases just past the window are never revoked. Returns 0, else 1-8.
+  iterations: 3
+  test_srcs: cheriot_revoke_load_barrier_rnd/cheriot_revoke_load_barrier_rnd.S
+  sim_opts: >-
+    +enable_cheriot_seq=1 +disable_spurious_dside_responses=1
+    +revbm_mode=random +revbm_revoke_pct=50 +revbm_heap_base=80000000
+    +revbm_err_pct=10 +revbm_err_kind=dev
+    +revbm_gnt_delay_max=3 +revbm_rsp_delay_max=3
+  config: cheriot-c-tests
+
+- test: cheriot_revoke_load_barrier_rnd_intg
+  desc: >
+    cheriot_revoke_load_barrier_rnd with 30% of the bitmap words answered with a flipped ECC bit
+    (+revbm_err_kind=intg), so integrity errors arrive on words whose selected bit is set and
+    clear (trvk_revoked_source_cross). Needs MemECC (SecureIbex=1). Returns 0, else 1-8.
+  iterations: 3
+  test_srcs: cheriot_revoke_load_barrier_rnd/cheriot_revoke_load_barrier_rnd.S
+  sim_opts: >-
+    +enable_cheriot_seq=1 +disable_spurious_dside_responses=1
+    +revbm_mode=random +revbm_revoke_pct=50 +revbm_heap_base=80000000
+    +revbm_err_pct=30 +revbm_err_kind=intg
+    +revbm_gnt_delay_max=3 +revbm_rsp_delay_max=3
+  config: cheriot-c-tests
+
+- test: cheriot_revoke_load_barrier_rnd_both
+  desc: >
+    cheriot_revoke_load_barrier_rnd with 30% of the bitmap words answered with a device error
+    and a flipped ECC bit on the same response (+revbm_err_kind=both; TRVK ORs them), with the
+    selected bit set and clear (trvk_revoked_source_cross). Needs MemECC. Returns 0, else 1-8.
+  iterations: 3
+  test_srcs: cheriot_revoke_load_barrier_rnd/cheriot_revoke_load_barrier_rnd.S
+  sim_opts: >-
+    +enable_cheriot_seq=1 +disable_spurious_dside_responses=1
+    +revbm_mode=random +revbm_revoke_pct=50 +revbm_heap_base=80000000
+    +revbm_err_pct=30 +revbm_err_kind=both
+    +revbm_gnt_delay_max=3 +revbm_rsp_delay_max=3
+  config: cheriot-c-tests
+
+# Expected to FAIL with 6 on the current RTL (static analysis; see the .S
+# header): CHERIoT-Sail applies the load-global attenuation before the
+# revocation check, the RTL gates it on the already-revoked tag.
+- test: cheriot_revoke_attenuation
+  desc: >
+    A revoked capability loaded through an authority without LG: tag 0 and, per
+    CHERIoT-Sail's LoadCapImm order, GL/LG cleared (perms 0x7C). Controls: the
+    same attenuation on a live load, and no attenuation through a full
+    authority. Returns 0 on success, else 1-7.
+  iterations: 1
+  test_srcs: cheriot_revoke_attenuation/cheriot_revoke_attenuation.S
+  sim_opts: >-
+    +enable_cheriot_seq=1 +disable_spurious_dside_responses=1
+    +revbm_mode=range +revbm_heap_base=80000000
+    +revbm_revoke_base=80018000 +revbm_revoke_size=8
+  config: cheriot-c-tests
+
+- test: csr_access_sweep
+  desc: >
+    Reads and writes every CSR counted by uarch_cg's cp_csr_read_only / cp_csr_write, from
+    M-mode (write back the value read) and from U-mode (with mcounteren 0 and all-ones). Illegal
+    accesses are skipped by the trap handler. Fills csr_read_only_priv_cross,
+    csr_write_priv_cross and cp_csr_write. MSHWM/MSHWMB are swept from U-mode only (Ibex and
+    Spike both trap); their M-mode accesses are left to CHERIoT tests.
+  iterations: 1
+  test_srcs: csr_access_sweep/csr_access_sweep.S
+  config: riscv-tests
+
+- test: pmp_fault_hazard
+  desc: >
+    Load/store accesses each followed by one instruction category (ALU/Mul/Div with and without a
+    load hazard, branch, jalr through the loaded address, jal, load, store, CSR, fence, fence.i,
+    ecall, ebreak, mret, wfi, compressed/uncompressed/CSR/privilege illegal, fetch error of a
+    nop and of a load word, the latter FetchError with a Mem stall), in three passes: PMP
+    fault (locked no-permission entry), bus error (d-side error window) and a
+    completing access after which the instruction executes. Sweeps with icache off/on,
+    data-independent timing, a masked pending timer interrupt and dcsr.ebreakm. The rtl_test
+    raises debug requests at PMP faults, bus errors, ID stalls and after trap flushes, NMIs after
+    trap flushes, fetch-enable drops, and the timer interrupt at the first wfi. Targets
+    uarch_cg.exception_stall_instr_cross, stall_cross, pipe_cross, pipe_flush_instr_cross,
+    debug_entry_if_instr_cross, interrupt_taken_instr_cross and irq_wfi_cross. Self-checking
+    (fail codes in the test header), Spike cosim on.
+  iterations: 4
+  test_srcs: pmp_fault_hazard/pmp_fault_hazard.S
+  config: riscv-tests
+  # The riscv-tests config's 300 s expired on seeds 164/166 of regression 163 (2026-10-09) with the
+  # sweep still running (debug handler entered 462 times); 13 of the earlier runs ended the same way.
+  timeout_s: 1200
+  rtl_test: core_ibex_stall_events_test
+  sim_opts: "+disable_spurious_dside_responses=1 +dside_bus_err_lo=80100000 +dside_bus_err_hi=8010000f +dbg_req_on_write=80100100 +irq_timer_on_wfi=1 +dbg_on_pmp_err_pct=50 +dbg_on_dside_err_pct=50 +dbg_on_stall_pct=5 +dbg_after_flush_pct=30 +nmi_after_flush_pct=40 +fetch_off_on_stall_pct=5 +dbg_gap_min=10 +dbg_gap_max=60"

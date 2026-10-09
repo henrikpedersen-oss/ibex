@@ -11,8 +11,44 @@ class ibex_asm_program_gen extends riscv_asm_program_gen;
   `uvm_object_utils(ibex_asm_program_gen)
   `uvm_object_new
 
+  // Kernel stack depth, in XLEN-sized words.
+  //
+  // riscv_instr_gen_config defaults this to 4000 words (16 KiB), which is ~121 frames of the
+  // 132-byte context that push_gpr_to_kernel_stack() writes. The interrupt- and debug-heavy
+  // tests take far more entries than that: riscv_debug_basic_test at SEED=21618 took 1402,
+  // of which 817 never reached a matching pop (nested entries taken while a handler was still
+  // running, which the generator allows by design -- push_gpr_to_kernel_stack() deliberately
+  // leaves the KSP in tp "if we again take a interrupt (nested) before restoring our USP").
+  //
+  // The stack therefore descends monotonically and, once past kernel_stack_start, walks down
+  // through .user_stack, the regions, .data and into .text -- overwriting instructions the
+  // core then fetches. Because riscv-dv sets +no_fence=1 for these tests there is no FENCE.I,
+  // so the DUT is entitled to its stale prefetch while the ISS sees the new bytes; the cosim
+  // reports an unexplainable divergence at a PC whose instruction word differs between them.
+  // See TODO.md, "riscv_debug_basic_test" for the byte-level reconstruction of one case.
+  //
+  // NOTE: this is a mitigation, not a cure. Nested entries are unbounded, so a long enough run
+  // overflows any finite stack; it just does so silently, corrupting code rather than faulting.
+  // The real fix is to make overflow detectable (guard region / fault on underflow) or to stop
+  // the stack growing without bound. Tracked in TODO.md.
+  //
+  // NOTE: riscv_core_setting.sv also declares `int kernel_stack_len = 5000`. That variable is
+  // package scope and nothing reads it -- riscv_asm_program_gen::gen_kernel_stack_section()
+  // uses cfg.kernel_stack_len. Setting it there has no effect; it must be set on cfg, here.
+  // 131072 words = 512 KiB. The SP starts at the top of .kernel_stack and descends monotonically
+  // as nested debug/interrupt entries are taken without matching pops.  The total descent before
+  // .text corruption = section size + ~123 KiB of intermediate sections (user_stack, data, etc.)
+  // below the section bottom.  The worst observed descent is ~387 KiB (seed 21859); 512 KiB
+  // section gives a total threshold of ~635 KiB, ~64% headroom.  Previous value was 65536 (256
+  // KiB, threshold ~379 KiB), which was tight: seed 21859 overflowed by 8 KiB.
+  // .kernel_stack starts at 0x8001ee68, so this ends at 0x8009ee68 -- inside the 1 MiB SRAM
+  // at [0x80000000, 0x80100000).  This is a mitigation, not a cure: nested entries are unbounded.
+
   virtual function void gen_program();
     bit disable_pmp_exception_handler = 0;
+
+    // Must happen before any section is emitted: gen_kernel_stack_section() reads this.
+    cfg.kernel_stack_len = 131072;
 
     default_include_csr_write = {
       MSCRATCH,
@@ -77,6 +113,31 @@ class ibex_asm_program_gen extends riscv_asm_program_gen;
              };
     instr.push_back("mret");
     gen_section(get_label("ecall_handler", hart), instr);
+  endfunction
+
+  // Illegal instruction trap handler: the base version with a program-image check.
+  // A wild jump can leave the PC in uninitialised memory, which the TB returns as 0x0000
+  // (c.unimp); the base handler's mepc += 4 then walks forward one trap at a time until the
+  // wall-clock timeout (illegal_instr.21575: 10,860 traps from 0x0 to 0xa9a8). If mepc is
+  // outside [_start, _exit) the program has already left its image, so end the test instead.
+  virtual function void gen_illegal_instr_handler(int hart);
+    string instr[$];
+    gen_signature_handshake(instr, CORE_STATUS, ILLEGAL_INSTR_EXCEPTION);
+    gen_signature_handshake(.instr(instr), .signature_type(WRITE_CSR), .csr(MCAUSE));
+    instr = {instr,
+             $sformatf("csrr  x%0d, 0x%0x", cfg.gpr[0], MEPC),
+             $sformatf("la    x%0d, _start", cfg.gpr[1]),
+             $sformatf("bltu  x%0d, x%0d, 1f", cfg.gpr[0], cfg.gpr[1]),
+             $sformatf("la    x%0d, _exit", cfg.gpr[1]),
+             $sformatf("bgeu  x%0d, x%0d, 1f", cfg.gpr[0], cfg.gpr[1]),
+             $sformatf("addi  x%0d, x%0d, 4", cfg.gpr[0], cfg.gpr[0]),
+             "j     2f",
+             $sformatf("1: la x%0d, test_done", cfg.gpr[0]),
+             $sformatf("2: csrw 0x%0x, x%0d", MEPC, cfg.gpr[0])
+    };
+    pop_gpr_from_kernel_stack(MSTATUS, MSCRATCH, cfg.mstatus_mprv, cfg.sp, cfg.tp, instr);
+    instr.push_back("mret");
+    gen_section(get_label("illegal_instr_handler", hart), instr);
   endfunction
 
   virtual function void gen_program_header();

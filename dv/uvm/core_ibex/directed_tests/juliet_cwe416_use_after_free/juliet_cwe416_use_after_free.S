@@ -3,90 +3,83 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # =============================================================================
-# Test: juliet_cwe416_use_after_free — CWE-416 Use After Free (CHERIoT)
+# Test: juliet_cwe416_use_after_free -- named after CWE-416 Use After Free; it
+#       is a register-level CClearTag check, not a use-after-free fault test
 # =============================================================================
 # CWE-416 (NIST Juliet Test Suite): Use After Free.
 #
-# In C without CHERIoT (bad):
-#   char *data = (char *)malloc(100);
+#   char *data = (char *)malloc(64);
 #   free(data);
-#   /* FLAW: use data after free */
-#   printLine(data);  ← undefined behaviour, likely crash or corruption
+#   printLine(data);          // FLAW: use after free
 #
-# In CHERIoT, freeing memory involves revoking all capabilities to it.
-# The allocator calls CClearTag on the freed capability (and also sweeps
-# the heap to revoke any other copies).  After revocation:
-#   - cgettag(data) = 0  → the capability is no longer valid
-#   - Any load/store through 'data' raises a CHERI exception
+# In CHERIoT the defence is revocation: the allocator's free() invalidates the
+# freed capability and the revoker sweeps memory for copies, so a later load or
+# store through 'data' takes a tag violation. This test models only the
+# register half of that: "free" is a CClearTag of the allocation capability.
 #
-# This test simulates the CHERIoT use-after-free protection:
-#   1. "Allocate": CSetBounds(MTDC, 64) → alloc_cap (tag=1)
-#   2. "Free": CClearTag(alloc_cap) → alloc_cap (tag=0)
-#   3. "Use after free": cgettag(alloc_cap) → 0 (the use would fault)
+# What this test checks (results go to t0, so ca0 keeps the capability under
+# test -- aN and caN are the same register):
 #
-# The key property: CClearTag is the hardware-level revocation primitive.
-# Once cleared, the capability cannot be reinstated; any use-after-free
-# attempt is detected at the capability level, not via a software check.
+#   Test 1  "malloc": MTDC, cursor moved to the address of a .data object,
+#           CSetBounds(.., 64) gives a tagged capability: CGetTag = 1.
+#   Test 2  "free": CClearTag of that capability gives tag 0.
+#   Test 3  CClearTag changes nothing but the tag: CGetAddr is still the
+#           object's address (non-zero, so a CClearTag that zeroed the
+#           address would be caught). CHERIoT-Sail: CClearTag = clearTag(cs1).
+#   Tests 4-6  mstatus.MIE = 1, mcause = 0, mip = 0 (no interrupt taken).
 #
-# Extra checks:
-#   - The integer address field (cursor) is unchanged after CClearTag.
-#     A freed pointer still holds the same numeric address — but the tag=0
-#     makes it unusable for any capability-checked operation.
+# What it does not do: it never frees or revokes anything, performs no load or
+# store and takes no trap, so it is not evidence that using a freed capability
+# faults (that is cheriot_revoke_basic's LW through a scrubbed pointer).
 #
-#   Test 1 (tag=1 before free — allocation is valid)
-#   Test 2 (tag=0 after CClearTag — allocation revoked)
-#   Test 3 (CGetAddr = 0 after CClearTag — cursor unchanged, cap unusable)
-#   Tests 4-6 (interrupt state — no interrupt expected)
+# Returns 0 on success, else the failing test number (1-6).
 #
-# Adapted from Juliet CWE416_Use_After_Free (NIST/NSA).
+# Encodings (Sail encdec, opcode 0x5B; cross-checked against
+# cheriot_perm_lc_sc.S):
+#   cspecialr  ca0, mtdc     = .word 0x03D0055B  (CSpecialRW, SCR 29)
+#   csetaddr   ca0, ca0, a1  = .word 0x20B5055B  (funct7=0x10)
+#   csetbounds ca0, ca0, a1  = .word 0x10B5055B  (funct7=0x08)
+#   cgettag    t0, ca0       = .word 0xFE4502DB  (funct7=0x7F, rs2=0x04)
+#   ccleartag  ca0, ca0      = .word 0xFEB5055B  (rs2=0x0B)
+#   cgetaddr   t0, ca0       = .word 0xFEF502DB  (rs2=0x0F)
 # =============================================================================
-#
-# CClearTag ca0, ca0 (funct7=0x7F rs2=0x0B):
-#   = 0xFEB5055B
-#
-# Tests:
-#   1. tag=1 before free.
-#   2. tag=0 after CClearTag (simulates free+revocation).
-#   3. CGetAddr=0 after CClearTag (cursor unchanged, pointer unusable).
-#   4. mstatus.MIE = 1.
-#   5. mcause = 0.
-#   6. mip = 0.
 
 .globl main
 main:
     csrsi   mstatus, 8              # set mstatus.MIE (bit 3)
 
-    # Step 1: "Allocate" — create a 64-byte bounded capability (data = malloc(64)).
+    # "Allocate": data = malloc(64) -- a 64-byte capability to heap_obj.
+    la      a1, heap_obj            # integer address (never dereferenced)
     .word   0x03D0055B              # cspecialr ca0, mtdc
+    .word   0x20B5055B              # csetaddr ca0, ca0, a1
     li      a1, 64
     .word   0x10B5055B              # csetbounds ca0, ca0, a1
 
     # ── Test 1: tag = 1 (allocation valid before free) ────────────────────────
-    .word   0xFE45055B              # cgettag a0, ca0
-    li      a1, 1
-    bne     a0, a1, .Lfail_test1
+    .word   0xFE4502DB              # cgettag t0, ca0 (t0: keep ca0 intact)
+    li      t1, 1
+    bne     t0, t1, .Lfail_test1
 
-    # Step 2: "Free" — revoke capability (free(data)).
-    .word   0xFEB5055B              # ccleartag ca0, ca0  ← CHERIoT free() revocation
+    # "Free": clear the tag of the allocation capability.
+    .word   0xFEB5055B              # ccleartag ca0, ca0
 
-    # ── Test 2: tag = 0 (allocation revoked — use after free is now detectable) ─
-    .word   0xFE45055B              # cgettag a0, ca0
-    bne     a0, x0, .Lfail_test2   # tag must be 0
+    # ── Test 2: tag = 0 after CClearTag ───────────────────────────────────────
+    .word   0xFE4502DB              # cgettag t0, ca0
+    bnez    t0, .Lfail_test2
 
-    # ── Test 3: cursor unchanged = 0 (pointer address preserved, but unusable) ──
-    # The 'data' variable still holds a numeric address, but tag=0 means
-    # any load/store through it would trigger a CHERI exception.
-    .word   0xFEF5055B              # cgetaddr a0, ca0
-    bne     a0, x0, .Lfail_test3
+    # ── Test 3: cursor unchanged = &heap_obj ──────────────────────────────────
+    .word   0xFEF502DB              # cgetaddr t0, ca0
+    la      t1, heap_obj
+    bne     t0, t1, .Lfail_test3
 
     # ── Interrupt state verification ───────────────────────────────────────────
-    csrr    a0, mstatus
-    andi    a1, a0, 8
-    beq     a1, x0, .Lfail_test4
-    csrr    a0, mcause
-    bne     a0, x0, .Lfail_test5
-    csrr    a0, mip
-    bne     a0, x0, .Lfail_test6
+    csrr    t0, mstatus
+    andi    t0, t0, 8
+    beqz    t0, .Lfail_test4
+    csrr    t0, mcause
+    bnez    t0, .Lfail_test5
+    csrr    t0, mip
+    bnez    t0, .Lfail_test6
 
     li      a0, 0
     ret
@@ -97,3 +90,8 @@ main:
 .Lfail_test4: li a0, 4; ret
 .Lfail_test5: li a0, 5; ret
 .Lfail_test6: li a0, 6; ret
+
+    .data
+    .balign 8
+heap_obj:                           # the "allocation"; never accessed
+    .space  64

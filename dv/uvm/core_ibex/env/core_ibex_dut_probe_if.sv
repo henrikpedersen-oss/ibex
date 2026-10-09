@@ -45,6 +45,16 @@ interface core_ibex_dut_probe_if(input logic clk);
   logic                              csr_save_cause;
   ibex_pkg::exc_cause_t              exc_cause;
   logic                              wb_exception;
+  // LSU in CTX_WAIT_GNT1: a CSC waiting for the grant of its first word (cheriot_enable_on_off test).
+  logic                              lsu_ctx_wait_gnt1;
+  // Pipeline events for core_ibex_stall_events_test, which raises debug requests, NMIs and
+  // fetch-enable drops on them:
+  // - the instruction in ID stays there next cycle (valid and not cleared: stalled or retained)
+  logic                              id_instr_held;
+  // - the instruction in ID is stalled on memory (an outstanding access, or its own LSU request)
+  logic                              id_stall_mem;
+  // - a data access blocked by PMP finishes its request phase: the error reports next cycle
+  logic                              lsu_pmp_err_next;
 
   always @(posedge clk or posedge reset) begin
     if (reset) begin
@@ -92,6 +102,10 @@ interface core_ibex_dut_probe_if(input logic clk);
     input sync_exc_seen;
     input irq_exc_seen;
     input wb_exception;
+    input lsu_ctx_wait_gnt1;
+    input id_instr_held;
+    input id_stall_mem;
+    input lsu_pmp_err_next;
   endclocking
 
   initial begin

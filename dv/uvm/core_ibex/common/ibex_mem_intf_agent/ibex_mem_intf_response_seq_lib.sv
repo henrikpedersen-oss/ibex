@@ -19,6 +19,22 @@ class ibex_mem_intf_response_seq extends uvm_sequence #(ibex_mem_intf_seq_item);
   bit                    is_dmem_seq = 1'b0;
   bit                    suppress_error_on_exc = 1'b0;
   bit                    enable_spurious_response = 1'b0;
+  // Triggered when a bus error has been decided for an access, before its response is sent (the
+  // response follows after rvalid_delay cycles). Lets a test time other stimulus (interrupts,
+  // debug requests) so that it is pending when the error reaches the core.
+  event                  error_armed;
+
+  // Address-window error injection, for directed tests that need an error on one particular
+  // access (e.g. the second beat of a CLC, or the second half of a misaligned load). Every
+  // access whose word address falls in [*_lo, *_hi] gets the error, deterministically:
+  //   +{dside,iside}_bus_err_lo=<hex>  +{dside,iside}_bus_err_hi=<hex>   bus error (any access)
+  //   +{dside,iside}_intg_err_lo=<hex> +{dside,iside}_intg_err_hi=<hex>  bad integrity (reads)
+  // Off unless both bounds of a window are given. Not subject to suppress_error_on_exc: the
+  // program chooses when to touch the window.
+  bit [ADDR_WIDTH-1:0]   bus_err_win_lo, bus_err_win_hi;
+  bit [ADDR_WIDTH-1:0]   intg_err_win_lo, intg_err_win_hi;
+  bit                    bus_err_win_en = 1'b0;
+  bit                    intg_err_win_en = 1'b0;
 
 
   `uvm_object_utils(ibex_mem_intf_response_seq)
@@ -42,6 +58,34 @@ class ibex_mem_intf_response_seq extends uvm_sequence #(ibex_mem_intf_seq_item);
 
     if (m_mem == null) `uvm_fatal(get_full_name(), "Cannot get memory model")
     `uvm_info(`gfn, $sformatf("is_dmem_seq: 0x%0x", is_dmem_seq), UVM_LOW)
+
+    begin
+      string side = is_dmem_seq ? "dside" : "iside";
+      bus_err_win_en = $value$plusargs({side, "_bus_err_lo=%h"}, bus_err_win_lo) &&
+                       $value$plusargs({side, "_bus_err_hi=%h"}, bus_err_win_hi);
+      intg_err_win_en = $value$plusargs({side, "_intg_err_lo=%h"}, intg_err_win_lo) &&
+                        $value$plusargs({side, "_intg_err_hi=%h"}, intg_err_win_hi);
+      if (bus_err_win_en) begin
+        `uvm_info(`gfn, $sformatf("%0s bus-error window [0x%08h, 0x%08h]", side,
+                                  bus_err_win_lo, bus_err_win_hi), UVM_LOW)
+      end
+      if (intg_err_win_en) begin
+        `uvm_info(`gfn, $sformatf("%0s read-integrity-error window [0x%08h, 0x%08h]", side,
+                                  intg_err_win_lo, intg_err_win_hi), UVM_LOW)
+      end
+    end
+
+    // +dmem_gnt_when_idle_pct=N: the data side grants on N% of the cycles without a request
+    // (ibex_mem_intf_response_agent_cfg::gnt_when_idle_pct). Off by default.
+    if (is_dmem_seq &&
+        $value$plusargs("dmem_gnt_when_idle_pct=%d", p_sequencer.cfg.gnt_when_idle_pct)) begin
+      if (p_sequencer.cfg.gnt_when_idle_pct > 100) begin
+        `uvm_fatal(`gfn, $sformatf("+dmem_gnt_when_idle_pct=%0d is not a percentage",
+                                   p_sequencer.cfg.gnt_when_idle_pct))
+      end
+      `uvm_info(`gfn, $sformatf("dside grants on %0d%% of idle cycles",
+                                p_sequencer.cfg.gnt_when_idle_pct), UVM_LOW)
+    end
 
     `DV_CHECK_MEMBER_RANDOMIZE_FATAL(spurious_response_delay_cycles)
 
@@ -101,6 +145,14 @@ class ibex_mem_intf_response_seq extends uvm_sequence #(ibex_mem_intf_seq_item);
         enable_intg_error = 1'b0;
       end
 
+      if (bus_err_win_en && aligned_addr inside {[bus_err_win_lo : bus_err_win_hi]}) begin
+        enable_error = 1'b1;
+      end
+      if (intg_err_win_en && item.read_write == READ &&
+          aligned_addr inside {[intg_err_win_lo : intg_err_win_hi]}) begin
+        enable_intg_error = 1'b1;
+      end
+
       if (!req.randomize() with {
         addr       == item.addr;
         read_write == item.read_write;
@@ -134,6 +186,7 @@ class ibex_mem_intf_response_seq extends uvm_sequence #(ibex_mem_intf_seq_item);
         enable_intg_error = 1'b0;
       end
       if (req.error) begin
+        -> error_armed;
         `DV_CHECK_STD_RANDOMIZE_FATAL(rand_data)
         req.data = rand_data;
       end else if(item.read_write == READ) begin
@@ -178,9 +231,13 @@ class ibex_mem_intf_response_seq extends uvm_sequence #(ibex_mem_intf_seq_item);
   endfunction
 
   // Read a word of DATA_WIDTH bits from addr.
-  // Handle reads from uninit memory as follows:
-  // - DMEM : return a random value
-  // - IMEM : return {2{C.unimp}}
+  // Handle reads from uninit memory as follows, byte by byte:
+  // - DMEM : a random byte, written back to both memory models
+  // - IMEM : 0x00, so a fully uninit word is {2{C.unimp}}. Bytes already written are kept: Spike
+  //          reads unwritten memory as 0 byte by byte, and a fetch from a word only partly written
+  //          (e.g. by the first half of a misaligned store) used to return 0 for the whole word, so
+  //          the DUT saw c.unimp where Spike executed the stored byte (riscv_debug_single_step_test
+  //          24855, 2026-10-06).
   protected function logic [DATA_WIDTH-1:0] read(bit [ADDR_WIDTH-1:0] addr,
                                                  output bit did_access_uninit_mem);
     logic [DATA_WIDTH-1:0] data = '0;
@@ -191,7 +248,6 @@ class ibex_mem_intf_response_seq extends uvm_sequence #(ibex_mem_intf_seq_item);
       byte_data = read_byte(addr + i, byte_is_uninit);
       if (byte_is_uninit) begin
         did_access_uninit_mem = 1'b1;
-        // If any byte of the access comes back as uninit, bork the whole access.
         if (is_dmem_seq) begin
           // DMEM
           `DV_CHECK_STD_RANDOMIZE_FATAL(byte_data)
@@ -204,9 +260,9 @@ class ibex_mem_intf_response_seq extends uvm_sequence #(ibex_mem_intf_seq_item);
         end else begin
           // IMEM
           `uvm_info(`gfn,
-                    $sformatf("Addr is uninit! IMEM seq, returning 0x0000 (c.unimp)"),
+                    $sformatf("Addr 0x%0h is uninit! IMEM seq, returning 0x00", addr + i),
                     UVM_MEDIUM)
-          return {2{16'h0000}}; // 2x C.unimp instructions
+          byte_data = 8'h00;
         end
       end
       data[7:0] = byte_data;

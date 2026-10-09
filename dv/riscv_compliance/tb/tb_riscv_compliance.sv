@@ -69,4 +69,34 @@ module tb_riscv_compliance;
     $finish;
   end
 
+  // Trap loop: a test that keeps trapping at one PC never ends on its own, and the core's "Illegal
+  // instruction" $display on every pass made the 10M-cycle watchdog take hours of wall clock and
+  // several GB of log and trace. In CHERIoT mode the trap target is MTCC, and the env cannot
+  // redirect it (no mtvec): I-EBREAK-01's csrw stvec trapped to itself; I-MISALIGN_JMP-01 ran into
+  // zeroed memory and looped 0x300 nop, nop, bge -> 0x312 c.unimp -> trap to 0x300 (2026-10-09).
+  // Stop after TrapLoopMax traps at one PC with no trap at any other PC in between: other
+  // retirements (a handler, the code leading back to the faulting instruction) do not reset the
+  // count, a trap elsewhere does. A compliance test traps at many different PCs. No signature is
+  // written, so the test fails.
+  localparam int unsigned TrapLoopMax = 1000;
+  int unsigned trap_loop_n;
+  logic [31:0] trap_loop_pc;
+  always @(posedge clk) begin
+    if (!rst_n) begin
+      trap_loop_n <= 0;
+    end else if (u_dut.u_top.rvfi_valid && u_dut.u_top.rvfi_trap) begin
+      if (trap_loop_n != 0 && u_dut.u_top.rvfi_pc_rdata == trap_loop_pc) begin
+        trap_loop_n <= trap_loop_n + 1;
+        if (trap_loop_n + 1 >= TrapLoopMax) begin
+          $display("TIMEOUT: trap loop, %0d traps at PC 0x%08x and none elsewhere", TrapLoopMax,
+                   trap_loop_pc);
+          $finish;
+        end
+      end else begin
+        trap_loop_n  <= 1;
+        trap_loop_pc <= u_dut.u_top.rvfi_pc_rdata;
+      end
+    end
+  end
+
 endmodule

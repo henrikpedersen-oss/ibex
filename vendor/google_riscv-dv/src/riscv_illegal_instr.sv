@@ -216,6 +216,15 @@ class riscv_illegal_instr extends uvm_object;
   constraint illegal_compressed_op_c {
     if (exception == kIllegalCompressedOpcode) {
       c_op != 2'b01;
+      // LOCAL PATCH (not upstream google/riscv-dv -- reapply after any vendor resync):
+      // C2 funct3=101 is c.fsdsp in plain C, so riscv-dv treats it as illegal on a core without
+      // D. Zcmp (ibex_pkg::RV32ZcaZcbZcmp) puts cm.push/cm.pop/cm.popret(z)/cm.mvsa01/cm.mva01s
+      // there, which ibex executes outside CHERIoT mode -- same hazard as the Zcb note in
+      // reserved_compressed_instr_c.
+      !((c_msb == 3'b101) && (c_op == 2'b10));
+      // C0 funct3=100 is reserved in plain C but holds Zcb's c.lbu/c.lhu/c.lh/c.sb/c.sh; its
+      // genuinely reserved part is still generated through kReservedC2 (patched below).
+      !((c_msb == 3'b100) && (c_op == 2'b00));
       if (legal_c00_opcode.size() == 8) {
         c_op != 2'b00;
       } else {
@@ -244,10 +253,21 @@ class riscv_illegal_instr extends uvm_object;
       (reserved_c == kReservedAddispn)   -> ((instr_bin[15:5] == '0) && (c_op == 2'b00));
       (reserved_c == kReservedAddiw)     -> ((c_msb == 3'b001) && (c_op == 2'b01) &&
                                              (instr_bin[11:7] == 5'b0));
+      // LOCAL PATCH (not upstream google/riscv-dv -- reapply after any vendor resync):
+      // Zcb (ibex_pkg::RV32ZcaZcbZcmp, the default config) takes over the C1 funct6=100111 space
+      // that plain C reserves. With instr_bin[6:5] == 10 every encoding is c.mul, so kReservedC0
+      // can never produce an illegal instruction; with 11 only instr_bin[4:2] == 100 (c.zext.w,
+      // RV64 only), 110 and 111 stay illegal (ibex_compressed_decoder.sv). A "reserved" encoding
+      // the core executes defeats the illegal-instruction handler's pc+4 resume: the pad after it
+      // is then executed too and the handler resumes in the middle of the next 32-bit instruction.
+      // riscv_illegal_instr_test.13294 (2026-09-28) looped that way until its wall-clock timeout
+      // on a 0x9dc1 (c.mul x11,x8).
+      reserved_c != kReservedC0;
       (reserved_c == kReservedC0)        -> ((instr_bin[15:10] == 6'b100111) &&
                                              (instr_bin[6:5] == 2'b10) && (c_op == 2'b01));
       (reserved_c == kReservedC1)        -> ((instr_bin[15:10] == 6'b100111) &&
-                                             (instr_bin[6:5] == 2'b11) && (c_op == 2'b01));
+                                             (instr_bin[6:5] == 2'b11) && (c_op == 2'b01) &&
+                                             (instr_bin[4:2] inside {3'b100, 3'b110, 3'b111}));
       // LOCAL PATCH (not upstream google/riscv-dv -- reapply after any vendor resync):
       // kReservedC2 assumed the whole {c_msb=100, c_op=00} space (C0 quadrant,
       // funct3=100) was reserved/safely-illegal. The Zcb extension (enabled by
@@ -319,6 +339,13 @@ class riscv_illegal_instr extends uvm_object;
     if (exception == kIllegalOpcode) {
       !(opcode inside {legal_opcode});
       opcode[1:0] == 2'b11;
+      // Local patch: no opcode whose bits [4:2] = 3'b111 -- the length encoding of a 48-bit or
+      // longer instruction. Ibex treats it as an illegal 32-bit instruction and writes its 32
+      // bits to mtval; Spike decodes it as a longer instruction and writes mtval = 0. The
+      // privileged spec allows both, so the cosim cannot judge it, and the handler's pc+4 skip
+      // does not fit an instruction that long either
+      // (riscv_assorted_traps_interrupts_debug_test.2901, 0x0a414cbf).
+      opcode[4:2] != 3'b111;
     } else {
       opcode inside {legal_opcode};
     }

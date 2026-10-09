@@ -1,0 +1,104 @@
+// Copyright lowRISC contributors.
+// Licensed under the Apache License, Version 2.0, see LICENSE for details.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Testplan for TestRIG: QuickCheckVEngine drives the ibex UVM testbench over DII, and the in-bench
+// scoreboard compares every retired instruction against a Sail reference model -- CHERIoT-Sail for
+// the cheriot flavour, RISC-V Sail for riscv. Same testbench on Xcelium and Verilator.
+//
+// dvsim testplan format (ibex/vendor/lowrisc_ip/util/dvsim/Testplan.py). The flow is run by the
+// root Makefile (testrig-*-xlm / testrig-*-vlt); this file maps the closure obligations in
+// ibex_cheriot_verification_spec.md ("TestRIG is closed when ...") to runs. make testplan-testrig
+// reports against it.
+//
+// Test names: testrig_<flavour> for a clean run, testrig_<flavour>_corrupt_<field> for a
+// scoreboard fault-injection run (+dii_sb_corrupt=<n> +dii_sb_corrupt_field=<field>). Each run
+// keeps ibex/dv/testrig/<sim>_testrig_out/results/<name>.{run.log,result}.
+// Tags are the simulators a test must pass on for the report (testrig_results.py counts one run
+// per tag). Only xlm (Xcelium) is graded; Verilator runs (testrig-*-vlt) are kept but not counted.
+{
+  name: "testrig"
+
+  testpoints: [
+    {
+      name: cheriot_vs_cheriot_sail
+      desc: '''**Goal**: every instruction the core retires in CHERIoT mode matches CHERIoT-Sail.
+
+            **Stimulus**: QuickCheckVEngine, architecture rv32emcZifencei_Xcheriot, at full size
+            (N = 100 per generator), interrupt and unstructured generators excluded
+            (make testrig-cheriot-xlm, make testrig-cheriot-vlt).
+
+            **Check**: the run passes -- no scoreboard mismatch, UVM_ERROR, UVM_FATAL, SVA failure
+            or $fatal, and QuickCheckVEngine finished -- and the scoreboard compared a non-zero
+            number of instructions with 0 mismatches. A pipeclean or N < 100 run does not count.'''
+      stage: V2
+      tags: ["xlm"]
+      tests: ["testrig_cheriot"]
+    }
+    {
+      name: riscv_vs_riscv_sail
+      desc: '''**Goal**: every instruction the core retires in plain RISC-V mode matches RISC-V
+            Sail.
+
+            **Stimulus**: QuickCheckVEngine, architecture rv32emcZifencei, at full size
+            (make testrig-riscv-xlm, make testrig-riscv-vlt).
+
+            **Check**: as cheriot_vs_cheriot_sail.'''
+      stage: V2
+      tags: ["xlm"]
+      tests: ["testrig_riscv"]
+    }
+    {
+      name: scoreboard_fault_injection
+      desc: '''**Goal**: each scoreboard check can fail -- a green TestRIG run is evidence only once
+            the check behind it has been seen to go red.
+
+            **Stimulus**: one run per field (rd, pc, trap, mem) per flavour per simulator, with
+            the scoreboard corrupting the RTL side of one retired instruction
+            (+dii_sb_corrupt=<n> +dii_sb_corrupt_field=<field>; make testrig-fault-injection-xlm,
+            make testrig-fault-injection-vlt).
+
+            **Check** (spec "Scoreboard Fault Injection"): the run fails; the
+            "+dii_sb_corrupt: corrupted <field>" line is present; the corrupted instruction is the
+            first mismatch, at the same PC; there is no "never applied" error. Each run's log is
+            kept. Repeated after any change to the scoreboard, the DPI bridges or a reference
+            model. The mem and wtag fields need a non-trapping store, which the cheriot stream
+            produces rarely, so they are injected at the first eligible instruction. insn
+            corrupts the reported instruction (checked against the injected word); rdtag and
+            wtag, CHERIoT only, a capability tag on an integer write and on a capability store.
+            intr flips rvfi_intr of a retirement that neither traps nor follows a trap: an
+            interrupt entry the model did not take, which the interrupt check must report
+            (it runs in every stream, so the default generator is enough).'''
+      stage: V2
+      tags: ["xlm"]
+      tests: ["testrig_cheriot_corrupt_rd", "testrig_cheriot_corrupt_pc",
+              "testrig_cheriot_corrupt_trap", "testrig_cheriot_corrupt_mem",
+              "testrig_cheriot_corrupt_insn", "testrig_cheriot_corrupt_rdtag",
+              "testrig_cheriot_corrupt_wtag", "testrig_cheriot_corrupt_intr",
+              "testrig_riscv_corrupt_rd", "testrig_riscv_corrupt_pc",
+              "testrig_riscv_corrupt_trap", "testrig_riscv_corrupt_mem",
+              "testrig_riscv_corrupt_insn", "testrig_riscv_corrupt_intr"]
+    }
+    {
+      name: interrupts_and_unstructured
+      desc: '''**Goal**: the core's interrupt entry, and arbitrary instruction words, match the
+            reference model.
+
+            **Stimulus**: QuickCheckVEngine's interrupt and unstructured generators, without the
+            -x interrupt|unstructured exclusion, in both flavours.
+
+            **Check**: as cheriot_vs_cheriot_sail. unstructured sends arbitrary words, including
+            ones naming x16-x31, which the RV32E-register CHERIoT mode rejects, so the scoreboard
+            and the reference model must agree on those as illegal instructions. For interrupt,
+            the scoreboard gives the model the stimulus's pending bits and requires the core to
+            take an interrupt exactly where the model does (spec "INTR handling"): taking one
+            the model has not enabled, and executing an instruction while the model would take
+            one, are both mismatches. Each is a Known TestRIG Limitation until these tests pass,
+            or until the layer that covers the behaviour instead is named.'''
+      stage: V3
+      tags: ["xlm"]
+      tests: ["testrig_cheriot_interrupt", "testrig_riscv_interrupt",
+              "testrig_cheriot_unstructured", "testrig_riscv_unstructured"]
+    }
+  ]
+}

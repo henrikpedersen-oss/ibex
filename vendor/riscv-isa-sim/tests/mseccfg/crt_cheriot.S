@@ -1,21 +1,16 @@
 # See LICENSE for license details.
 #
 # CHERIoT-aware startup: identical to crt.S but initialises the capability
-# stack pointer (c2) from DDC before entering _init.
+# stack pointer (c2) from MTDC before entering _init.
 #
-# In CHERIoT mode every memory store uses the capability register file.
-# Standard crt.S sets x2 (SP) via integer arithmetic, leaving c2 untagged.
-# The first store in _init (c.swsp / c.cscsp) then faults because c2.tag=0.
+# In CHERIoT mode every load and store is authorised by the capability in its
+# base register; there is no DDC. Standard crt.S sets x2 (SP) via integer
+# arithmetic, leaving c2 untagged, so the first store in _init (c.swsp /
+# c.cscsp) would fault with a tag violation.
 #
-# Fix: after computing the integer SP, load DDC into c2 (giving it tag=1 and
-# full-memory bounds), then point c2's cursor at the integer SP value in x2.
-#
-#   cspecialr c2, ddc   -- 0x0210015B  (rd=x2, SCR=DDC)
-#   csetaddr  c2, c2, x2 -- 0x2021015B  (rd=x2, cs1=x2, rs2=x2)
-#
-# Encodings derived from:
-#   cspecialr ca0, ddc  = 0x0210055B  (rd=a0=x10 → rd=x2 changes bits[11:7])
-#   csetaddr  a0, a0, a1 = 0x20B5055B  (all regs → x2 changes rs1,rs2,rd fields)
+# Fix: after computing the integer SP, read MTDC (SCR 29, the memory root:
+# tag=1, full-memory bounds) into c2, then point c2's cursor at the integer SP
+# value (see the sequence and its encodings further down).
 
 #include "encoding.h"
 
@@ -158,6 +153,25 @@ _start:
   la gp, __global_pointer$
 .option pop
 
+  # ── CHERIoT capability global-pointer initialisation ────────────────────────
+  # Same problem, and same fix, as the stack pointer below: `la` lowers to
+  # AUIPC+ADDI and the ADDI is a plain integer op, so c3/gp ends up tag=0. In
+  # CHERIoT mode every SW/LW is promoted to CSC/CLC and faults on an untagged
+  # base register.
+  #
+  # gp is not merely a data pointer here -- trap_entry uses it as the base of its
+  # register save area (`SREG sp, 31*REGBYTES(gp)` is its first instruction). With
+  # gp untagged that store faults, which re-enters trap_entry, which executes the
+  # same store: an unbreakable double-fault loop before handle_trap is ever
+  # reached. wb_cheri_clc_csc is the first test to take a trap and hit it.
+  #
+  # Encodings derived from the c2 sequence below by changing rd/cs1 from x2 to x3:
+  #   cspecialr c2, mtdc   = 0x03D0015B -> c3 = 0x03D001DB (rd  bits[11:7] 2->3: +0x80)
+  #   csetaddr  c2, c2, t0 = 0x2051015B -> c3 = 0x205181DB (rd +0x80, cs1 bits[19:15] +0x8000)
+  mv    t0, gp           # t0 (x5) = integer gp value
+  .word 0x03D001DB       # cspecialr c3, mtdc -- c3 ← MTDC (tag=1); x3.int ← 0
+  .word 0x205181DB       # csetaddr c3, c3, t0 -- c3.cursor ← t0 (original gp)
+
   la  tp, _end + 63
   and tp, tp, -64
 
@@ -182,8 +196,8 @@ _start:
   # (machine data capability, SCR 29: tag=1, perms=0x07F, full-memory bounds)
   # and move its cursor to the just-computed integer SP address.
   #
-  # ibex CHERIoT valid SCR addresses: 27=ZTOP, 28=MTCC, 29=MTDC, 30=MScratchC,
-  # 31=MEPCC.  DDC (SCR 1) is illegal in ibex — it does not exist as a CSR.
+  # ibex CHERIoT valid SCR addresses outside debug mode: 28=MTCC, 29=MTDC, 30=MScratchC,
+  # 31=MEPCC (27 ZTOPC is illegal). There is no DDC: SCR 1 is an illegal SCR number.
   #
   # CRITICAL: cspecialr writes the SCR's cursor (0 for MTDC at reset) into the
   # destination register's INTEGER part, clobbering x2=SP.  Save SP to t0
@@ -245,8 +259,18 @@ trap_entry:
   #addi sp, sp, -272
   # use shadow address
   SREG sp, 31*REGBYTES(gp)
-  addi sp, gp, 512
-  addi sp, gp, 512
+  # Derive the frame pointer from gp's capability, not with integer arithmetic.
+  # `addi sp, gp, 512` is a plain integer op: it produces the right address but
+  # clears c2's tag, and the very next instruction (SREG x1, ...(sp)) is a CSC
+  # through that untagged base -- it faults, re-enters trap_entry, and loops.
+  #
+  # CIncAddrImm adds the offset to the cursor while preserving tag and bounds, and
+  # needs no scratch register -- which matters here, because only sp has been saved
+  # at this point and clobbering anything else would corrupt the trapped context.
+  #
+  # cincaddrimm ca0, ca0, 4 = 0x0045155B (I-type, funct3=001, imm in bits[31:20])
+  #   -> c2, c3, 512        = 0x2001915B (imm=0x200, rs1=3, rd=2)
+  .word 0x2001915B       # cincaddrimm c2, c3, 512 -- c2 <- gp cap, cursor gp+512
 
   SREG x1, 1*REGBYTES(sp)
   SREG x2, 2*REGBYTES(sp)
@@ -263,22 +287,20 @@ trap_entry:
   SREG x13, 13*REGBYTES(sp)
   SREG x14, 14*REGBYTES(sp)
   SREG x15, 15*REGBYTES(sp)
-  SREG x16, 16*REGBYTES(sp)
-  SREG x17, 17*REGBYTES(sp)
-  SREG x18, 18*REGBYTES(sp)
-  SREG x19, 19*REGBYTES(sp)
-  SREG x20, 20*REGBYTES(sp)
-  SREG x21, 21*REGBYTES(sp)
-  SREG x22, 22*REGBYTES(sp)
-  SREG x23, 23*REGBYTES(sp)
-  SREG x24, 24*REGBYTES(sp)
-  SREG x25, 25*REGBYTES(sp)
-  SREG x26, 26*REGBYTES(sp)
-  SREG x27, 27*REGBYTES(sp)
-  SREG x28, 28*REGBYTES(sp)
-  SREG x29, 29*REGBYTES(sp)
-  SREG x30, 30*REGBYTES(sp)
-  SREG x31, 31*REGBYTES(sp)
+  # x16-x31 deliberately not saved -- same 16-register constraint as the init path
+  # above, which is why the crt.S zeroing loop was dropped there.
+  #
+  # This block was inherited byte-identical from crt.S, which is plain RV32 and saves
+  # all 31 registers. Under cheriot_enable_i only x0-x15 exist: ibex_decoder.sv's
+  # illegal_reg_16 fires on raddr_b[4] with rf_ren_b_o, and OPCODE_STORE sets
+  # rf_ren_b_o, so `SREG x16` is itself an illegal instruction. It would trap back
+  # into trap_entry, re-run the stores below, and hit the same instruction forever --
+  # never reaching handle_trap. It has never fired only because no CHERIoT directed
+  # test currently takes a trap.
+  #
+  # Truncating the frame to x1-x15 is safe: nothing indexes the high slots. The
+  # handle_trap in syscalls.c is a weak stub that ignores regs[], and the mseccfg
+  # per-test overrides read mtval via csrr rather than the saved frame.
 
   csrr a0, mcause
   csrr a1, mepc
@@ -305,22 +327,9 @@ trap_entry:
   LREG x13, 13*REGBYTES(sp)
   LREG x14, 14*REGBYTES(sp)
   LREG x15, 15*REGBYTES(sp)
-  LREG x16, 16*REGBYTES(sp)
-  LREG x17, 17*REGBYTES(sp)
-  LREG x18, 18*REGBYTES(sp)
-  LREG x19, 19*REGBYTES(sp)
-  LREG x20, 20*REGBYTES(sp)
-  LREG x21, 21*REGBYTES(sp)
-  LREG x22, 22*REGBYTES(sp)
-  LREG x23, 23*REGBYTES(sp)
-  LREG x24, 24*REGBYTES(sp)
-  LREG x25, 25*REGBYTES(sp)
-  LREG x26, 26*REGBYTES(sp)
-  LREG x27, 27*REGBYTES(sp)
-  LREG x28, 28*REGBYTES(sp)
-  LREG x29, 29*REGBYTES(sp)
-  LREG x30, 30*REGBYTES(sp)
-  LREG x31, 31*REGBYTES(sp)
+  # x16-x31 not restored: they were never saved (see the note in the save block).
+  # LREG is lw, which writes its destination, so instr_rd[4] with rf_we_or_load trips
+  # the same illegal_reg_16 check -- the restore path is as illegal as the save path.
 
   #addi sp, sp, 272
   LREG sp, 31*REGBYTES(gp)

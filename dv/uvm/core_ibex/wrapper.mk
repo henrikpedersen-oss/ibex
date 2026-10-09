@@ -84,8 +84,12 @@ comp-results = $(addsuffix $(trr-stem),$(ts-dirs))
 # Depending on these files gives a safe over-approximation that will ensure we
 # rebuild things if that module changes.
 GEN_DIR := $(realpath ../../../vendor/google_riscv-dv)
+# The Ibex extension (riscv_dv_extension/*.sv, e.g. ibex_asm_program_gen.sv) is compiled into the
+# generator too; without it here an edit there never rebuilt the generator, and every test ran
+# with the old generated code.
 riscv-dv-files := \
-  $(shell find $(GEN_DIR) -type f)
+  $(shell find $(GEN_DIR) -type f) \
+  $(shell find $(EXT_DIR) -name '*.sv' -o -name '*.svh')
 
 all-verilog = \
   $(shell find ../../../rtl -name '*.v' -o -name '*.sv' -o -name '*.svh') \

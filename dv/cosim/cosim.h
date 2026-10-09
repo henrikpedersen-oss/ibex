@@ -75,8 +75,21 @@ class Cosim {
   // `write_reg` must be 0).
   //
   // Returns false if there are any errors; use `get_errors` to obtain details
+  // of them.
+  //
+  // `more_ops` says this retirement is a non-final operation of an expanded
+  // instruction (Zcmp cm.push/cm.pop/cm.popret/cm.mvsa01/cm.mva01s). Ibex
+  // retires one RVFI item per operation, all at the same PC, while the ISS
+  // executes the whole instruction in a single step.
+  //
+  // When set, the implementation must NOT step the ISS: it records the DUT's
+  // register write and returns. Only on the final operation does it step, by
+  // which point every memory access the instruction performs is queued, so the
+  // ISS's accesses can be matched against a complete set rather than against
+  // whatever had arrived when the first operation retired.
   virtual bool step(uint32_t write_reg, uint32_t write_reg_data, uint32_t pc,
-                    bool sync_trap, bool suppress_reg_write) = 0;
+                    bool intr, bool sync_trap, bool suppress_reg_write,
+                    bool more_ops) = 0;
 
   // When more than one of `set_mip`, `set_nmi` or `set_debug_req` is called
   // before `step` which one takes effect is chosen by the co-simulator. Which
@@ -111,7 +124,21 @@ class Cosim {
   // Behaviour wise this is almost as same as external NMI case explained at
   // set_nmi method. Difference is that this one is a response from Ibex rather
   // than an input.
-  virtual void set_nmi_int(bool nmi_int) = 0;
+  //
+  // `mtval` is the value Ibex will write to the mtval CSR when it takes this
+  // NMI. It must be supplied by the DUT because the ISS cannot derive it:
+  // Ibex sets mtval to the address of the transaction that returned bad
+  // integrity (ibex_controller.sv:438,742 -- documented in
+  // cs_registers.rst:292, "in the case of errors in the load-store unit mtval
+  // holds the address of the transaction causing the error"), whereas a
+  // standard RISC-V model zeroes mtval when taking any interrupt. Without this
+  // a later `csrr rd, mtval` in the handler diverges: the DUT reads the faulting
+  // address and the ISS reads 0.
+  //
+  // It cannot be reconstructed from the preceding synchronous trap's tval
+  // either -- those agree in some cases but not all, because the NMI carries the
+  // *dside* integrity-error address rather than whatever faulted first.
+  virtual void set_nmi_int(bool nmi_int, uint32_t mtval) = 0;
 
   // Set the debug request.
   //
@@ -131,6 +158,14 @@ class Cosim {
   // Set the value of a CSR. This is used when it is needed to have direct
   // communication between DUT and Spike (e.g. Performance counters).
   virtual void set_csr(const int csr_num, const uint32_t new_val) = 0;
+
+  // Read the value of a CSR from the ISS.
+  //
+  // Added for the mtval/exception-cause checker: riscv_cosim_step() compares
+  // only rd_addr, rd_wdata, pc and trap, so a CSR the DUT writes on a trap --
+  // mtval in particular, which carries the CHERIoT capcause in [4:0] and
+  // cap_idx in [10:5] -- was never checked against the ISS at all.
+  virtual uint32_t get_csr(const int csr_num) = 0;
 
   // Set the ICache scramble key valid bit that is visible in CPUCTRLSTS.
   virtual void set_ic_scr_key_valid(bool valid) = 0;

@@ -86,8 +86,15 @@ class ibex_mem_intf_response_driver extends uvm_driver #(ibex_mem_intf_seq_item)
     int gnt_delay;
     forever begin
       while(cfg.vif.response_driver_cb.request !== 1'b1) begin
+        // gnt_when_idle_pct: grant with no request, as an always-ready slave may. A request that
+        // arrives while it is high is accepted at once; the grant below then meets the next one.
+        if (cfg.gnt_when_idle_pct > 0 && ~cfg.vif.response_driver_cb.reset) begin
+          cfg.vif.response_driver_cb.grant <= ($urandom_range(99, 0) < cfg.gnt_when_idle_pct);
+        end
         cfg.vif.wait_neg_clks(1);
       end
+      // Drop an idle grant, so that gnt_delay below still holds the request back.
+      if (cfg.gnt_when_idle_pct > 0) cfg.vif.response_driver_cb.grant <= 1'b0;
       if(cfg.zero_delays) begin
         gnt_delay = 0;
       end else begin

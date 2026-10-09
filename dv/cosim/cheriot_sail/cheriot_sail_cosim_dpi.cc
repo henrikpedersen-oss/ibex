@@ -34,6 +34,9 @@ extern "C" {
 #include "sail_failure.h"
 #include "rts.h"  // read_tag_bool: the model's tag memory
 #include "riscv_rvfi_model_RV32.h"
+// CHERIoT-Ibex's implementation-defined CSRs in the model's platform (GAP-CS-3): the bench
+// inputs (counter values, scrambling-key valid, mcounteren_writable_i) are pushed through it.
+#include "ibex_platform_csrs.h"
 
 // model_init / model_fini are defined in the generated C but not declared in
 // the generated header (they live in the .c only).
@@ -59,6 +62,8 @@ extern uint64_t rv_ram_size;
 extern uint64_t rv_rom_base;
 extern uint64_t rv_rom_size;
 extern uint64_t rv_htif_tohost;
+extern uint64_t rv_clint_base;
+extern uint64_t rv_clint_size;
 extern bool     rv_enable_fdext;
 extern bool     rv_enable_zfinx;
 extern bool     rv_enable_misaligned;
@@ -90,6 +95,17 @@ static uint64_t s_ram_size = UINT64_C(0x800000);
 
 void cheriot_sail_cosim_set_ram_size(const svBitVecVal *size_p) {
   s_ram_size = (uint64_t)size_p[0];
+}
+
+// Second memory region mapped by the next init, in the platform's ROM segment (writable like
+// RAM: within_phys_mem() accepts either segment for loads, stores and fetches). Default none.
+// The UVM bench uses it for a window at address 0 (+far_code_windows, ibex_cosim_scoreboard.sv).
+static uint64_t s_rom_base = 0;
+static uint64_t s_rom_size = 0;
+
+void cheriot_sail_cosim_set_rom(const svBitVecVal *base_p, const svBitVecVal *size_p) {
+  s_rom_base = (uint64_t)base_p[0];
+  s_rom_size = (uint64_t)size_p[0];
 }
 
 // ---------------------------------------------------------------------------
@@ -153,13 +169,20 @@ void cheriot_sail_cosim_init(const svBitVecVal *boot_addr_p) {
   zext_rvfi_init(UNIT);
   if (trace_enabled()) fprintf(stderr, "[cheriot-sail] init: zext_rvfi_init done\n");
 
-  // CHERIoT-Ibex RVFI-DII mode: no ROM, RAM starts at 0x80000000.
+  // CHERIoT-Ibex RVFI-DII mode: RAM starts at 0x80000000, no ROM unless set_rom() asked for one.
   // These globals are in riscv_platform_impl.c, linked into our .so.
   rv_ram_base    = UINT64_C(0x80000000);
   rv_ram_size    = s_ram_size;
-  rv_rom_base    = UINT64_C(0);
-  rv_rom_size    = UINT64_C(0);
+  rv_rom_base    = s_rom_base;
+  rv_rom_size    = s_rom_size;
   rv_htif_tohost = UINT64_C(0);
+  // No CLINT, as in the RISC-V bridge: ibex has no core-local timer (its interrupts are pins), so
+  // 0x02000000-0x020bffff is not a device on the DUT's bus. Sail's default CLINT made a store
+  // there succeed in the model and fault on the TestRIG bench (QuickCheckVEngine's interrupt
+  // template clears MSIP with `sw x0, 0(CLINT)`; testrig_cheriot_interrupt, 2026-10-09), and its
+  // mtime/mtimecmp could raise a timer interrupt the stimulus never raised.
+  rv_clint_base  = UINT64_C(0);
+  rv_clint_size  = UINT64_C(0);
 
   // Set PC and mtvec to match CHERIoT-Ibex reset behaviour (from riscv_sim.c).
   // Ibex's reset PC is {boot_addr[31:8], 8'h80} (ibex_if_stage.sv PC_BOOT). The
@@ -220,6 +243,9 @@ int cheriot_sail_cosim_step(const svBitVecVal *insn_p,
   zrvfi_zzero_exec_packet(UNIT);
 
   if (s_pcc_mtcc_loop) {
+    // Each of these steps is a synchronous exception (a fetch fault to MTCC) the model does not
+    // execute; Ibex records it in cpuctrlsts as any other (ibex_cs_registers.sv:936-946).
+    ibex_csr_sync_exception(UNIT);
     s_step_no++;
     return 0;
   }
@@ -355,19 +381,26 @@ int cheriot_sail_cosim_step(const svBitVecVal *insn_p,
   // RTL's.  Skip when the RTL took a trap — on a trap the RTL's rd_addr is 0
   // (no register was committed) and rd_wdata is undefined.
   //
-  // Also skip time-varying counter CSRs: the Sail DII model does not advance
-  // mcycle/minstret/mhpmcounterN between steps so those reads always return 0
-  // while the RTL returns the running hardware count.
+  // Also skip mcycle/minstret (0xB00/0xB02, 0xB80/0xB82 and the cycle/instret aliases at
+  // 0xC00/0xC02, 0xC80/0xC82; time 0xC01/0xC81 is illegal on both sides): mcycle is pushed but
+  // sampled at retirement, not when the CSR was read, and minstret is the model's own count.
   //   opcode SYSTEM = 0x73; funct3 != 0 distinguishes CSR from ECALL/EBREAK.
-  //   Counter CSR address ranges: 0xB00-0xB1F, 0xB80-0xB9F (M-mode),
-  //                                0xC00-0xC1F, 0xC80-0xC9F (U-mode shadows).
+  // The HPM counters (mhpmcounter3-31(h), hpmcounter3-31(h)) are compared: their values are
+  // pushed before every step from the RVFI record (cheriot_sail_cosim_set_mhpmcounter), which
+  // holds the value the instruction read, as the Spike cosim relies on (spike_cosim.cc).
   uint32_t csr_addr      = (insn >> 20) & 0xfff;
   bool is_csr_insn       = ((insn & 0x7f) == 0x73) && (((insn >> 12) & 0x7) != 0);
-  bool is_counter_csr    = is_csr_insn &&
-                           (((csr_addr >= 0xB00) && (csr_addr <= 0xB1F)) ||
-                            ((csr_addr >= 0xB80) && (csr_addr <= 0xB9F)) ||
-                            ((csr_addr >= 0xC00) && (csr_addr <= 0xC1F)) ||
-                            ((csr_addr >= 0xC80) && (csr_addr <= 0xC9F)));
+  bool is_counter_csr    = false;
+  if (is_csr_insn) {
+    switch (csr_addr) {
+      case 0xB00: case 0xB02: case 0xB80: case 0xB82:              // mcycle(h), minstret(h)
+      case 0xC00: case 0xC01: case 0xC02: case 0xC80: case 0xC81: case 0xC82:  // aliases
+        is_counter_csr = true;
+        break;
+      default:
+        break;
+    }
+  }
   if (!rtl_trap && zrvfi_int_data_present && !is_counter_csr) {
     uint64_t sail_rd_addr, sail_rd_wdata;
     get_integer_output(&sail_rd_addr, &sail_rd_wdata);
@@ -434,6 +467,15 @@ int cheriot_sail_cosim_take_interrupt(const svBitVecVal *mip_p) {
   return 0;
 }
 
+// The same condition take_interrupt() checks first; reads the model's state only.
+int cheriot_sail_cosim_irq_would_take(const svBitVecVal *mip_p) {
+  if (!s_initialized) {
+    return 0;
+  }
+  const bool mie_set = (zmstatus.zbits >> 3) & 1;
+  return mie_set && ((uint64_t)mip_p[0] & zmie.zbits) != 0;
+}
+
 // Return the Sail model's mtval register value after the last zstep().
 // Only meaningful when the last step took a trap (rvfi_trap == 1).
 uint32_t cheriot_sail_cosim_get_mtval(void) {
@@ -484,6 +526,24 @@ void cheriot_sail_cosim_write_mem_byte(const svBitVecVal *addr_p, const svBitVec
 // returns the hardware value rather than Sail's own (frozen) counter.
 void cheriot_sail_cosim_set_mcycle(uint64_t mcycle) {
   zmcycle = mcycle;
+}
+
+// Bench inputs of CHERIoT-Ibex's platform CSRs (cheriot-sail-model/sail-riscv/c_emulator/
+// ibex_platform_csrs.c, spec GAP-CS-3). Pushed before every step, like mcycle. Only values that
+// depend on timing or on the bench are pushed: what the counters counted (the RVFI record's
+// mhpmcounters/mhpmcountersh, the value the instruction reads), the scrambling-key handshake and
+// the mcounteren_writable_i pin. Reset values, WARL masks and cpuctrlsts' trap/MRET side effects
+// are the model's.
+void cheriot_sail_cosim_set_mhpmcounter(uint32_t idx, uint64_t value) {
+  ibex_platform_set_mhpmcounter(idx, value);
+}
+
+void cheriot_sail_cosim_set_ic_scr_key_valid(svBit valid) {
+  ibex_platform_set_ic_scr_key_valid(valid != 0);
+}
+
+void cheriot_sail_cosim_set_mcounteren_writable(svBit writable) {
+  ibex_platform_set_mcounteren_writable(writable != 0);
 }
 
 // ---------------------------------------------------------------------------

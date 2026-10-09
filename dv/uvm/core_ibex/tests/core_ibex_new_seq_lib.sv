@@ -144,6 +144,9 @@ class irq_new_seq extends core_base_new_seq #(irq_seq_item);
   virtual task send_req();
     irq_seq_item irq;
     irq = irq_seq_item::type_id::create("irq");
+    // A sequence that never raises the NMI leaves its line alone, so its drop-all item cannot end
+    // an NMI another sequence on the same sequencer is holding (nmi_pulse_seq).
+    irq.drive_nm = !no_nmi;
 
     // Raise randomized num of interrupts
     start_item(irq);
@@ -170,6 +173,53 @@ class irq_new_seq extends core_base_new_seq #(irq_seq_item);
   endtask: send_req
 
 endclass: irq_new_seq
+
+// Raises only the NMI line for an interval, then drops it (irq_new_seq without the randomised set
+// of interrupts). It drives only irq_nm, so the other lines keep whatever another sequence on the
+// same sequencer (irq_new_seq with no_nmi) is driving.
+class nmi_pulse_seq extends irq_new_seq;
+
+  `uvm_object_utils(nmi_pulse_seq)
+  `uvm_object_new
+
+  virtual task send_req();
+    irq_seq_item irq;
+    irq = irq_seq_item::type_id::create("irq");
+    irq.drive_maskable = 1'b0;
+    start_item(irq);
+    `DV_CHECK_RANDOMIZE_WITH_FATAL(irq, num_of_interrupt == 1; irq_nm == 1;)
+    finish_item(irq);
+    get_response(irq);
+    `DV_CHECK_MEMBER_RANDOMIZE_FATAL(interval)
+    clk_vif.wait_clks(interval);
+    start_item(irq);
+    `DV_CHECK_RANDOMIZE_WITH_FATAL(irq, num_of_interrupt == 0;)
+    finish_item(irq);
+    get_response(irq);
+  endtask
+
+endclass
+
+// Raises irq_timer_i and leaves it high: no drop item follows. A program then decides with
+// mie.MTIE and mstatus.MIE whether the interrupt is taken or only pending (uarch_cg.cp_irq_pending
+// is |(mip & mie), which ignores mstatus.MIE). Drives the maskable lines only (timer on, the others
+// off), so an NMI another sequence drives is left alone.
+class irq_timer_hold_seq extends uvm_sequence #(irq_seq_item);
+
+  `uvm_object_utils(irq_timer_hold_seq)
+  `uvm_object_new
+
+  virtual task body();
+    irq_seq_item irq;
+    irq = irq_seq_item::type_id::create("irq");
+    irq.drive_nm = 1'b0;
+    start_item(irq);
+    `DV_CHECK_RANDOMIZE_WITH_FATAL(irq, num_of_interrupt == 1; irq_timer == 1;)
+    finish_item(irq);
+    get_response(irq);
+  endtask
+
+endclass
 
 // Simple debug sequence
 // debug_req is just a single bit sideband signal, use the interface to drive it directly

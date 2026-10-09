@@ -49,6 +49,12 @@ SIGNATURE_ADDR      := 8ffffffc
 ### Ibex top level parameters ###
 IBEX_CONFIG         := opentitan
 
+# 1: build the testbench with the real RISC-V debug module (vendor/pulp_riscv_dbg dm_top behind
+# ibex_dm_obi_mux, +define+IBEX_DM_REAL; scripts/compile_tb.py) for the directed tests marked
+# requires_dm (directed_tests/directed_testlist_dm.yaml, core_ibex_dm_test). Empty: the normal
+# build, whose debug requests come from the TB debug agent. Changing it rebuilds the testbench.
+DM                  :=
+
 # Path to DUT used for coverage reports
 DUT_COV_RTL_PATH    := "ibex_top"
 

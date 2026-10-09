@@ -321,10 +321,24 @@ class RegressionMetadata(scripts_lib.testdata_cls):
         """
         m = directed_test_schema.import_model(self.directed_test_data)
 
+        # DM=1 (core_ibex Makefile variable, exported): the testbench is built with the real debug
+        # module (compile_tb.py). Tests marked requires_dm can only run on such a build.
+        dm_build = os.environ.get('DM', '').strip() == '1'
+        requested = self.test.split(',')
+
         matched_list: ibex_cmd._TestEntries = []
         for entry in m.get('tests'):
-            select_test = any(x in self.test.split(',')
+            select_test = any(x in requested
                               for x in ['all_directed', entry.get('test')])
+            if select_test and entry.get('requires_dm') and not dm_build:
+                if entry.get('test') in requested:
+                    raise RuntimeError(
+                        f"Directed test '{entry.get('test')}' needs the testbench built with the "
+                        "real debug module: add DM=1 (e.g. make uvm-test-xlm "
+                        f"TEST={entry.get('test')} DM=1).")
+                logger.info(f"Skipping directed test '{entry.get('test')}' (requires_dm) on a "
+                            "build without the real debug module (DM=1 not set).")
+                continue
             if select_test:
                 entry.update({'iterations': (self.iterations or entry['iterations'])})
                 if entry['iterations'] > 0:

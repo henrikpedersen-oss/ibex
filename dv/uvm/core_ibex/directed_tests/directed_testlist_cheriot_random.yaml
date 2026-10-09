@@ -1,0 +1,90 @@
+# Copyright lowRISC contributors.
+# Licensed under the Apache License, Version 2.0, see LICENSE for details.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Self-randomising CHERIoT directed tests. The program draws its stimulus from an LFSR seeded
+# with the UVM seed (compile_test.py passes -DDV_SEED=<seed> to every directed compile), so
+# each iteration is a different program; the CHERIoT-Sail cosim checks every retired
+# instruction and the program checks liveness, its own trap handling and a few
+# model-independent ISA invariants.
+#
+# Uses the cheriot-dv-tests config (directed_testlist_cheriot_traps.yaml): self-contained, no
+# crt_cheriot.S, pin On from reset, CHERIoT-Sail oracle on. +disable_spurious_dside_responses=1
+# for the reason given at the top of directed_testlist.yaml (the test's own handler would
+# take the injected bus error as an unexpected trap and fail with code 2).
+
+- test: cheriot_rand_operands
+  desc: >
+    Random CHERIoT operands for the per-instruction crosses of cheriot_uarch_cg: an LFSR
+    (seeded per UVM seed) builds capabilities from MTDC/MTCC/MScratchC of every class the
+    crosses name -- root, E = 24, E = 1..14, E = 0 and zero-length bounds; base near 0, near
+    2^32 or anywhere; cursor below/at the base, inside, top-1..7, at/above the top; all
+    permission encodings; every otype; untagged and raw-encoded -- and runs CSetBounds
+    (all req_len classes), CSetBoundsExact/RoundDown/Imm, CIncAddr/CIncAddrImm/CSetAddr,
+    AUICGP and AUIPCC (all imm20 classes, from E = 0/2/5/24 PCCs), the CGet* family, CSetHigh,
+    CSEQX/CTestSubset (explicit tag x otype), CSeal/CUnseal (sealer otype 0-15/>=16 x
+    position), CRRL/CRAM (rs1 bit-size 0-32), CSC/CLC, CJALR (rd c0/cra/ct1/ca5 x five imm
+    classes, target vs bounds, sentries, MIE), CJAL from bounded PCCs, and a CSpecialRW sweep
+    of SCR 28-31 and undefined SCRs x cs1/cd classes with and without PCC.SR. Before the loop,
+    deterministic sweeps: CSetBounds requests 0-9 over fixed sources (setbounds_det); CRRL/CRAM/
+    CSetBoundsRoundDown on a tagged rs1 of every bit-size, and CSetBounds[Imm] on untagged raw
+    E = 24 sources (bits_det); CJALR over cs1 tag x EX x cp_cheri_cjalr_bound value x imm class,
+    generated from a model of CHERIoT-Sail (cjalr_det, gen_cjalr_det.py): every attempt checks
+    its mtval, and tagged+EX jumps whose target is in bounds land in a zone the test writes at
+    0x80FFFF80, where the number of instructions run before the fetch leaves PCC's bounds is
+    checked; CJALR over cs1 tag x otype x rd x imm x MIE (cjalr_ot_det); and the address group
+    on base-0, top-of-memory, wrapped-base, untagged sealed E = 4 and raw wrapped-base E = 0
+    capabilities (addr_det). CSEQX/CTestSubset operands include E = 0 capabilities
+    with chosen T/B mantissas; CSeal sealers cover every SE x tag combination. Faulting
+    instructions resume through a CHERIoT handler; CHERIoT-Sail cosim checks every result.
+    Returns 0, else a code from the test header (2 unexpected trap, 3 wrong cause or a
+    fall-through ebreak, 4 CJALR fell through, 10/11 liveness, 12/13 no CJALR faulted/landed,
+    16-18 cjalr_det landing count / return-or-trap / mtval, 19-27 ISA invariants).
+  iterations: 12
+  # ~3.1M cycles. 21-30 min wall clock on nyx in a full regression (2026-10-08, 20 seeds), most
+  # of it writing the ~80 MB log of relaxed Spike mismatches (Spike cannot model CHERI
+  # instructions; CHERIoT-Sail is the oracle). 1800 s cut off 3 of 12 seeds at ~2.9M cycles.
+  timeout_s: 3600
+  test_srcs: cheriot_rand_operands/cheriot_rand_operands.S
+  config: cheriot-dv-tests
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
+
+- test: cheriot_rand_ldst
+  desc: >
+    cheriot_rand_operands built with -DONLY_LDST: every operation is one load or store (LB, LBU,
+    LH, LHU, LW, CLC, SB, SH, SW, CSC), naturally aligned, through an MTDC-derived authority
+    whose base or top is placed -10..10 bytes from the access, with the needed permission (LD or
+    SD) dropped or kept and the authority valid, untagged or sealed. Below-base cursors use an
+    E = 24 authority, the only exponent whose representable range includes them. Fills
+    cheri_access_bounds_cg (base/top edge crosses and the fault-priority cross). Faults resume
+    through the CHERIoT handler; CHERIoT-Sail cosim checks every load result. Returns 0, else
+    a code from the test header (2/3 unexpected trap, 10 liveness, 14 no access completed,
+    15 no access faulted).
+  iterations: 6
+  timeout_s: 1800
+  test_srcs: cheriot_rand_operands/cheriot_rand_operands.S
+  config: cheriot-dv-tests
+  gcc_opts: -march=rv32imc -mabi=ilp32 -static -mcmodel=medany -nostdlib -nostartfiles -DONLY_LDST
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
+
+- test: cheriot_rand_operands_far
+  desc: >
+    cheriot_rand_operands built with -DFAR_WINDOWS and run with +far_code_windows=1 (CHERIoT-Sail
+    maps [0, 0x1000) and [0x80000000, 2^32); the bench and Spike answer every address): the same
+    program plus the cjalr_det cases whose tagged + EX target is fetched in bounds within 7 bytes
+    of 0 or of 2^32 -- the 63 cheriot_cjalr_cross1 bins the default build cannot reach
+    (cp_cheri_cjalr_bound 0x0a0/0x0c0/0x0e0 bin1-5, 0x0a2 bin1/2/5, 0x0c2/0x0e2 bin1/2/4/5,
+    0x102/0x182 bin1-5, 0x122/0x132/0x142/0x152/0x162 bin1/2/4/5, 0x172 bin1/2/5, 0x130/0x150
+    bin2, 0x170 bin2/4) and 24 more the random loop also hits. They land in two zones the test
+    writes at [0, 0x80) and [0xFFFFFF80, 2^32) (c.addi in every halfword; the top zone ends in a
+    c.beqz at 2^32 - 2 back to a cjalr at 0xFFFFFF78, so no fetch or link crosses 2^32), where the
+    number of instructions run before the fetch leaves PCC's bounds and the return-or-fetch-fault
+    outcome are checked against the CHERIoT-Sail model in gen_cjalr_det.py. Same failure codes as
+    cheriot_rand_operands; liveness (11) counts CJD_NTRY + CJD_NTRY_FAR attempts.
+  iterations: 1
+  # Same size as cheriot_rand_operands: 26-30 min in a full regression (2026-10-08).
+  timeout_s: 3600
+  test_srcs: cheriot_rand_operands/cheriot_rand_operands.S
+  config: cheriot-dv-tests
+  gcc_opts: -march=rv32imc -mabi=ilp32 -static -mcmodel=medany -nostdlib -nostartfiles -DFAR_WINDOWS
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1 +far_code_windows=1"

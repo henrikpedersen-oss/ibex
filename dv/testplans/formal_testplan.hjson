@@ -1,0 +1,233 @@
+// Copyright lowRISC contributors.
+// Licensed under the Apache License, Version 2.0, see LICENSE for details.
+// SPDX-License-Identifier: Apache-2.0
+{
+  name: "formal"
+
+  // Tests. Sail-equivalence proofs (formal-riscv, formal-cheriot) are reported per property
+  // family -- the top-level lemma groups of formal-cheriot/thm/riscv.proof -- as
+  // formal_<flow>_<Family>: passing = proven properties of the family, total = proven + cex. A
+  // family with no properties in the session log is NOT RUN. formal_<flow>_complete checks no
+  // proof step left an assertion undetermined. formal_cheriot_cover_<name> passes when that
+  // cover property is covered. The transition proof and VeriCHERI are reported per named
+  // property. Tags are the flows a test must pass in: riscv (make formal), cheriot (make
+  // formal-cheriot), transition (make formal-cheriot-transition), vericheri (make vericheri).
+  // Reported by make testplan-formal.
+  testpoints: [
+    {
+      name: ibex_invariants
+      desc: '''Microarchitectural invariants the equivalence proof builds on
+
+            The Ibex lemma (thm/ibex.proof): pipeline, LSU and decode invariants such as "a data
+            request needs a memory instruction" and "the decompressed instruction matches". They
+            are proved first and then used as assumptions by the instruction families, so each
+            must be proven for any family result to stand.'''
+      stage: V2
+      tags: ["riscv", "cheriot"]
+      tests: ["formal_riscv_Ibex", "formal_cheriot_Ibex"]
+    }
+
+    {
+      name: capability_data_type_invariant
+      desc: '''Every capability the core holds is well formed
+
+            The data-type invariant lemma (thm/dti.proof, family Dti): capabilities in the
+            execute stage, the CSRs, writeback and the register file satisfy the capability well-
+            formedness predicate. It is a lemma of the CHERIoT proof, proved before the families
+            that rely on it.'''
+      stage: V2
+      tags: ["cheriot"]
+      tests: ["formal_cheriot_Dti"]
+    }
+
+    {
+      name: sail_equivalence_rv32_instructions
+      desc: '''Every retired RV32 instruction matches the Sail model
+
+            For each instruction class, the architectural effect of a retiring instruction --
+            next PC, register write, CSR state, memory request -- equals the Sail
+            specification's: RISC-V Sail in formal-riscv (make formal), CHERIoT-Sail in formal-
+            cheriot (make formal-cheriot), where RV32 instructions run with CHERIoT enabled and
+            their memory accesses are authorised by capabilities.'''
+      stage: V2
+      tags: ["riscv", "cheriot"]
+      tests: ["formal_riscv_Arith", "formal_riscv_BType", "formal_riscv_JType",
+              "formal_riscv_UType", "formal_riscv_Fence", "formal_cheriot_Arith",
+              "formal_cheriot_BType", "formal_cheriot_JType", "formal_cheriot_UType",
+              "formal_cheriot_Fence"]
+    }
+
+    {
+      name: sail_equivalence_muldiv
+      desc: '''Multiply and divide instructions match the Sail model
+
+            MType families: address, CSR, PC and data effects of MUL, MULH, MULHSU, MULHU, DIV,
+            DIVU, REM and REMU. The data results are part of the obligation: every MType_*_Data
+            property is enabled and proven.'''
+      stage: V2
+      tags: ["riscv", "cheriot"]
+      tests: ["formal_riscv_MType", "formal_cheriot_MType"]
+    }
+
+    {
+      name: sail_equivalence_memory
+      desc: '''Loads and stores match the Sail model
+
+            Mem family: address, alignment, data and error behaviour of loads and stores,
+            including the split misaligned case (mem.proof).'''
+      stage: V2
+      tags: ["riscv", "cheriot"]
+      tests: ["formal_riscv_Mem", "formal_cheriot_Mem"]
+    }
+
+    {
+      name: sail_equivalence_system
+      desc: '''CSR access, ECALL/EBREAK/MRET and WFI match the Sail model
+
+            CSR, Special and WFI families, over every CSR the model defines
+            (wbexc_is_checkable_csr).'''
+      stage: V2
+      tags: ["riscv", "cheriot"]
+      tests: ["formal_riscv_CSR", "formal_riscv_Special", "formal_riscv_WFI", "formal_cheriot_CSR",
+              "formal_cheriot_Special", "formal_cheriot_WFI"]
+    }
+
+    {
+      name: sail_equivalence_traps
+      desc: '''Interrupts, illegal instructions and fetch errors match the Sail model
+
+            IRQ, Illegal and FetchErr families: PC and CSR state after an interrupt, an illegal
+            instruction or an instruction fetch error.'''
+      stage: V2
+      tags: ["riscv", "cheriot"]
+      tests: ["formal_riscv_IRQ", "formal_riscv_Illegal", "formal_riscv_FetchErr",
+              "formal_cheriot_IRQ", "formal_cheriot_Illegal", "formal_cheriot_FetchErr"]
+    }
+
+    {
+      name: sail_equivalence_top
+      desc: '''Top-level equivalence of every finishing instruction
+
+            Top family: the whole architectural state after any finishing instruction, RV32 or
+            CHERIoT -- the property the per-class families together discharge.'''
+      stage: V2
+      tags: ["riscv", "cheriot"]
+      tests: ["formal_riscv_Top", "formal_cheriot_Top"]
+    }
+
+    {
+      name: sail_equivalence_cheriot_instructions
+      desc: '''Every CHERIoT instruction matches CHERIoT-Sail on the full capability state
+
+            One property family per CHERIoT instruction group, proved against CHERIoT-Sail
+            (ibexspec.sv generated from Microsoft's CHERIoT-Sail fork ac58b3f8, the only model
+            version the Sail-to-SystemVerilog flow supports; simulation uses the newest model):
+            - CapInspect: CGetPerm, CGetType, CGetBase, CGetLen, CGetTag, CGetAddr, CGetHigh,
+              CGetTop
+            - CapModify: CSetAddr, CIncAddr, CIncAddrImm, CAndPerm, CClearTag, CSetHigh, CMove
+            - CapBounds: CSetBounds, CSetBoundsImm, CSetBoundsExact, CSetBoundsRoundDown, CRRL,
+              CRAM
+            - CapCompare: CSub, CIsEqual (CSetEqualExact), CTestSubset
+            - CapSeal: CSeal, CUnseal
+            - CapMem: CLC, CSC, and RV32 loads and stores authorised by a capability
+            - CapJump: CJAL, CJALR, including sentry types and interrupt posture
+            - CapPcRel: AUIPCC, AUICGP
+            - CapScr: CSpecialRW
+
+            Each family compares the full capability state, not only integer values: the
+            destination register's tag, bounds, permissions, object type and address
+            (spec/cheri.sv regcap2sail, fullcap2sail, pcc2sail); PCC; the SCRs; the tag a CSC
+            stores; and mcause/mtval. Each splits into the non-trapping and the trapping (Err)
+            case, so every CHERI exception an instruction can raise is compared. Property names
+            start with the family name, which is how make testplan-formal counts them.'''
+      stage: V2
+      tags: ["cheriot"]
+      tests: ["formal_cheriot_CapInspect", "formal_cheriot_CapModify", "formal_cheriot_CapBounds",
+              "formal_cheriot_CapCompare", "formal_cheriot_CapSeal", "formal_cheriot_CapMem",
+              "formal_cheriot_CapJump", "formal_cheriot_CapPcRel", "formal_cheriot_CapScr"]
+    }
+
+    {
+      name: proof_complete
+      desc: '''Every property of the proof reached a verdict
+
+            No SUMMARY block (one per proof step) lists an undetermined assertion. An
+            undetermined property is neither proven nor refuted, and the session log does not
+            name it, so it cannot appear under its family; this test is where it shows.'''
+      stage: V2
+      tags: ["riscv", "cheriot"]
+      tests: ["formal_riscv_complete", "formal_cheriot_complete"]
+    }
+
+    {
+      name: cheriot_enable_transition
+      desc: '''cheriot_enable_i 0 to 1 cannot corrupt CHERIoT state (#827, REQ_BCK_05)
+
+            The environment may start cheriot_enable_i at any encoding other than On and turn it
+            On once (make formal-cheriot-transition, verify-cheriot-transition.tcl):
+            - a_cheri_opcode_requires_enable: while not On, no instruction is decoded as CHERIoT
+            - a_cheriot_enable_invalid_fails_safe: while the encoding is invalid (neither On nor
+              Off), no instruction completes unless the major alert has been raised -- the core
+              must stop or alert the external alert handler, never fail open
+            - a_no_tag_write_while_off: while not On, no register-file write carries a tag, so
+              nothing stale is tagged when CHERIoT comes on
+            - sanity_decoder_gate: a copy of a_cheri_opcode_requires_enable with the decoder's
+              enable input freed (stopat) gives a counterexample, showing the main result depends
+              on the gate'''
+      stage: V2
+      tags: ["transition"]
+      tests: ["formal_transition_a_cheri_opcode_requires_enable",
+              "formal_transition_a_cheriot_enable_invalid_fails_safe",
+              "formal_transition_a_no_tag_write_while_off", "formal_transition_sanity_decoder_gate"]
+    }
+
+    {
+      name: vericheri_capability_invariants
+      desc: '''Capabilities stay representable and monotonic
+
+            VeriCHERI (RPTU-EIS) invariants against the RTL, no reference model: every capability
+            in the register file, the writeback path, the SCRs and PCC is representable (base
+            plus inductive steps), and no instruction increases a capability's authority
+            (monotonicity). LoadedCapRepr_NotVacuous is covered, showing the representability
+            assumption on loaded capabilities is not vacuous (#823).'''
+      stage: V2
+      tags: ["vericheri"]
+      tests: ["vericheri_VeriCHERI_ReprBase", "vericheri_VeriCHERI_ReprStep_Regfile",
+              "vericheri_VeriCHERI_ReprStep_Wb", "vericheri_VeriCHERI_ReprStep_Scrs",
+              "vericheri_VeriCHERI_ReprStep_Pcc", "vericheri_VeriCHERI_MonoStep",
+              "vericheri_LoadedCapRepr_NotVacuous"]
+    }
+
+    {
+      name: cheriot_cover_properties
+      desc: '''CHERIoT behaviours are reachable in the formal model
+
+            The cover properties of formal-cheriot/cheriot_cover_props.sv -- capability
+            instructions, trap paths, sentries, revocation -- are covered in the formal-cheriot
+            model: each must be reachable, or the properties that depend on the behaviour it
+            describes are vacuous there. The file is bound into the formal-cheriot proof against
+            the current core hierarchy (g_cheriot_ex.u_ibex_cheriot_ex).'''
+      stage: V2
+      tags: ["cheriot"]
+      tests: ["formal_cheriot_cover_cp_cheri_retires", "formal_cheriot_cover_cp_cheri_trap",
+              "formal_cheriot_cover_cp_cheri_rf_suppress", "formal_cheriot_cover_cp_pvio_tag",
+              "formal_cheriot_cover_cp_cseal_exec", "formal_cheriot_cover_cp_cseal_ok",
+              "formal_cheriot_cover_cp_cseal_pvio_tag", "formal_cheriot_cover_cp_cseal_pvio_seal",
+              "formal_cheriot_cover_cp_cunseal_exec", "formal_cheriot_cover_cp_cunseal_ok",
+              "formal_cheriot_cover_cp_cunseal_pvio_seal", "formal_cheriot_cover_cp_candperm_exec",
+              "formal_cheriot_cover_cp_csetbounds_ok", "formal_cheriot_cover_cp_csetbounds_bvio",
+              "formal_cheriot_cover_cp_csetbounds_ex", "formal_cheriot_cover_cp_csetbounds_imm",
+              "formal_cheriot_cover_cp_clc_ok", "formal_cheriot_cover_cp_clc_pvio_ld",
+              "formal_cheriot_cover_cp_clc_bvio", "formal_cheriot_cover_cp_clc_tag_revoked",
+              "formal_cheriot_cover_cp_clc_clr_lm", "formal_cheriot_cover_cp_csc_ok",
+              "formal_cheriot_cover_cp_csc_pvio_sd", "formal_cheriot_cover_cp_csc_pvio_sc",
+              "formal_cheriot_cover_cp_csc_bvio", "formal_cheriot_cover_cp_csc_store_local",
+              "formal_cheriot_cover_cp_rvfi_cap_mem", "formal_cheriot_cover_cp_cap_misalign",
+              "formal_cheriot_cover_cp_cjalr_ok", "formal_cheriot_cover_cp_cjalr_pvio_tag",
+              "formal_cheriot_cover_cp_cjalr_pvio_ex", "formal_cheriot_cover_cp_cjalr_pvio_seal",
+              "formal_cheriot_cover_cp_cjalr_ie_sentry", "formal_cheriot_cover_cp_cjalr_id_sentry",
+              "formal_cheriot_cover_cp_rv32_bvio", "formal_cheriot_cover_cp_rv32_pvio_tag",
+              "formal_cheriot_cover_cp_intr_taken"]
+    }
+  ]
+}
