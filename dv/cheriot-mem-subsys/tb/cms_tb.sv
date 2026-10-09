@@ -6,8 +6,8 @@
 // opentitan-cheriot/hw/ip/cheriot/rtl/cheriot.sv), unmodified.
 //
 //   cms_tl_host x4  -> cored_tl_d (+ tag sideband), revbm_tl_d, corerevbm_tl, regs_tl_d
-//   cms_tl_mem  x3  <- cored_tl_h and trbe_tl_h (one shared data store), meta_sram_tl
-//   prim_alert_receiver on fatal_fault; intr_trbe_done_o checked against the model;
+//   cms_tl_mem  x3  <- cored_tl_h and tbre_tl_h (one shared data store), meta_sram_tl
+//   prim_alert_receiver on fatal_fault; intr_tbre_done_o checked against the model;
 //   tlul_assert on all seven TL-UL ports
 //   cms_sb (cms_pkg): shadow tag map, revocation bitmap, data and CSR model
 //
@@ -39,9 +39,9 @@ module cms_tb;
   tl_d2h_t core_d2h, revbm_d2h, corerevbm_d2h, csr_d2h;
   logic    core_tag_h2d, core_tag_d2h;
   logic    unused_tag_revbm, unused_tag_corerevbm, unused_tag_csr;
-  tl_h2d_t dmem_h2d, trbe_h2d, meta_h2d;
-  tl_d2h_t dmem_d2h, trbe_d2h, meta_d2h;
-  logic    intr_trbe_done;
+  tl_h2d_t dmem_h2d, tbre_h2d, meta_h2d;
+  tl_d2h_t dmem_d2h, tbre_d2h, meta_d2h;
+  logic    intr_tbre_done;
 
   prim_alert_pkg::alert_rx_t [cheriot_reg_pkg::NumAlerts-1:0] alert_rx;
   prim_alert_pkg::alert_tx_t [cheriot_reg_pkg::NumAlerts-1:0] alert_tx;
@@ -59,7 +59,7 @@ module cms_tb;
     .clk_i           (clk),
     .rst_ni          (rst_n),
     .cheriot_ena_i   (ena),
-    .intr_trbe_done_o(intr_trbe_done),
+    .intr_tbre_done_o(intr_tbre_done),
     .alert_rx_i      (alert_rx),
     .alert_tx_o      (alert_tx),
     .regs_tl_d_i     (csr_h2d),
@@ -74,8 +74,8 @@ module cms_tb;
     .revbm_tl_d_o    (revbm_d2h),
     .cored_tl_h_o    (dmem_h2d),
     .cored_tl_h_i    (dmem_d2h),
-    .trbe_tl_h_o     (trbe_h2d),
-    .trbe_tl_h_i     (trbe_d2h),
+    .tbre_tl_h_o     (tbre_h2d),
+    .tbre_tl_h_i     (tbre_d2h),
     .meta_sram_tl_o  (meta_h2d),
     .meta_sram_tl_i  (meta_d2h)
   );
@@ -99,8 +99,8 @@ module cms_tb;
 
   cms_tl_mem #(.Name("dmem"), .Kind(0), .Depth(4)) u_dmem (
     .clk_i(clk), .rst_ni(rst_n), .ena_i(ena), .tl_i(dmem_h2d), .tl_o(dmem_d2h));
-  cms_tl_mem #(.Name("trbe_mem"), .Kind(1), .Depth(4)) u_trbe_mem (
-    .clk_i(clk), .rst_ni(rst_n), .ena_i(ena), .tl_i(trbe_h2d), .tl_o(trbe_d2h));
+  cms_tl_mem #(.Name("tbre_mem"), .Kind(1), .Depth(4)) u_tbre_mem (
+    .clk_i(clk), .rst_ni(rst_n), .ena_i(ena), .tl_i(tbre_h2d), .tl_o(tbre_d2h));
   cms_tl_mem #(.Name("meta"), .Kind(2), .Depth(2)) u_meta (
     .clk_i(clk), .rst_ni(rst_n), .ena_i(ena), .tl_i(meta_h2d), .tl_o(meta_d2h));
 
@@ -138,7 +138,7 @@ module cms_tb;
   tlul_assert #(.EndpointType("Device")) u_assert_corerevbm (.clk_i(clk), .rst_ni(rst_n), .h2d(corerevbm_h2d), .d2h(corerevbm_d2h));
   tlul_assert #(.EndpointType("Device")) u_assert_csr       (.clk_i(clk), .rst_ni(rst_n), .h2d(csr_h2d), .d2h(csr_d2h));
   tlul_assert #(.EndpointType("Host"))   u_assert_dmem      (.clk_i(clk), .rst_ni(rst_n), .h2d(dmem_h2d), .d2h(dmem_d2h));
-  tlul_assert #(.EndpointType("Host"))   u_assert_trbe      (.clk_i(clk), .rst_ni(rst_n), .h2d(trbe_h2d), .d2h(trbe_d2h));
+  tlul_assert #(.EndpointType("Host"))   u_assert_tbre      (.clk_i(clk), .rst_ni(rst_n), .h2d(tbre_h2d), .d2h(tbre_d2h));
   tlul_assert #(.EndpointType("Host"))   u_assert_meta      (.clk_i(clk), .rst_ni(rst_n), .h2d(meta_h2d), .d2h(meta_d2h));
 
   // Always-on checks of the DUT's host ports, cycle by cycle
@@ -148,14 +148,14 @@ module cms_tb;
       if (meta_h2d.a_valid && ena != prim_mubi_pkg::MuBi4True)
         cms_error("mode", $sformatf("meta SRAM a_valid with cheriot_ena_i = %0h", ena));
       // The engine only reads memory.
-      if (trbe_h2d.a_valid && trbe_h2d.a_opcode != Get)
-        cms_error("trbe", "write on trbe_tl_h");
+      if (tbre_h2d.a_valid && tbre_h2d.a_opcode != Get)
+        cms_error("tbre", "write on tbre_tl_h");
       // No core data access issued outside CHERIoT mode looks up a tag (checked by the SB on the
       // returned tag); none is ever dropped either: every core request reaches cored_tl_h.
     end
   end
 
-  // intr_trbe_done_o is INTR_STATE & INTR_ENABLE (a level interrupt). The model learns the
+  // intr_tbre_done_o is INTR_STATE & INTR_ENABLE (a level interrupt). The model learns the
   // registers from CSR responses, which come a cycle or more after the register changed, so the
   // pin is compared once the CSR port has been quiet for a few cycles.
   cms_sb       sb;           // the reference model (declared here: the check below uses it)
@@ -168,9 +168,9 @@ module cms_tb;
     end else begin
       if (csr_quiet < 4) csr_quiet++;
       exp_intr = sb.intr_pin_expect();
-      if (csr_quiet >= 4 && !exp_intr[intr_trbe_done]) begin
+      if (csr_quiet >= 4 && !exp_intr[intr_tbre_done]) begin
         if (!intr_bad)
-          cms_error("intr", $sformatf("intr_trbe_done_o %b, expected %s", intr_trbe_done,
+          cms_error("intr", $sformatf("intr_tbre_done_o %b, expected %s", intr_tbre_done,
                                       tagset_str(exp_intr)));
         intr_bad = 1;
       end else begin
@@ -208,8 +208,8 @@ module cms_tb;
 `ifndef VERILATOR
 `define CMS_TF    u_dut.u_cheriot_tag_filter
 `define CMS_WTRC  `CMS_TF.gen_wtrc.u_cheriot_wtrc
-`define CMS_MOVER u_dut.u_cheriot_trbe.u_cheriot_trbe_mover
-`define CMS_TRVK  u_dut.u_cheriot_trbe.u_cheriot_trvk_tlul.u_cheriot_trvk_core
+`define CMS_MOVER u_dut.u_cheriot_tbre.u_cheriot_tbre_mover
+`define CMS_TRVK  u_dut.u_cheriot_tbre.u_cheriot_trvk_tlul.u_cheriot_trvk_core
 `define CMS_RMW   u_dut.u_cheriot_rmw_filter
 `define CMS_ACT   u_dut.u_cheriot_access_check_trvk
 
@@ -219,15 +219,18 @@ module cms_tb;
     MutDataStoreSetsTag,
     MutCapStoreDropsTag,
     MutTrvkWrongBit,
-    MutTrbeSkipLast,
-    MutTrbeNoInval,
-    MutTrbeEpochStuck,
-    MutTrbeDoneEarly,
+    MutTbreSkipLast,
+    MutTbreNoInval,
+    MutTbreEpochStuck,
+    MutTbreDoneEarly,
     MutSnoopOff,
     MutMetaIntgUnreported,
     MutDataErrDropped,
     MutAlertDropped,
-    MutModeLooseMubi
+    MutModeLooseMubi,
+    MutTbreReadErrFatal,
+    MutWtrcPresentedUnflagged,
+    MutAlertTestUnlocked
   } cms_mut_e;
 
   cms_mut_e    mut = MutNone;
@@ -256,10 +259,12 @@ module cms_tb;
   logic              mv_tag_data;    // tag_m_o, data store sets the tag
   logic              mv_tag_cap;     // tag_m_o, capability store drops it
   logic [4:0]        mv_bit_sel;     // revbm_bit_select
-  logic [31:0]       mv_num_words;   // trbe_num_words
+  logic [31:0]       mv_num_words;   // tbre_num_words
   logic              mv_busy;        // mover busy_o
   tlul_pkg::tl_d2h_t mv_core_rsp;    // tag filter tl_d_o
   logic              mv_fwd;         // allow_forward
+  logic              mv_mover_err;   // mover err_o
+  logic              mv_alert_we;    // ALERT_TEST's gated write enable
 
   // partial_write_keeps_tag: only a full-word PutFullData write is looked up
   assign mv_lookup = prim_mubi_pkg::mubi4_test_true_strict(ena) && `CMS_TF.addr_tagged &&
@@ -276,10 +281,10 @@ module cms_tb;
                       (`CMS_TF.tag_d_i && !(`CMS_TF.tl_d_is_write && `CMS_TF.tl_d_i.a_address[2]));
   // trvk_wrong_bit: the engine's bitmap lookup reads the next granule's bit
   assign mv_bit_sel = `CMS_TRVK.revbm_bit_addr[4:0] + 5'd1;
-  // trbe_skip_last: a sweep of more than one capability stops one capability early
-  assign mv_num_words = (u_dut.trbe_sweep_caps > 1) ? (32'(u_dut.trbe_sweep_caps) - 32'd1) << 1
-                                                    : 32'(u_dut.trbe_sweep_caps) << 1;
-  // trbe_done_early: busy only while reads are being issued, not until every clear is answered
+  // tbre_skip_last: a sweep of more than one capability stops one capability early
+  assign mv_num_words = (u_dut.tbre_sweep_caps > 1) ? (32'(u_dut.tbre_sweep_caps) - 32'd1) << 1
+                                                    : 32'(u_dut.tbre_sweep_caps) << 1;
+  // tbre_done_early: busy only while reads are being issued, not until every clear is answered
   assign mv_busy = (`CMS_MOVER.state_q == 1'b1);
   // data_err_dropped: see cms_mut_drop_host_err
   assign mv_core_rsp = cms_mut_drop_host_err(`CMS_TF.host_rsp, `CMS_WTRC.tag_wr || `CMS_WTRC.head_cap,
@@ -292,6 +297,11 @@ module cms_tb;
                   `CMS_ACT.tl_h_i.a_address[1:0] == 2'b00 && `CMS_ACT.tl_h_i.a_size == 2'd2 &&
                   (`CMS_ACT.tl_h_i.a_opcode == tlul_pkg::PutFullData ||
                    `CMS_ACT.tl_h_i.a_opcode == tlul_pkg::Get);
+  // tbre_read_err_fatal: an error response to a read of the swept memory is a mover fault (the
+  // RTL before the merge of PR #31515), so a read-protected page raises fatal_fault
+  assign mv_mover_err = (|`CMS_MOVER.tl_err) || `CMS_MOVER.read_d_err;
+  // alert_test_unlocked: ALERT_TEST.regwen is ignored, so alert testing cannot be disabled
+  assign mv_alert_we = u_dut.u_reg_regs.alert_test_we;
 
   initial begin : mutate
     if ($value$plusargs("cms_mutate=%s", mut_name)) begin
@@ -313,25 +323,25 @@ module cms_tb;
           mut = MutTrvkWrongBit;
           force `CMS_TRVK.revbm_bit_select = mv_bit_sel;
         end
-        "trbe_skip_last": begin
-          mut = MutTrbeSkipLast;
-          force u_dut.trbe_num_words = mv_num_words;
+        "tbre_skip_last": begin
+          mut = MutTbreSkipLast;
+          force u_dut.tbre_num_words = mv_num_words;
         end
-        "trbe_no_inval": begin
-          mut = MutTrbeNoInval;
+        "tbre_no_inval": begin
+          mut = MutTbreNoInval;
           force `CMS_MOVER.write_a_valid = 1'b0;
         end
-        "trbe_epoch_stuck": begin
-          mut = MutTrbeEpochStuck;
-          force u_dut.trbe_epoch_en = 1'b0;
+        "tbre_epoch_stuck": begin
+          mut = MutTbreEpochStuck;
+          force u_dut.tbre_epoch_en = 1'b0;
         end
-        "trbe_done_early": begin
-          mut = MutTrbeDoneEarly;
+        "tbre_done_early": begin
+          mut = MutTbreDoneEarly;
           force `CMS_MOVER.busy_o = mv_busy;
         end
         "snoop_off": begin
           mut = MutSnoopOff;
-          force u_dut.trbe_snoop_valid = '0;
+          force u_dut.tbre_snoop_valid = '0;
         end
         "meta_intg_unreported": begin
           mut = MutMetaIntgUnreported;
@@ -349,6 +359,20 @@ module cms_tb;
         "mode_loose_mubi": begin
           mut = MutModeLooseMubi;
           force `CMS_ACT.allow_forward = mv_fwd;
+        end
+        "tbre_read_err_fatal": begin
+          mut = MutTbreReadErrFatal;
+          force `CMS_MOVER.err_o = mv_mover_err;
+        end
+        // A request presented between W1 and its tag write is not flagged, only one out of
+        // sequence when it is taken (the RTL before the merge of PR #31515)
+        "wtrc_presented_unflagged": begin
+          mut = MutWtrcPresentedUnflagged;
+          force `CMS_WTRC.req_before_tag_wr = 1'b0;
+        end
+        "alert_test_unlocked": begin
+          mut = MutAlertTestUnlocked;
+          force u_dut.u_reg_regs.alert_test_gated_we = mv_alert_we;
         end
         default: $fatal(1, "[cms_tb] unknown mutation '%s'", mut_name);
       endcase
@@ -381,16 +405,16 @@ module cms_tb;
                     `CMS_TRVK.revbm_rsp_data_i[`CMS_TRVK.revbm_bit_addr[4:0]] !=
                     `CMS_TRVK.revbm_rsp_data_i[`CMS_TRVK.revbm_bit_select];
         end
-        MutTrbeSkipLast:
-          differs = u_dut.trbe_valid_q &&
-                    u_dut.trbe_num_words != 32'(u_dut.trbe_sweep_caps) << 1;
-        MutTrbeNoInval:
+        MutTbreSkipLast:
+          differs = u_dut.tbre_valid_q &&
+                    u_dut.tbre_num_words != 32'(u_dut.tbre_sweep_caps) << 1;
+        MutTbreNoInval:
           differs = `CMS_MOVER.write_a_possible && !`CMS_MOVER.payload_fifo_out.rtag &&
                     !`CMS_MOVER.payload_fifo_out.rerr && `CMS_MOVER.write_rtag_q &&
                     `CMS_MOVER.waddr_fifo_out[2] && !`CMS_MOVER.track_stale_q[`CMS_MOVER.track_rptr];
-        MutTrbeEpochStuck:
-          differs = u_dut.trbe_done && !u_dut.trbe_failed_q && !u_dut.trbe_sweep_err;
-        MutTrbeDoneEarly:
+        MutTbreEpochStuck:
+          differs = u_dut.tbre_done && !u_dut.tbre_failed_q && !u_dut.tbre_sweep_err;
+        MutTbreDoneEarly:
           differs = `CMS_MOVER.busy_o != (`CMS_MOVER.state_q == 1'b1 || `CMS_MOVER.inflight_q != '0);
         MutSnoopOff: begin
           // A core write, during a sweep, to a capability whose lower word's read the engine
@@ -400,11 +424,11 @@ module cms_tb;
           sa[1] = u_dut.core_wr_addr_q[0];
           sa[2] = u_dut.core_wr_addr_q[1];
           for (int unsigned s = 0; s < 3; s++) begin
-            if (u_dut.trbe_active && sv[s] &&
+            if (u_dut.tbre_active && sv[s] &&
                 ((`CMS_MOVER.tl_r_o.a_valid && sa[s][31:3] == `CMS_MOVER.tl_r_o.a_address[31:3]) ||
                  sa[s][31:3] == `CMS_MOVER.track_granule_q[0] ||
                  sa[s][31:3] == `CMS_MOVER.track_granule_q[1] ||
-                 (u_dut.trbe_clear_valid && sa[s][31:3] == u_dut.trbe_clear_addr[31:3])))
+                 (u_dut.tbre_clear_valid && sa[s][31:3] == u_dut.tbre_clear_addr[31:3])))
               differs = 1;
           end
         end
@@ -426,6 +450,14 @@ module cms_tb;
                  `CMS_ACT.tl_h_i.a_opcode == tlul_pkg::Get);
           differs = `CMS_ACT.tl_h_i.a_valid && rtl != `CMS_ACT.allow_forward;
         end
+        MutTbreReadErrFatal:
+          differs = `CMS_MOVER.read_d_err && !(|`CMS_MOVER.tl_err);
+        // cap_state_q 2'd2 is CapW1: W1 taken, neither answered nor turned into its tag write
+        MutWtrcPresentedUnflagged:
+          differs = `CMS_WTRC.tl_d_i.a_valid && `CMS_WTRC.cap_state_q == 2'd2 &&
+                    !`CMS_WTRC.w1_done;
+        MutAlertTestUnlocked:
+          differs = u_dut.u_reg_regs.alert_test_we && !u_dut.u_reg_regs.alert_test_regwen_qs;
         default: ;
       endcase
       if (differs) begin
@@ -537,7 +569,7 @@ module cms_tb;
     longint unsigned t0;
     t0 = cms_cycle;
     while (!(u_core.idle() && u_revbm.idle() && u_corerevbm.idle() && u_csr.idle() &&
-             u_dmem.idle() && u_trbe_mem.idle() && u_meta.idle() &&
+             u_dmem.idle() && u_tbre_mem.idle() && u_meta.idle() &&
              u_core.done_q.size() == 0 && u_csr.done_q.size() == 0 &&
              u_revbm.done_q.size() == 0 && u_corerevbm.done_q.size() == 0)) begin
       @(posedge clk);
@@ -684,47 +716,47 @@ module cms_tb;
     data = r.rdata;
   endtask
 
-  // Poll TRBE_STATUS.busy until the sweep is over (programmers_guide.md step 5).
-  task automatic trbe_wait_idle(int unsigned max_polls = 100000);
+  // Poll TBRE_STATUS.busy until the sweep is over (programmers_guide.md step 5).
+  task automatic tbre_wait_idle(int unsigned max_polls = 100000);
     logic [31:0] status;
     for (int unsigned i = 0; i < max_polls; i++) begin
-      csr_read(CsrTrbeStatus, status);
+      csr_read(CsrTbreStatus, status);
       if (!status[StatusBusy]) return;
       wait_cycles($urandom_range(8));
     end
-    cms_error("tb", "TRBE_STATUS.busy never cleared");
+    cms_error("tb", "TBRE_STATUS.busy never cleared");
   endtask
 
-  task automatic trbe_sweep(logic [31:0] base, logic [31:0] num, bit wait_done = 1'b1);
+  task automatic tbre_sweep(logic [31:0] base, logic [31:0] num, bit wait_done = 1'b1);
     logic e;
-    trbe_wait_idle();
-    csr_write(CsrTrbeBase, base, e);
-    csr_write(CsrTrbeNum, num, e);
-    csr_write(CsrTrbeStart, 32'h1, e);
-    if (wait_done) trbe_wait_idle();
+    tbre_wait_idle();
+    csr_write(CsrTbreBase, base, e);
+    csr_write(CsrTbreNum, num, e);
+    csr_write(CsrTbreStart, 32'h1, e);
+    if (wait_done) tbre_wait_idle();
   endtask
 
-  // Wait for the end of the running sweep by its trbe_done interrupt instead of polling
+  // Wait for the end of the running sweep by its tbre_done interrupt instead of polling
   // (programmers_guide.md step 5 and "Tracking Completed Sweeps"): enable it, wait for the pin,
   // acknowledge it, and re-check busy, as a wake can be stale and a sweep ending in the cycle the
   // interrupt is acknowledged does not raise it again.
-  task automatic trbe_wait_intr(int unsigned max_cycles = 200000);
+  task automatic tbre_wait_intr(int unsigned max_cycles = 200000);
     logic [31:0] d;
     logic        e;
     csr_write(CsrIntrEnable, 32'h1, e);
     for (int unsigned w = 0; w < 4; w++) begin
-      for (int unsigned i = 0; i < max_cycles && !intr_trbe_done; i++) @(posedge clk);
-      if (!intr_trbe_done) begin
-        cms_error("tb", "trbe_done interrupt never raised");
+      for (int unsigned i = 0; i < max_cycles && !intr_tbre_done; i++) @(posedge clk);
+      if (!intr_tbre_done) begin
+        cms_error("tb", "tbre_done interrupt never raised");
         return;
       end
-      csr_read(CsrTrbeStatus, d);
+      csr_read(CsrTbreStatus, d);
       csr_write(CsrIntrState, 32'h1, e);
       if (!d[StatusBusy]) return;
-      csr_read(CsrTrbeStatus, d);
+      csr_read(CsrTbreStatus, d);
       if (!d[StatusBusy]) return;
     end
-    cms_error("tb", "trbe_done interrupt raised four times with the engine still busy");
+    cms_error("tb", "tbre_done interrupt raised four times with the engine still busy");
   endtask
 
   // ---- reset ----
@@ -749,7 +781,7 @@ module cms_tb;
       inflight[granule(u_core.cur.addr)] = u_core.cur.tag;
     rst_n = 1'b0;
     u_core.flush(); u_revbm.flush(); u_corerevbm.flush(); u_csr.flush();
-    u_dmem.clear_injections(); u_trbe_mem.clear_injections(); u_meta.clear_injections();
+    u_dmem.clear_injections(); u_tbre_mem.clear_injections(); u_meta.clear_injections();
     sb.on_reset(inflight);
     // The data half of a write in flight may or may not have reached memory: either is right.
     foreach (wr_inflight[i]) begin
@@ -799,6 +831,17 @@ module cms_tb;
     if (alert_cnt != 0) cms_error("alert", $sformatf("%s: unexpected fatal_fault alert", why));
   endtask
 
+  // The WTRC's assertions state what Ibex does (NoReqBeforeTagWr_A: nothing presented between W1
+  // and its tag write). A test that drives what the core cannot, to see the subsystem flag it,
+  // turns them off around it: a fired RTL assertion fails the run (cheriot_mem_subsys_results.py).
+  // Xcelium only; the Verilator lint target never runs a test.
+  task automatic wtrc_assertions(bit on);
+`ifndef VERILATOR
+    if (on) $asserton(0, u_dut.u_cheriot_tag_filter.gen_wtrc.u_cheriot_wtrc);
+    else    $assertoff(0, u_dut.u_cheriot_tag_filter.gen_wtrc.u_cheriot_wtrc);
+`endif
+  endtask
+
   // Randomise the handshake timing of every port
   task automatic randomize_timing(bit aggressive);
     u_core.a_gap_max        = aggressive ? 0 : $urandom_range(3);
@@ -811,8 +854,8 @@ module cms_tb;
     u_dmem.a_ready_pct      = aggressive ? 100 : $urandom_range(100, 50);
     u_dmem.lat_min          = 1;
     u_dmem.lat_max          = aggressive ? 1 : $urandom_range(4, 1);
-    u_trbe_mem.a_ready_pct  = $urandom_range(100, 50);
-    u_trbe_mem.lat_max      = $urandom_range(4, 1);
+    u_tbre_mem.a_ready_pct  = $urandom_range(100, 50);
+    u_tbre_mem.lat_max      = $urandom_range(4, 1);
     u_meta.a_ready_pct      = aggressive ? 100 : $urandom_range(100, 50);
     u_meta.lat_max          = aggressive ? 1 : $urandom_range(3, 1);
   endtask
@@ -837,13 +880,13 @@ module cms_tb;
         CsrIntrEnable != cheriot_reg_pkg::CHERIOT_INTR_ENABLE_OFFSET ||
         CsrIntrTest != cheriot_reg_pkg::CHERIOT_INTR_TEST_OFFSET ||
         CsrAlertTest != cheriot_reg_pkg::CHERIOT_ALERT_TEST_OFFSET ||
-        CsrRegwen != cheriot_reg_pkg::CHERIOT_TRBE_REGWEN_OFFSET ||
-        CsrTrbeBase != cheriot_reg_pkg::CHERIOT_TRBE_BASE_ADDR_OFFSET ||
-        CsrTrbeNum != cheriot_reg_pkg::CHERIOT_TRBE_NUM_CAPS_OFFSET ||
-        CsrTrbeStart != cheriot_reg_pkg::CHERIOT_TRBE_START_OFFSET ||
-        CsrTrbeStatus != cheriot_reg_pkg::CHERIOT_TRBE_STATUS_OFFSET ||
-        CsrTrbeEpoch != cheriot_reg_pkg::CHERIOT_TRBE_EPOCH_OFFSET ||
-        $bits(CsrTrbeEpoch) != cheriot_reg_pkg::RegsAw)
+        CsrRegwen != cheriot_reg_pkg::CHERIOT_TBRE_REGWEN_OFFSET ||
+        CsrTbreBase != cheriot_reg_pkg::CHERIOT_TBRE_BASE_ADDR_OFFSET ||
+        CsrTbreNum != cheriot_reg_pkg::CHERIOT_TBRE_NUM_CAPS_OFFSET ||
+        CsrTbreStart != cheriot_reg_pkg::CHERIOT_TBRE_START_OFFSET ||
+        CsrTbreStatus != cheriot_reg_pkg::CHERIOT_TBRE_STATUS_OFFSET ||
+        CsrTbreEpoch != cheriot_reg_pkg::CHERIOT_TBRE_EPOCH_OFFSET ||
+        $bits(CsrTbreEpoch) != cheriot_reg_pkg::RegsAw)
       cms_error("tb", "CSR offsets differ from cheriot_reg_pkg");
     // ... and so do the write byte enables the model requires (reggen's PERMIT table).
     for (int unsigned i = 0; i < cheriot_reg_pkg::NumRegsRegs; i++)
@@ -855,7 +898,7 @@ module cms_tb;
     meta_store = new("meta");
     sb = new(meta_store, data_store);
     u_dmem.store = data_store;     u_dmem.sb = sb;
-    u_trbe_mem.store = data_store; u_trbe_mem.sb = sb;
+    u_tbre_mem.store = data_store; u_tbre_mem.sb = sb;
     u_meta.store = meta_store;     u_meta.sb = sb;
 
     cms_info("tb", $sformatf("test %s seed %0d; SRAM [0x%08x,0x%08x) NVM [0x%08x,0x%08x) meta [0x%08x,0x%08x)",

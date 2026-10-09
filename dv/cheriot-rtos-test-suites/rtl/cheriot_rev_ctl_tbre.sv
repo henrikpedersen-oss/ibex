@@ -4,39 +4,41 @@
 
 // Derived from sonata-system/rtl/system/cheriot_rev_ctl_trbe.sv, where it is an uncommitted local
 // addition, so that this flow does not depend on a local change in another submodule. This copy
-// follows the register map of lowRISC/opentitan PR #31515 (TRBE_STATUS, TRBE_EPOCH, the trbe_done
+// follows the register map of lowRISC/opentitan PR #31515 (TBRE_STATUS, TBRE_EPOCH, the tbre_done
 // interrupt); the sonata-system copy still targets PR #31470's TRBE_BUSY and no longer builds
 // against opentitan-cheriot/.
 
-// Drives the CHERIoT memory subsystem's revocation engine (TRBE) from Sonata's rev_ctl.
+// Drives the CHERIoT memory subsystem's revocation engine (TBRE) from Sonata's rev_ctl.
 //
 // rev_ctl keeps the register interface the CHERIoT RTOS hardware-revoker driver uses (base, top,
 // go, epoch, interrupt; platform-hardware_revoker.hh). Its core-side interface is abstract: a go
 // pulse with the [start, end) range, and a running bit it turns into the epoch's low bit, the epoch
 // count (advanced whenever running falls) and the completion interrupt. This module implements
-// that interface with the TRBE, programming the TRBE's CSRs over TL-UL exactly as firmware would,
+// that interface with the TBRE, programming the TBRE's CSRs over TL-UL exactly as firmware would,
 // so the subsystem RTL is used unmodified:
 //
-//   first go: INTR_ENABLE <= trbe_done
-//   go:       TRBE_BASE_ADDR <= start; TRBE_NUM_CAPS <= capabilities in [start, end);
-//             TRBE_START <= 1; TRBE_STATUS read: start_err means the start was not taken; not
+//   first go: INTR_ENABLE <= tbre_done
+//   go:       TBRE_BASE_ADDR <= start; TBRE_NUM_CAPS <= capabilities in [start, end);
+//             TBRE_START <= 1; TBRE_STATUS read: start_err means the start was not taken; not
 //             busy any more means a short sweep is already over (to the end step's check)
-//   wait:     for the trbe_done interrupt (trbe_done_i)
-//   end:      TRBE_STATUS read: busy and sweep_err must be clear; INTR_STATE <= trbe_done
+//   wait:     for the tbre_done interrupt (tbre_done_i)
+//   end:      TBRE_STATUS read: busy and sweep_err must be clear; INTR_STATE <= tbre_done
 //   running:  from the go pulse until the end of a sweep without an error
 //
-// rev_ctl's own epoch stays the firmware's epoch; TRBE_EPOCH is not read. rev_ctl advances its
-// epoch whenever running falls, so the epoch keeps TRBE_EPOCH's guarantee as long as running only
+// rev_ctl's own epoch stays the firmware's epoch; TBRE_EPOCH is not read. rev_ctl advances its
+// epoch whenever running falls, so the epoch keeps TBRE_EPOCH's guarantee as long as running only
 // falls at the end of a sweep that resolved every capability. A sweep that cannot be shown to have
-// done so -- a start the TRBE did not take, a sweep with STATUS.sweep_err, an interrupt while still
+// done so -- a start the TBRE did not take, a sweep with STATUS.sweep_err, an interrupt while still
 // busy, a bus error on the CSR port -- keeps running high: the epoch stays odd, the driver never
 // sees a completed revocation and keeps the memory in quarantine, and err_o is raised, sticky until
-// reset. Every one of these also follows a fault the subsystem raises its fatal alert for, or a
-// broken guarantee of its register interface, so the shim does not retry. An empty range has no
-// capability to resolve and completes without the TRBE.
+// reset. Every one of these also follows a fault the subsystem raises its fatal alert for, an error
+// response to one of the engine's reads of the swept memory (sweep_err without the alert; the SRAM
+// this SoC sweeps does not deny reads), or a broken guarantee of its register interface, so the
+// shim does not retry. An empty range has no
+// capability to resolve and completes without the TBRE.
 //
 // A go while a sweep is running is ignored (the driver only starts one when the epoch is even).
-module cheriot_rev_ctl_trbe
+module cheriot_rev_ctl_tbre
   import cheriot_reg_pkg::*;
 (
   input  logic clk_i,
@@ -50,12 +52,12 @@ module cheriot_rev_ctl_trbe
   output tlul_pkg::tl_h2d_t tl_o,
   input  tlul_pkg::tl_d2h_t tl_i,
 
-  // The subsystem's trbe_done interrupt (intr_trbe_done_o).
-  input  logic trbe_done_i,
+  // The subsystem's tbre_done interrupt (intr_tbre_done_o).
+  input  logic tbre_done_i,
 
   output logic err_o
 );
-  // Fields of TRBE_STATUS
+  // Fields of TBRE_STATUS
   localparam int unsigned StatusBusyBit     = 0;
   localparam int unsigned StatusStartErrBit = 8;
   localparam int unsigned StatusSweepErrBit = 9;
@@ -81,7 +83,7 @@ module cheriot_rev_ctl_trbe
   logic        intr_en_q;   // INTR_ENABLE written
   logic [31:0] base_q;
   logic [31:0] num_caps_q;
-  logic [31:0] status_q;    // last TRBE_STATUS read, for the testbench
+  logic [31:0] status_q;    // last TBRE_STATUS read, for the testbench
 
   logic        go;
   logic [31:0] start_addr, end_addr;
@@ -94,7 +96,7 @@ module cheriot_rev_ctl_trbe
   assign end_addr   = ctl_to_core_i[63:32];
   assign go         = ctl_to_core_i[64];
 
-  // TRBE_BASE_ADDR holds a capability address, so the sweep starts at the capability start_addr
+  // TBRE_BASE_ADDR holds a capability address, so the sweep starts at the capability start_addr
   // is in.
   assign start_cap = {start_addr[31:3], 3'b000};
 
@@ -108,11 +110,11 @@ module cheriot_rev_ctl_trbe
     wdata = '0;
     unique case (state_q)
       WrIntrEnable: begin addr = 32'(CHERIOT_INTR_ENABLE_OFFSET);    wdata = 32'h1;      end
-      WrBase:       begin addr = 32'(CHERIOT_TRBE_BASE_ADDR_OFFSET); wdata = base_q;     end
-      WrNumCaps:    begin addr = 32'(CHERIOT_TRBE_NUM_CAPS_OFFSET);  wdata = num_caps_q; end
-      WrStart:      begin addr = 32'(CHERIOT_TRBE_START_OFFSET);     wdata = 32'h1;      end
+      WrBase:       begin addr = 32'(CHERIOT_TBRE_BASE_ADDR_OFFSET); wdata = base_q;     end
+      WrNumCaps:    begin addr = 32'(CHERIOT_TBRE_NUM_CAPS_OFFSET);  wdata = num_caps_q; end
+      WrStart:      begin addr = 32'(CHERIOT_TBRE_START_OFFSET);     wdata = 32'h1;      end
       RdStarted,
-      RdDone:       begin addr = 32'(CHERIOT_TRBE_STATUS_OFFSET);                        end
+      RdDone:       begin addr = 32'(CHERIOT_TBRE_STATUS_OFFSET);                        end
       WrIntrState:  begin addr = 32'(CHERIOT_INTR_STATE_OFFSET);     wdata = 32'h1;      end
       default:      ;
     endcase
@@ -144,7 +146,7 @@ module cheriot_rev_ctl_trbe
             num_caps_q <= (end_addr > start_addr) ? (end_addr - start_cap + 32'd7) >> 3 : '0;
             running_q  <= 1'b1;
             if (!(end_addr > start_addr)) begin
-              // Nothing to revoke. The TRBE would ignore the start and flag it, so it is not asked.
+              // Nothing to revoke. The TBRE would ignore the start and flag it, so it is not asked.
               state_q <= Empty;
             end else if (!intr_en_q) begin
               state_q <= WrIntrEnable;
@@ -159,7 +161,7 @@ module cheriot_rev_ctl_trbe
           state_q   <= Idle;
         end
         WaitDone: begin
-          if (trbe_done_i) begin
+          if (tbre_done_i) begin
             state_q <= RdDone;
           end
         end
@@ -190,7 +192,7 @@ module cheriot_rev_ctl_trbe
                   state_q <= WrIntrState;
                 end
               end
-              // The interrupt is raised once the TRBE is no longer active, with or without an
+              // The interrupt is raised once the TBRE is no longer active, with or without an
               // error.
               RdDone: begin
                 status_q <= rdata;
@@ -201,7 +203,7 @@ module cheriot_rev_ctl_trbe
                   state_q <= WrIntrState;
                 end
               end
-              // The TRBE is idle, so no sweep can end while the interrupt is acknowledged.
+              // The TBRE is idle, so no sweep can end while the interrupt is acknowledged.
               default: begin
                 running_q <= 1'b0;
                 state_q   <= Idle;

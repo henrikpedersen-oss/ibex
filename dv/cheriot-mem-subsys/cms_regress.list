@@ -9,30 +9,30 @@ cms_cap_load_hint            cms_cap_load_hint            3
 cms_mode_gating              cms_mode_gating              2
 cms_access_check             cms_access_check             3
 cms_rmw_same_word            cms_rmw_same_word            5
-cms_rmw_core_trbe_same_word  cms_rmw_core_trbe_same_word  5
-cms_trbe_sweep               cms_trbe_sweep               3
-cms_trbe_base_decode         cms_trbe_base_decode         5
-cms_trbe_csr                 cms_trbe_csr                 2
-cms_trbe_concurrent          cms_trbe_concurrent          5
-cms_trbe_store_race          cms_trbe_store_race          3
-cms_trbe_snoop_window        cms_trbe_snoop_window        5
-cms_trbe_epoch               cms_trbe_epoch               3
-cms_trbe_intr                cms_trbe_intr                3
+cms_rmw_core_tbre_same_word  cms_rmw_core_tbre_same_word  5
+cms_tbre_sweep               cms_tbre_sweep               3
+cms_tbre_base_decode         cms_tbre_base_decode         5
+cms_tbre_csr                 cms_tbre_csr                 2
+cms_tbre_concurrent          cms_tbre_concurrent          5
+cms_tbre_store_race          cms_tbre_store_race          3
+cms_tbre_snoop_window        cms_tbre_snoop_window        5
+cms_tbre_epoch               cms_tbre_epoch               3
+cms_tbre_intr                cms_tbre_intr                3
 cms_nvm_cap_store            cms_nvm_cap_store            5
 cms_err_tag_path             cms_err_tag_path             2
 cms_err_meta_intg            cms_err_meta_intg            2
 cms_err_csr_intg             cms_err_csr_intg             1
-cms_err_trbe_read            cms_err_trbe_read            3
-cms_err_trbe_revbm           cms_err_trbe_revbm           2
+cms_err_tbre_read            cms_err_tbre_read            3
+cms_err_tbre_revbm           cms_err_tbre_revbm           2
 cms_err_data_path            cms_err_data_path            2
 cms_alert_test               cms_alert_test               1
 cms_reset                    cms_reset                    5
 cms_random                   cms_random                   20
 cms_random_long              cms_random                   2   +num_ops=40000
 cms_random_corrupt_load_tag  cms_cap_load_hint            1   +cms_sb_corrupt=load_tag,7
-cms_random_corrupt_sweep     cms_trbe_sweep               1   +cms_sb_corrupt=sweep,11
+cms_random_corrupt_sweep     cms_tbre_sweep               1   +cms_sb_corrupt=sweep,11
 cms_random_corrupt_revbm     cms_access_check             1   +cms_sb_corrupt=revbm,3
 cms_random_corrupt_err       cms_access_check             1   +cms_sb_corrupt=err,5
 cms_random_corrupt_data      cms_tag_store_load           1   +cms_sb_corrupt=data,9
-cms_random_corrupt_race      cms_trbe_store_race          1   +cms_sb_corrupt=race,5
-cms_random_corrupt_epoch     cms_trbe_epoch               1   +cms_sb_corrupt=epoch,2
+cms_random_corrupt_race      cms_tbre_store_race          1   +cms_sb_corrupt=race,5
+cms_random_corrupt_epoch     cms_tbre_epoch               1   +cms_sb_corrupt=epoch,2

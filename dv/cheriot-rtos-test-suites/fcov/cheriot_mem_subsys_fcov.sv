@@ -13,10 +13,10 @@
 // The Microsoft-fork core had its TBRE inside the core (cheri_tbre, sharing the LSU) with covergroups
 // in dv/cheriot/fcov/core_ibex_fcov_if.sv (cp_tbre_fsm, cp_tbre_fifo_hazard, cp_tbre_mem_err,
 // cp_concur_mem_reqs). None of those signals exist here; their intent does and is carried over:
-// sweep state, sweep under error, concurrent core/TRBE traffic and -- the important one -- a core store
-// to a capability the TRBE is about to invalidate (cheriot_top_fcov_if cp_trbe_core_store_race). The
+// sweep state, sweep under error, concurrent core/TBRE traffic and -- the important one -- a core store
+// to a capability the TBRE is about to invalidate (cheriot_top_fcov_if cp_tbre_core_store_race). The
 // subsystem resolves that race in two places, both covered: the mover's capability tracker skips the
-// clear of a capability the core wrote (cheriot_trbe_mover_fcov_if cp_snoop, cp_outcome kept_stale),
+// clear of a capability the core wrote (cheriot_tbre_mover_fcov_if cp_snoop, cp_outcome kept_stale),
 // and the subsystem turns a presented clear the core write overtakes into a read at the RMW filter
 // (cheriot_top_fcov_if cp_clear_squash).
 //
@@ -26,7 +26,7 @@
 
 // ---------------------------------------------------------------------------------------------------
 // Tag filter: whether an access needs its tag looked up or updated, and what the core gets back.
-// Bound to both instances: the core's (TagOnlyWrites = 0) and the TRBE's (TagOnlyWrites = 1).
+// Bound to both instances: the core's (TagOnlyWrites = 0) and the TBRE's (TagOnlyWrites = 1).
 // ---------------------------------------------------------------------------------------------------
 interface cheriot_tag_filter_fcov_if (
   input logic clk_i,
@@ -93,7 +93,7 @@ interface cheriot_tag_filter_fcov_if (
       ignore_bins untagged      = binsof(cp_region.untagged);
       ignore_bins nvm_cap_store = binsof(cp_cap_hint) intersect {1} && binsof(cp_region.nvm);
     }
-    // Only the core's filter verifies NVM capability stores; the TRBE's only clears tags.
+    // Only the core's filter verifies NVM capability stores; the TBRE's only clears tags.
     cp_nvm_cap_store: coverpoint nvm_cap_store iff (rst_ni && req_fire && !tag_only_writes) {
       bins verified = {1'b1};
     }
@@ -131,7 +131,10 @@ interface cheriot_rmw_filter_fcov_if (
   input logic [4:0] bit_sel,
   input logic       data_intg_err,
   input logic       rsp_intg_err,
-  input logic       device_err
+  input logic       device_err,
+  // a request taken in the cycle the previous read is answered (back-to-back reads, possibly from
+  // the other requester behind the shared filter)
+  input logic       req_on_read_rsp
 );
   covergroup rmw_cg @(posedge clk_i);
     option.per_instance = 1;
@@ -157,6 +160,7 @@ interface cheriot_rmw_filter_fcov_if (
       wildcard bins rsp_intg  = {3'b?1?};
       wildcard bins data_intg = {3'b??1};
     }
+    cp_read_back_to_back: coverpoint req_on_read_rsp iff (rst_ni) { bins taken = {1'b1}; }
   endgroup
 
   bit en_fcov;
@@ -165,9 +169,9 @@ interface cheriot_rmw_filter_fcov_if (
 endinterface
 
 // ---------------------------------------------------------------------------------------------------
-// TRBE mover: the sweep and what happens to every capability in it.
+// TBRE mover: the sweep and what happens to every capability in it.
 // ---------------------------------------------------------------------------------------------------
-interface cheriot_trbe_mover_fcov_if (
+interface cheriot_tbre_mover_fcov_if (
   input logic        clk_i,
   input logic        rst_ni,
   input logic        sweep_start,   // start: renamed, a covergroup has a built-in start() method
@@ -183,13 +187,15 @@ interface cheriot_trbe_mover_fcov_if (
   input logic        stale,          // track_stale_q of the capability: the core wrote it
   input logic        invalidate,     // write_a_valid
   input logic [3:0]  inflight,
-  input logic [3:0]  errs,           // {read_tl, read_tl_intg, write_tl, write_tl_intg}
+  // {read error response (not cleared, sweep_err, no alert), read integrity, write malformed or
+  //  error, write integrity}
+  input logic [3:0]  errs,
   // core writes against the capability tracker
   input logic        snoop_read_hit,   // to the capability whose lower word is being read
   input logic        snoop_track_mark, // marks a tracked capability stale
   input logic        snoop_frozen_hit  // to the tracked capability whose clear is presented
 );
-  covergroup trbe_mover_cg @(posedge clk_i);
+  covergroup tbre_mover_cg @(posedge clk_i);
     option.per_instance = 1;
     cp_sweep_len: coverpoint num_words iff (rst_ni && sweep_start) {
       bins one_cap   = {2};
@@ -216,7 +222,7 @@ interface cheriot_trbe_mover_fcov_if (
       wildcard illegal_bins invalidate_untagged = {5'b00??1};
       illegal_bins  invalidate_stale    = {5'b01011};
     }
-    // cheriot_trbe instantiates the mover with MaxInflight = 2.
+    // cheriot_tbre instantiates the mover with MaxInflight = 2.
     cp_inflight: coverpoint inflight iff (rst_ni) { bins levels[] = {[0:2]}; }
     // Core writes the tracker sees: during the lower word's read, to a tracked capability, and to
     // the one whose clear is already presented (left to the subsystem's clear squash).
@@ -226,7 +232,7 @@ interface cheriot_trbe_mover_fcov_if (
       wildcard bins frozen_hit = {3'b??1};
     }
     cp_errs: coverpoint errs iff (rst_ni) {
-      wildcard bins read_tl       = {4'b1???};
+      wildcard bins read_err      = {4'b1???};
       wildcard bins read_tl_intg  = {4'b?1??};
       wildcard bins write_tl      = {4'b??1?};
       wildcard bins write_tl_intg = {4'b???1};
@@ -235,7 +241,7 @@ interface cheriot_trbe_mover_fcov_if (
 
   bit en_fcov;
   initial void'($value$plusargs("enable_ibex_fcov=%d", en_fcov));
-  `DV_FCOV_INSTANTIATE_CG(trbe_mover_cg, en_fcov)
+  `DV_FCOV_INSTANTIATE_CG(tbre_mover_cg, en_fcov)
 endinterface
 
 // ---------------------------------------------------------------------------------------------------
@@ -270,32 +276,32 @@ interface cheriot_access_check_fcov_if (
 endinterface
 
 // ---------------------------------------------------------------------------------------------------
-// Subsystem top: sweep starts, arbitration, and the core/TRBE race.
+// Subsystem top: sweep starts, arbitration, and the core/TBRE race.
 // ---------------------------------------------------------------------------------------------------
 interface cheriot_top_fcov_if (
   input logic       clk_i,
   input logic       rst_ni,
-  // TRBE_START written with 1
+  // TBRE_START written with 1
   input logic       start_write,
   input logic       start_nonzero,
   input logic       start_in_range,
   input logic       start_in_nvm,    // in range, in the NVM rather than the main SRAM
   input logic       start_cheriot,
-  input logic       start_accepted,  // trbe_valid_d rose
-  input logic       start_err,       // ignored start, sets TRBE_STATUS.start_err
+  input logic       start_accepted,  // tbre_valid_d rose
+  input logic       start_err,       // ignored start, sets TBRE_STATUS.start_err
   input logic       start_clamped,   // sweep shortened at the top of its tagged region
   input logic       start_while_busy,
   // end of a sweep
-  input logic       trbe_done,       // the engine stopped being active
-  input logic       sweep_err,       // sets TRBE_STATUS.sweep_err
-  input logic       epoch_counted,   // TRBE_EPOCH counts the sweep
-  input logic       intr,            // intr_trbe_done_o
+  input logic       tbre_done,       // the engine stopped being active
+  input logic       sweep_err,       // sets TBRE_STATUS.sweep_err
+  input logic       epoch_counted,   // TBRE_EPOCH counts the sweep
+  input logic       intr,            // intr_tbre_done_o
   // contention
-  input logic [1:0] rmw_req,         // {TRBE, core} tag traffic onto the RMW filter
-  input logic [3:0] meta_req,        // {trbe revbm, sys revbm, tags, core revbm} onto the meta SRAM
-  // race: the core stores to the capability the TRBE has an invalidation pending for
+  input logic [1:0] rmw_req,         // {TBRE, core} tag traffic onto the RMW filter
+  input logic [3:0] meta_req,        // {tbre revbm, sys revbm, tags, core revbm} onto the meta SRAM
+  // race: the core stores to the capability the TBRE has an invalidation pending for
   input logic       core_store_fire,
-  input logic       trbe_inval_pending,
+  input logic       tbre_inval_pending,
   input logic       same_cap,
   // a core write overtakes a presented tag clear (marks it stale), which then reaches the RMW
   // filter as a read
@@ -323,7 +329,7 @@ interface cheriot_top_fcov_if (
     }
     cp_clamped: coverpoint start_clamped iff (rst_ni && start_accepted);
     // A sweep ends counted, or with an error and not counted.
-    cp_sweep_end: coverpoint {sweep_err, epoch_counted} iff (rst_ni && trbe_done) {
+    cp_sweep_end: coverpoint {sweep_err, epoch_counted} iff (rst_ni && tbre_done) {
       bins          counted   = {2'b01};
       wildcard bins failed    = {2'b1?};
       illegal_bins  err_count = {2'b11};
@@ -334,19 +340,19 @@ interface cheriot_top_fcov_if (
     }
     cp_rmw_contention: coverpoint rmw_req iff (rst_ni) {
       bins core_only = {2'b01};
-      bins trbe_only = {2'b10};
+      bins tbre_only = {2'b10};
       bins both      = {2'b11};
     }
     cp_meta_requesters: coverpoint meta_req iff (rst_ni) {
       bins core_revbm = {4'b0001};
       bins tags       = {4'b0010};
       bins sys_revbm  = {4'b0100};
-      bins trbe_revbm = {4'b1000};
+      bins tbre_revbm = {4'b1000};
       bins several    = {[4'b0011:4'b1111]} with ($countones(item) > 1);
     }
-    // A fresh capability stored where the TRBE is about to clear a stale one's tag: the TRBE's
+    // A fresh capability stored where the TBRE is about to clear a stale one's tag: the TBRE's
     // write must not remove the new capability's tag. Needs a directed test to reach.
-    cp_trbe_core_store_race: coverpoint (trbe_inval_pending && same_cap)
+    cp_tbre_core_store_race: coverpoint (tbre_inval_pending && same_cap)
                              iff (rst_ni && core_store_fire) {
       bins race = {1'b1};
     }
@@ -374,7 +380,8 @@ interface cheriot_wtrc_fcov_if (
   input logic       mismatch,    // the word read is not the one stored
   input logic       w0_ok,       // W0 matched
   input logic       tag_wr,      // W1 verified: its response becomes the tag write
-  input logic       seq_err,     // a request out of the W0-then-W1 sequence is taken
+  input logic       seq_err,     // a request out of the W0-then-W1 sequence is taken, or one is
+                                 // presented between W1 and its tag write
   input logic       err          // fatal error
 );
   covergroup wtrc_cg @(posedge clk_i);
@@ -408,18 +415,18 @@ endinterface
 // ---------------------------------------------------------------------------------------------------
 // rev_ctl shim: how the RTOS drives sweeps.
 // ---------------------------------------------------------------------------------------------------
-interface cheriot_rev_ctl_trbe_fcov_if (
+interface cheriot_rev_ctl_tbre_fcov_if (
   input logic clk_i,
   input logic rst_ni,
   input logic go,
   input logic running,
   input logic empty_range,
-  input logic done_wait,      // waiting for the trbe_done interrupt
+  input logic done_wait,      // waiting for the tbre_done interrupt
   input logic start_ignored,  // the first STATUS read after the start shows start_err
   input logic sweep_failed,   // the STATUS read after the interrupt shows busy or sweep_err
   input logic err
 );
-  covergroup rev_ctl_trbe_cg @(posedge clk_i);
+  covergroup rev_ctl_tbre_cg @(posedge clk_i);
     option.per_instance = 1;
     cp_go: coverpoint {go, running} iff (rst_ni) {
       bins start          = {2'b10};
@@ -441,5 +448,5 @@ interface cheriot_rev_ctl_trbe_fcov_if (
 
   bit en_fcov;
   initial void'($value$plusargs("enable_ibex_fcov=%d", en_fcov));
-  `DV_FCOV_INSTANTIATE_CG(rev_ctl_trbe_cg, en_fcov)
+  `DV_FCOV_INSTANTIATE_CG(rev_ctl_tbre_cg, en_fcov)
 endinterface

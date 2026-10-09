@@ -11,7 +11,10 @@
 // Responses must come back in order (one requester, in-order memories); each completed transaction
 // goes to done_q, which cms_tb hands to the scoreboard, and to rsp_by_id for the test waiting on it.
 // Command and data integrity are generated for every request (bad_cmd_intg inverts cmd_intg).
-// Checks of the response itself: d_source, d_opcode, d_size; no response without a request.
+// Checks of the response itself: d_source, d_opcode, d_size; no response without a request; its
+// response and data integrity, which the subsystem regenerates for every response it makes or
+// changes, error responses included (chk_rsp_intg; cleared only by a test that injects an integrity
+// fault the subsystem passes on unchanged).
 
 module cms_tl_host
   import cms_pkg::*;
@@ -30,8 +33,9 @@ module cms_tl_host
 );
 
   // Knobs, set by the test
-  int unsigned a_gap_max   = 0;
-  int unsigned d_ready_pct = 100;
+  int unsigned a_gap_max    = 0;
+  int unsigned d_ready_pct  = 100;
+  bit          chk_rsp_intg = 1'b1;
 
   cms_txn_t    req_q[$];
   cms_txn_t    pend_q[$];
@@ -122,6 +126,13 @@ module cms_tl_host
           if (tl_i.d_source != t.source)
             cms_error(Name, $sformatf("response source %0d, expected %0d (in order)",
                                       tl_i.d_source, t.source));
+          if (chk_rsp_intg && (tl_i.d_user.rsp_intg != tlul_pkg::get_rsp_intg(tl_i) ||
+                               tl_i.d_user.data_intg != tlul_pkg::get_data_intg(tl_i.d_data)))
+            cms_error(Name, $sformatf({"response to %s 0x%08x (d_error %b) has bad integrity: ",
+                                       "rsp_intg 0x%02x, expected 0x%02x; data_intg 0x%02x, ",
+                                       "expected 0x%02x"}, t.opcode.name(), t.addr, tl_i.d_error,
+                                      tl_i.d_user.rsp_intg, tlul_pkg::get_rsp_intg(tl_i),
+                                      tl_i.d_user.data_intg, tlul_pkg::get_data_intg(tl_i.d_data)));
           t.rdata    = tl_i.d_data;
           t.rtag     = tag_i;
           t.err      = tl_i.d_error;

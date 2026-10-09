@@ -11,7 +11,7 @@
 // cheriot_rtos_default_rsp: the firmware sees a response, and the testbench log shows the access.
 //
 //   data host (ibex_lsu, after the CHERIoT memory subsystem)
-//     -> sram      0x0010_0000  128 KiB   (shared with the TRBE host)
+//     -> sram      0x0010_0000  128 KiB   (shared with the TBRE host)
 //     -> code_ram  0x4000_0000  1 MiB     (Sonata's HyperRAM window)
 //     -> rev_tag   0x3000_0000  2 KiB     (the subsystem's revocation-bitmap window)
 //     -> hw_rev    0x8000_a000  4 KiB     (rev_ctl)
@@ -19,7 +19,7 @@
 //     -> uart0     0x8010_0000  4 KiB
 //     -> rv_plic   0x8800_0000  128 MiB
 //     -> default   everything else
-//   cheriot_trbe host -> sram only, with no address decode (as in Sonata's xbar_main)
+//   cheriot_tbre host -> sram only, with no address decode (as in Sonata's xbar_main)
 //   ifetch host
 //     -> sram      0x0010_0000  (tl_ifetch_pkg mask: 256 KiB window, aliasing the 128 KiB)
 //     -> code_ram  0x4000_0000
@@ -31,8 +31,8 @@ module cheriot_rtos_xbar (
   // Hosts.
   input  tlul_pkg::tl_h2d_t tl_lsu_i,
   output tlul_pkg::tl_d2h_t tl_lsu_o,
-  input  tlul_pkg::tl_h2d_t tl_trbe_i,
-  output tlul_pkg::tl_d2h_t tl_trbe_o,
+  input  tlul_pkg::tl_h2d_t tl_tbre_i,
+  output tlul_pkg::tl_d2h_t tl_tbre_o,
   input  tlul_pkg::tl_h2d_t tl_ifetch_i,
   output tlul_pkg::tl_d2h_t tl_ifetch_o,
 
@@ -121,14 +121,14 @@ module cheriot_rtos_xbar (
     .dev_select_i (lsu_dev_sel)
   );
 
-  // SRAM port A is shared by the core's data port and the TRBE's sweep reads.
+  // SRAM port A is shared by the core's data port and the TBRE's sweep reads.
   tl_h2d_t sram_us_h2d [2];
   tl_d2h_t sram_us_d2h [2];
 
   assign sram_us_h2d[0]     = lsu_ds_h2d[DevSram];
   assign lsu_ds_d2h[DevSram] = sram_us_d2h[0];
-  assign sram_us_h2d[1]     = tl_trbe_i;
-  assign tl_trbe_o          = sram_us_d2h[1];
+  assign sram_us_h2d[1]     = tl_tbre_i;
+  assign tl_tbre_o          = sram_us_d2h[1];
 
   tlul_socket_m1 #(
     .HReqDepth (8'h0),

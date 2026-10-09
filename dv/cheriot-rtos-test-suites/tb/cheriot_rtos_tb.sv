@@ -286,7 +286,7 @@ module cheriot_rtos_tb;
   // Core-side mutations are applied to the main core *and* the lockstep shadow core
   // (SecureIbex = 1): a mismatch between the two would raise the lockstep alert -- and possibly
   // assertions -- and fail the run for a reason unrelated to the test under measurement. The load
-  // barrier and the TRBE sit outside both cores, so they are forced once.
+  // barrier and the TBRE sit outside both cores, so they are forced once.
   //
   // Not mutated: representability. It is computed inside a package function
   // (ibex_cheriot_pkg set_address), which force cannot reach, and forcing the result's tag would
@@ -297,7 +297,7 @@ module cheriot_rtos_tb;
 `define RTOS_LSU_M `RTOS_CORE.u_ibex_core.load_store_unit_i
 `define RTOS_LSU_S `RTOS_CORE.gen_lockstep.u_ibex_lockstep.u_shadow_core.load_store_unit_i
 `define RTOS_TRVK  `RTOS_CORE.gen_cheriot_trvk.i_ibex_trvk
-`define RTOS_MOVER u_soc.u_cheriot_mem_subsys.u_cheriot.u_cheriot_trbe.u_cheriot_trbe_mover
+`define RTOS_MOVER u_soc.u_cheriot_mem_subsys.u_cheriot.u_cheriot_tbre.u_cheriot_tbre_mover
   initial begin : mutate
     string m;
     if ($value$plusargs("sonata_mutate=%s", m)) begin
@@ -337,9 +337,9 @@ module cheriot_rtos_tb;
         // The core's load barrier never revokes / always revokes a capability it looks up.
         "barrier_none": force `RTOS_TRVK.revbm_revoked = 1'b0;
         "barrier_all":  force `RTOS_TRVK.revbm_revoked = 1'b1;
-        // The TRBE sweeps but never issues an invalidation: every revoked capability is treated
-        // as needing no write (cheriot_trbe_mover word_dropped), so the sweep completes cleanly.
-        "trbe_no_inval": force `RTOS_MOVER.write_a_valid = 1'b0;
+        // The TBRE sweeps but never issues an invalidation: every revoked capability is treated
+        // as needing no write (cheriot_tbre_mover word_dropped), so the sweep completes cleanly.
+        "tbre_no_inval": force `RTOS_MOVER.write_a_valid = 1'b0;
         default: $fatal(1, "[cheriot_rtos_tb] unknown mutation '%s'", m);
       endcase
     end
@@ -376,61 +376,61 @@ module cheriot_rtos_tb;
   end
 
   // ── Revocation sweep monitor ────────────────────────────────────────────────────────────────
-  // Logs each stage of a sweep -- rev_ctl go, the shim's CSR sequence, the TRBE accepting it, its
+  // Logs each stage of a sweep -- rev_ctl go, the shim's CSR sequence, the TBRE accepting it, its
   // end -- plus fatal errors, and while a sweep runs a progress line every 100k cycles: the word
-  // counter, words in flight and the bus handshakes on the mover's read/write ports and the TRBE's
+  // counter, words in flight and the bus handshakes on the mover's read/write ports and the TBRE's
   // SRAM port. Whichever count stops moving is where it is stuck. (Written for revocation_test's
-  // sweep check on 2026-09-29, which saw rev_ctl's epoch stop while the TRBE was stalled.)
-  initial begin : trbe_monitor
+  // sweep check on 2026-09-29, which saw rev_ctl's epoch stop while the TBRE was stalled.)
+  initial begin : tbre_monitor
     longint unsigned cyc, rd_req, rd_rsp, wr_req, wr_rsp, sram_req, sram_rsp;
-    logic running_prev, trbe_busy_prev, accept_prev, err_prev;
+    logic running_prev, tbre_busy_prev, accept_prev, err_prev;
     logic [8:0] fatal_prev;
     logic [3:0] shim_state_prev;
-    int unsigned trbe_sweeps;
+    int unsigned tbre_sweeps;
     cyc = 0; rd_req = 0; rd_rsp = 0; wr_req = 0; wr_rsp = 0; sram_req = 0; sram_rsp = 0;
-    running_prev = 0; trbe_busy_prev = 0; accept_prev = 0; fatal_prev = '0; shim_state_prev = '0;
-    err_prev = 0; trbe_sweeps = 0;
+    running_prev = 0; tbre_busy_prev = 0; accept_prev = 0; fatal_prev = '0; shim_state_prev = '0;
+    err_prev = 0; tbre_sweeps = 0;
     forever begin
       @(posedge clk);
       cyc++;
       begin : sample
         `define MS u_soc.u_cheriot_mem_subsys
-        `define MV `MS.u_cheriot.u_cheriot_trbe.u_cheriot_trbe_mover
+        `define MV `MS.u_cheriot.u_cheriot_tbre.u_cheriot_tbre_mover
         if (`MV.tl_r_o.a_valid && `MV.tl_r_i.a_ready) rd_req++;
         if (`MV.tl_r_i.d_valid && `MV.tl_r_o.d_ready) rd_rsp++;
         if (`MV.tl_w_o.a_valid && `MV.tl_w_i.a_ready) wr_req++;
         if (`MV.tl_w_i.d_valid && `MV.tl_w_o.d_ready) wr_rsp++;
-        if (`MS.trbe_tl_o.a_valid && `MS.trbe_tl_i.a_ready) sram_req++;
-        if (`MS.trbe_tl_i.d_valid && `MS.trbe_tl_o.d_ready) sram_rsp++;
+        if (`MS.tbre_tl_o.a_valid && `MS.tbre_tl_i.a_ready) sram_req++;
+        if (`MS.tbre_tl_i.d_valid && `MS.tbre_tl_o.d_ready) sram_rsp++;
 
-        if (`MS.u_rev_ctl_trbe.go)
-          $display("[trbe_monitor] %0d: rev_ctl go start=%h end=%h (shim %s)", cyc,
-                   `MS.u_rev_ctl_trbe.start_addr, `MS.u_rev_ctl_trbe.end_addr,
-                   `MS.u_rev_ctl_trbe.state_q == 0 ? "idle, accepted" : "busy, ignored");
-        if (`MS.u_rev_ctl_trbe.state_q != shim_state_prev)
-          $display("[trbe_monitor] %0d: shim state %0d -> %0d (base=%h num_caps=%0d)", cyc,
-                   shim_state_prev, `MS.u_rev_ctl_trbe.state_q,
-                   `MS.u_rev_ctl_trbe.base_q, `MS.u_rev_ctl_trbe.num_caps_q);
-        if (`MS.u_cheriot.trbe_valid_q && `MS.u_cheriot.trbe_ready && !accept_prev)
-          $display("[trbe_monitor] %0d: TRBE accepted sweep start=%h num_words=%0d", cyc,
-                   `MS.u_cheriot.trbe_start_addr, `MS.u_cheriot.trbe_num_words);
-        if (`MS.u_cheriot.trbe_busy != trbe_busy_prev)
-          $display("[trbe_monitor] %0d: TRBE busy %0d -> %0d (words issued %0d, in flight %0d)",
-                   cyc, trbe_busy_prev, `MS.u_cheriot.trbe_busy, `MV.current_q, `MV.inflight_q);
-        if (`MS.u_rev_ctl_trbe.running_q != running_prev)
-          $display("[trbe_monitor] %0d: shim running %0d -> %0d (err=%0d, TRBE_STATUS=%h, TRBE_EPOCH count %0d)",
-                   cyc, running_prev, `MS.u_rev_ctl_trbe.running_q, `MS.u_rev_ctl_trbe.err_q,
-                   `MS.u_rev_ctl_trbe.status_q, `MS.u_cheriot.trbe_epoch_q);
+        if (`MS.u_rev_ctl_tbre.go)
+          $display("[tbre_monitor] %0d: rev_ctl go start=%h end=%h (shim %s)", cyc,
+                   `MS.u_rev_ctl_tbre.start_addr, `MS.u_rev_ctl_tbre.end_addr,
+                   `MS.u_rev_ctl_tbre.state_q == 0 ? "idle, accepted" : "busy, ignored");
+        if (`MS.u_rev_ctl_tbre.state_q != shim_state_prev)
+          $display("[tbre_monitor] %0d: shim state %0d -> %0d (base=%h num_caps=%0d)", cyc,
+                   shim_state_prev, `MS.u_rev_ctl_tbre.state_q,
+                   `MS.u_rev_ctl_tbre.base_q, `MS.u_rev_ctl_tbre.num_caps_q);
+        if (`MS.u_cheriot.tbre_valid_q && `MS.u_cheriot.tbre_ready && !accept_prev)
+          $display("[tbre_monitor] %0d: TBRE accepted sweep start=%h num_words=%0d", cyc,
+                   `MS.u_cheriot.tbre_start_addr, `MS.u_cheriot.tbre_num_words);
+        if (`MS.u_cheriot.tbre_busy != tbre_busy_prev)
+          $display("[tbre_monitor] %0d: TBRE busy %0d -> %0d (words issued %0d, in flight %0d)",
+                   cyc, tbre_busy_prev, `MS.u_cheriot.tbre_busy, `MV.current_q, `MV.inflight_q);
+        if (`MS.u_rev_ctl_tbre.running_q != running_prev)
+          $display("[tbre_monitor] %0d: shim running %0d -> %0d (err=%0d, TBRE_STATUS=%h, TBRE_EPOCH count %0d)",
+                   cyc, running_prev, `MS.u_rev_ctl_tbre.running_q, `MS.u_rev_ctl_tbre.err_q,
+                   `MS.u_rev_ctl_tbre.status_q, `MS.u_cheriot.tbre_epoch_q);
         // The shim ends a sweep, and rev_ctl advances the firmware's epoch, only for a sweep the
-        // TRBE counted in TRBE_EPOCH as one without an error. An empty range ends without the TRBE.
-        if (running_prev && !`MS.u_rev_ctl_trbe.running_q && `MS.u_rev_ctl_trbe.num_caps_q != 0) begin
-          trbe_sweeps++;
-          if (`MS.u_cheriot.trbe_epoch_q != 31'(trbe_sweeps))
-            $error("[trbe_monitor] %0d: shim completed %0d sweeps, TRBE_EPOCH counts %0d", cyc,
-                   trbe_sweeps, `MS.u_cheriot.trbe_epoch_q);
+        // TBRE counted in TBRE_EPOCH as one without an error. An empty range ends without the TBRE.
+        if (running_prev && !`MS.u_rev_ctl_tbre.running_q && `MS.u_rev_ctl_tbre.num_caps_q != 0) begin
+          tbre_sweeps++;
+          if (`MS.u_cheriot.tbre_epoch_q != 31'(tbre_sweeps))
+            $error("[tbre_monitor] %0d: shim completed %0d sweeps, TBRE_EPOCH counts %0d", cyc,
+                   tbre_sweeps, `MS.u_cheriot.tbre_epoch_q);
         end
         // Bit order: {csr_intg, meta_sram_intg, meta_sram_data_intg, rmw_error,
-        //             trbe_mover_error, trbe_revbm_intg, trbe_revbm_data_intg, trbe_revbm_error,
+        //             tbre_mover_error, tbre_revbm_intg, tbre_revbm_data_intg, tbre_revbm_error,
         //             wtrc_error}
         // A raised fatal error is a failed run, not a log line: the subsystem's fatal alert and the
         // shim's sticky error flag are not wired to anything in the SoC, so without an $error
@@ -438,27 +438,27 @@ module cheriot_rtos_tb;
         // run_all_tests.sh fails the run on *E lines in run.log.
         if (`MS.u_cheriot.cheriot_fatal_error != fatal_prev) begin
           if (|`MS.u_cheriot.cheriot_fatal_error)
-            $error("[trbe_monitor] %0d: fatal errors %b -> %b", cyc, fatal_prev,
+            $error("[tbre_monitor] %0d: fatal errors %b -> %b", cyc, fatal_prev,
                    `MS.u_cheriot.cheriot_fatal_error);
           else
-            $display("[trbe_monitor] %0d: fatal errors %b -> %b", cyc, fatal_prev,
+            $display("[tbre_monitor] %0d: fatal errors %b -> %b", cyc, fatal_prev,
                      `MS.u_cheriot.cheriot_fatal_error);
         end
-        if (`MS.u_rev_ctl_trbe.err_q && !err_prev)
-          $error("[trbe_monitor] %0d: rev_ctl shim: sweep failed after state %0d (last TRBE_STATUS=%h); the firmware's epoch stays odd",
-                 cyc, shim_state_prev, `MS.u_rev_ctl_trbe.status_q);
-        if (`MS.u_rev_ctl_trbe.running_q && (cyc % 100_000 == 0))
-          $display("[trbe_monitor] %0d: running: mover state=%0d word=%0d in_flight=%0d rd %0d/%0d wr %0d/%0d sram %0d/%0d (req/rsp) shim state=%0d pending=%0d",
+        if (`MS.u_rev_ctl_tbre.err_q && !err_prev)
+          $error("[tbre_monitor] %0d: rev_ctl shim: sweep failed after state %0d (last TBRE_STATUS=%h); the firmware's epoch stays odd",
+                 cyc, shim_state_prev, `MS.u_rev_ctl_tbre.status_q);
+        if (`MS.u_rev_ctl_tbre.running_q && (cyc % 100_000 == 0))
+          $display("[tbre_monitor] %0d: running: mover state=%0d word=%0d in_flight=%0d rd %0d/%0d wr %0d/%0d sram %0d/%0d (req/rsp) shim state=%0d pending=%0d",
                    cyc, `MV.state_q, `MV.current_q, `MV.inflight_q,
                    rd_req, rd_rsp, wr_req, wr_rsp, sram_req, sram_rsp,
-                   `MS.u_rev_ctl_trbe.state_q, `MS.u_rev_ctl_trbe.pending_q);
+                   `MS.u_rev_ctl_tbre.state_q, `MS.u_rev_ctl_tbre.pending_q);
 
-        running_prev    = `MS.u_rev_ctl_trbe.running_q;
-        trbe_busy_prev  = `MS.u_cheriot.trbe_busy;
-        accept_prev     = `MS.u_cheriot.trbe_valid_q && `MS.u_cheriot.trbe_ready;
+        running_prev    = `MS.u_rev_ctl_tbre.running_q;
+        tbre_busy_prev  = `MS.u_cheriot.tbre_busy;
+        accept_prev     = `MS.u_cheriot.tbre_valid_q && `MS.u_cheriot.tbre_ready;
         fatal_prev      = `MS.u_cheriot.cheriot_fatal_error;
-        shim_state_prev = `MS.u_rev_ctl_trbe.state_q;
-        err_prev        = `MS.u_rev_ctl_trbe.err_q;
+        shim_state_prev = `MS.u_rev_ctl_tbre.state_q;
+        err_prev        = `MS.u_rev_ctl_tbre.err_q;
         `undef MV
         `undef MS
       end

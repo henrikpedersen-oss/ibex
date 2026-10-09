@@ -16,7 +16,7 @@ two memories and the four peripherals the firmware uses, on Sonata's memory map:
 | `0x0010_0000` | 128 KiB | SRAM, dual-ported (data + fetch). Boot vector at `+0x80` | Sonata `sram.sv` |
 | `0x3000_0000` | 2 KiB | Revocation bitmap window: the memory subsystem's meta SRAM | opentitan-cheriot `cheriot` |
 | `0x4000_0000` | 1 MiB | Code RAM, dual-ported: a plain SRAM model in Sonata's HyperRAM window | Sonata `sram.sv` |
-| `0x8000_a000` | 4 KiB | `rev_ctl`, the RTOS hardware-revoker interface, driving the subsystem's TRBE | Sonata `rev_ctl` |
+| `0x8000_a000` | 4 KiB | `rev_ctl`, the RTOS hardware-revoker interface, driving the subsystem's TBRE | Sonata `rev_ctl` |
 | `0x8004_0000` | 64 KiB | `rv_timer` (CLINT: `mtime`, `mtimecmp`) | Sonata `rv_timer.sv` |
 | `0x8010_0000` | 4 KiB | UART0 | OpenTitan `uart`, as vendored by Sonata |
 | `0x8800_0000` | 128 MiB | `rv_plic`. Sources: 1 = revoker, 8 = UART0 (Sonata's numbering) | Sonata `rv_plic` |
@@ -30,7 +30,8 @@ The core and memory subsystem are integrated as in Sonata's `sonata_system.sv` w
 `UseNewIbexCore = 1` and `UseCheriotMemSubsys = 1`, with the same core parameters (the
 `opentitan` configuration the UVM testbench builds), the same bus adapters, memory-integrity
 encoding and subsystem parameters. The integration glue (`cheriot_mem_subsys.sv`,
-`cheriot_rev_ctl_trbe.sv`) began as an uncommitted addition to a sonata-system checkout; the copies
+`cheriot_rev_ctl_tbre.sv`, `cheriot_rev_ctl_trbe.sv` there) began as an uncommitted addition to a
+sonata-system checkout; the copies
 in `rtl/` are this flow's own, ported to #31515. The Sonata RTL the SoC uses is vendored under
 `vendor/` (see [Sources](#sources)).
 
@@ -75,7 +76,7 @@ feed the testplan report:
 ```sh
 make sonata-xlm                     # the nix-built CHERIoT RTOS test suite
 make sonata-rtos-tests-xlm          # the same suite, built from the cheriot-rtos submodule
-make sonata-revocation-xlm          # load barrier, both directions, plus one TRBE sweep
+make sonata-revocation-xlm          # load barrier, both directions, plus one TBRE sweep
 make sonata-juliet-xlm              # Juliet CWE compartment enforcement
 make sonata-cheri-c-xlm             # Cambridge CHERI-C suite
 make sonata-test-xlm ELF=<path>     # any firmware image
@@ -141,7 +142,7 @@ Everything goes to `xlm_rtos_out/`, which git ignores:
 
 | Path | Contents |
 |---|---|
-| `build.log`, `run.log` | Elaboration and simulation logs. `run.log` has the heartbeat, `[trbe_monitor]` and `[cheriot_rtos_default_rsp]` lines |
+| `build.log`, `run.log` | Elaboration and simulation logs. `run.log` has the heartbeat, `[tbre_monitor]` and `[cheriot_rtos_default_rsp]` lines |
 | `uart0.log` | UART0 of the last run |
 | `sram.vmem`, `code.vmem` | Memory images of the last run |
 | `xcelium.d/`, `.elab_ok`, `.coverage_enabled` | Snapshot and its stamps |
@@ -165,7 +166,7 @@ FAIL, and grades each result:
 | `exec_off` | Execute permission on capability jumps | `cheri_c_badcall` |
 | `datastore_tag` | Data stores set the tag instead of clearing it | `cheri_c_union` |
 | `barrier_none` / `barrier_all` | Load barrier never / always revokes | revocation phase 2 / phases 1 and 3; `rtos_test_allocator` |
-| `trbe_no_inval` | The TRBE sweeps but never invalidates | `revocation_sweep` |
+| `tbre_no_inval` | The TBRE sweeps but never invalidates | `revocation_sweep` |
 
 The forces are in `tb/cheriot_rtos_tb.sv`. They use paths under
 `u_soc.u_top_tracing.u_ibex_top` and `u_soc.u_cheriot_mem_subsys`. Run the unmutated
@@ -182,9 +183,9 @@ parameters as the UVM testbench's `opentitan` configuration. The run merges its 
 
 The functional covergroups are bound from outside the RTL (`fcov/cheriot_mem_subsys_fcov_bind.sv`),
 and they sample with `+enable_ibex_fcov=1`:
-- the memory subsystem: tag filter, RMW filter, TRBE mover, access checks, subsystem top level
+- the memory subsystem: tag filter, RMW filter, TBRE mover, access checks, subsystem top level
 - the rev_ctl shim
-- the TRVK covergroup on the core's load barrier and on the TRBE's own filter
+- the TRVK covergroup on the core's load barrier and on the TBRE's own filter
 
 ## Layout
 
@@ -193,8 +194,8 @@ and they sample with `+enable_ibex_fcov=1`:
 | `rtl/cheriot_rtos_soc.sv` | The SoC |
 | `rtl/cheriot_rtos_xbar.sv` | Data and instruction crossbars on Sonata's map |
 | `rtl/cheriot_rtos_default_rsp.sv` | Responder for unmapped data addresses |
-| `rtl/cheriot_mem_subsys.sv`, `rtl/cheriot_rev_ctl_trbe.sv` | Sonata's memory-subsystem glue (derived; ported to #31515) |
-| `tb/cheriot_rtos_tb.sv` | Clock, reset, uartdpi, memory load, timeout, heartbeat, mutations, TRBE monitor |
+| `rtl/cheriot_mem_subsys.sv`, `rtl/cheriot_rev_ctl_tbre.sv` | Sonata's memory-subsystem glue (derived; ported to #31515) |
+| `tb/cheriot_rtos_tb.sv` | Clock, reset, uartdpi, memory load, timeout, heartbeat, mutations, TBRE monitor |
 | `fcov/` | Memory-subsystem covergroups and their binds |
 | `firmware/` | The revocation, Juliet CWE and CHERI-C firmware (xmake) and the boot stub |
 | `vendor/` | The Sonata RTL the SoC uses, pinned: `fetch.sh`, `VENDORED_FROM`, local `patches/` |
@@ -220,7 +221,7 @@ connect (OpenTitan's has neither). `vendor/fetch.sh` re-fetches the files and re
 
 | Patch | Why |
 |---|---|
-| `0001-tl_main_pkg-cheriot-trbe-host.patch` | The sonata-system checkout's local `TlCheriotTrbe` host. Unused here (only `ADDR_*` constants are); kept so the file is the one the flow was validated with |
+| `0001-tl_main_pkg-cheriot-trbe-host.patch` | The sonata-system checkout's local `TlCheriotTrbe` host (the engine's name before upstream renamed it TBRE). Unused here (only `ADDR_*` constants are); kept so the file is the one the flow was validated with |
 | `0002-uartdpi-quiet-pty-write-errors.patch` | The checkout's local uartdpi change: no stderr line per failed PTY write when logging to a file |
 | `0003-sram-prim_ram_2p-cfg_o.patch` | `ibex/vendor/lowrisc_ip`'s `prim_ram_2p` splits the RAM configuration into `cfg_i` and `cfg_o`; `cfg_o` is left open. The generic RAM model is otherwise line-for-line Sonata's |
 

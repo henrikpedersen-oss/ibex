@@ -5,7 +5,7 @@
 // Testplan for Sonata firmware on the CHERIoT RTOS test SoC (ibex/dv/cheriot-rtos-test-suites/,
 // Xcelium): CHERIoT-Ibex running CHERIoT RTOS software built for Sonata, on a minimal SoC with the
 // OpenTitan CHERIoT memory subsystem (lowRISC/opentitan#31470) -- tags and revocation bitmap in
-// its meta SRAM, TRBE sweep engine behind rev_ctl -- plus SRAM, code RAM, UART0, timer and PLIC on
+// its meta SRAM, TBRE sweep engine behind rev_ctl -- plus SRAM, code RAM, UART0, timer and PLIC on
 // Sonata's memory map. Other Sonata peripherals are not in the SoC (see its README.md).
 //
 // dvsim testplan format (ibex/vendor/lowrisc_ip/util/dvsim/Testplan.py). The flow itself is run
@@ -81,7 +81,7 @@
             **Stimulus**: the RTOS suite's allocator test, which frees and reallocates
             repeatedly and so needs completed sweeps to make progress.
 
-            **Check**: "Allocator finished". This exercises the TRBE through rev_ctl on every
+            **Check**: "Allocator finished". This exercises the TBRE through rev_ctl on every
             quarantine drain. A barrier that revokes nothing is rejected by the allocator's
             preflight ("Freed pointer still live; load barrier or revoker out of service?"), and
             a barrier without a sweep engine cannot drain the quarantine, so neither can pass.'''
@@ -289,7 +289,7 @@
               through the xbar, bypassing the tag filter, so its writes do not clear tags
               (cheriot_mem_subsys.sv, "as SBA does in OpenTitan"). It can therefore turn data into
               a tagged capability, and must be unreachable while debug access is disabled
-            - the TRBE writes only invalidations (tag clears) through the tag path
+            - the TBRE writes only invalidations (tag clears) through the tag path
             - any DMA controller in the SoC (OpenTitan's hw/ip/dma, for instance) must route its
               writes through the tag filter so they clear tags, and may
               only reach memory the requesting software holds a capability for -- checked in
@@ -305,16 +305,16 @@
             The RTOS test SoC has no debug module, so it has no debug host:
             bus_master_dbg_host_tag_clear and bus_master_dbg_host_locked cannot be run on it and
             need a SoC that has one (Sonata's sonata_system, or a debug module added to this SoC).
-            bus_master_trbe_invalidate_only applies to it. Its stimulus is the
-            revocation_test sweep (make sonata-revocation-xlm): after one TRBE sweep, compared
+            bus_master_tbre_invalidate_only applies to it. Its stimulus is the
+            revocation_test sweep (make sonata-revocation-xlm): after one TBRE sweep, compared
             bit for bit with CSEQX, the revoked capability differs from its stored value only in
             the cleared tag, the unrevoked one is unchanged, and untagged copies of both, stored
-            beside them in the sweep range, are unchanged (the TRBE never sets a tag). Reported as
-            "PASS/FAIL TRBE invalidate-only".'''
+            beside them in the sweep range, are unchanged (the TBRE never sets a tag). Reported as
+            "PASS/FAIL TBRE invalidate-only".'''
       stage: V2
       tags: ["cheriot_mem"]
       tests: ["bus_master_dbg_host_tag_clear", "bus_master_dbg_host_locked",
-              "bus_master_trbe_invalidate_only"]
+              "bus_master_tbre_invalidate_only"]
     }
 
     // ─── Memory subsystem coverage closure ──────────────────────────────────────────────────
@@ -325,7 +325,7 @@
 
             **Stimulus**: the tests above with COVERAGE=1, plus directed
             tests for bins the workloads cannot reach -- in particular a core store racing a
-            TRBE invalidation of the same capability (cheriot_top_cg cp_trbe_core_store_race),
+            TBRE invalidation of the same capability (cheriot_top_cg cp_tbre_core_store_race),
             and the error and integrity bins, which need fault injection.
 
             **Check**: every bin of every covergroup listed here hit or waived.'''
@@ -355,14 +355,15 @@
     {
       name: rmw_cg
       desc: '''Tag read-modify-write filter: FSM states, old x new tag on every fill, bit select
-            within the tag word, fill errors, and device, response-integrity and data-integrity
-            errors.'''
+            within the tag word, fill errors, device, response-integrity and data-integrity
+            errors, and a request taken in the cycle a read is answered (back-to-back reads).'''
     }
     {
-      name: trbe_mover_cg
-      desc: '''TRBE sweep engine: sweep length, running and draining (busy after the last read
+      name: tbre_mover_cg
+      desc: '''TBRE sweep engine: sweep length, running and draining (busy after the last read
             is issued), per-capability outcome (read error, tags of both words, invalidation
-            issued), words in flight, and read/write bus and integrity errors.'''
+            issued), words in flight, an error response to a read (not cleared, no alert), read
+            integrity errors and write errors.'''
     }
     {
       name: access_check_cg
@@ -371,20 +372,20 @@
     }
     {
       name: cheriot_top_cg
-      desc: '''Subsystem top level: TRBE start accepted or dropped (zero length, out of range,
+      desc: '''Subsystem top level: TBRE start accepted or dropped (zero length, out of range,
             CHERIoT off), start while busy, sweep length clamped to the SRAM top, contention
-            between the core's and the TRBE's tag traffic, meta SRAM requesters, a core store
-            racing a pending TRBE invalidation of the same capability, fatal alert.'''
+            between the core's and the TBRE's tag traffic, meta SRAM requesters, a core store
+            racing a pending TBRE invalidation of the same capability, fatal alert.'''
     }
     {
-      name: rev_ctl_trbe_cg
-      desc: '''rev_ctl to TRBE shim (ibex/dv/cheriot-rtos-test-suites/rtl/cheriot_rev_ctl_trbe.sv):
+      name: rev_ctl_tbre_cg
+      desc: '''rev_ctl to TBRE shim (ibex/dv/cheriot-rtos-test-suites/rtl/cheriot_rev_ctl_tbre.sv):
             go while idle and while running (ignored), empty range, a complete sweep, bus error.'''
     }
     {
       name: trvk_cg
       desc: '''Load-barrier revocation check (ibex/dv/uvm/core_ibex/fcov/core_ibex_trvk_fcov_if.sv),
-            bound twice: on the core's ibex_trvk, and on the TRBE's own cheriot_trvk_core, which
+            bound twice: on the core's ibex_trvk, and on the TBRE's own cheriot_trvk_core, which
             shares its decision logic. Revoked / not revoked, revoked by the bitmap, out of
             range, bit select within the bitmap word (low, middle, high), whether a bitmap read
             is required, the bitmap request handshake (quiet, back-pressured, accepted) and

@@ -66,28 +66,31 @@ package cms_pkg;
   parameter logic [5:0] CsrIntrTest   = 6'h08;
   parameter logic [5:0] CsrAlertTest  = 6'h0c;
   parameter logic [5:0] CsrRegwen     = 6'h10;
-  parameter logic [5:0] CsrTrbeBase   = 6'h14;
-  parameter logic [5:0] CsrTrbeNum    = 6'h18;
-  parameter logic [5:0] CsrTrbeStart  = 6'h1c;
-  parameter logic [5:0] CsrTrbeStatus = 6'h20;
-  parameter logic [5:0] CsrTrbeEpoch  = 6'h24;
-  // TRBE_STATUS fields
+  parameter logic [5:0] CsrTbreBase   = 6'h14;
+  parameter logic [5:0] CsrTbreNum    = 6'h18;
+  parameter logic [5:0] CsrTbreStart  = 6'h1c;
+  parameter logic [5:0] CsrTbreStatus = 6'h20;
+  parameter logic [5:0] CsrTbreEpoch  = 6'h24;
+  // TBRE_STATUS fields
   parameter int unsigned StatusBusy     = 0;
   parameter int unsigned StatusStartErr = 8;
   parameter int unsigned StatusSweepErr = 9;
+  // ALERT_TEST.regwen (rw0c, reset 1): writing 0 to it disables alert testing until reset
+  parameter int unsigned AlertTestRegwen = 31;
 
   function automatic bit csr_mapped(logic [5:0] off);
     return off inside {CsrIntrState, CsrIntrEnable, CsrIntrTest, CsrAlertTest, CsrRegwen,
-                       CsrTrbeBase, CsrTrbeNum, CsrTrbeStart, CsrTrbeStatus, CsrTrbeEpoch};
+                       CsrTbreBase, CsrTbreNum, CsrTbreStart, CsrTbreStatus, CsrTbreEpoch};
   endfunction
 
   // reggen refuses a write that leaves out a byte holding one of the register's fields (counted
-  // up to its highest field bit): byte 0 for the one-bit registers, bytes 0-1 for TRBE_STATUS
-  // (bits 9:8), all four for TRBE_BASE_ADDR, TRBE_NUM_CAPS and TRBE_EPOCH.
+  // up to its highest field bit): byte 0 for the one-bit registers, bytes 0-1 for TBRE_STATUS
+  // (bits 9:8), all four for TBRE_BASE_ADDR, TBRE_NUM_CAPS, TBRE_EPOCH and ALERT_TEST (regwen in
+  // bit 31).
   function automatic logic [3:0] csr_write_bytes(logic [5:0] off);
     case (off)
-      CsrTrbeBase, CsrTrbeNum, CsrTrbeEpoch: return 4'b1111;
-      CsrTrbeStatus:                         return 4'b0011;
+      CsrTbreBase, CsrTbreNum, CsrTbreEpoch, CsrAlertTest: return 4'b1111;
+      CsrTbreStatus:                         return 4'b0011;
       default:                               return 4'b0001;
     endcase
   endfunction
@@ -122,13 +125,13 @@ package cms_pkg;
   // Fault injection kinds of the memory models (cms_tl_mem::inject)
   typedef enum int { InjErr = 0, InjRspIntg = 1, InjDataIntg = 2 } inj_kind_e;
 
-  // One read of the revocation engine on trbe_tl_h: address, the first cycle it was presented
+  // One read of the revocation engine on tbre_tl_h: address, the first cycle it was presented
   // (a_valid) and the cycle of its handshake.
   typedef struct {
     logic [31:0]     addr;
     longint unsigned p_cycle;
     longint unsigned a_cycle;
-  } trbe_rd_t;
+  } tbre_rd_t;
 
   typedef struct {
     int unsigned           id;
@@ -345,13 +348,13 @@ package cms_pkg;
       x_outcome:  cross cp_sealing, cp_base, cp_bit;
     endgroup
 
-    // TRBE_START outcome
+    // TBRE_START outcome
     logic [2:0] st_outcome;  // 0 accepted, 1 num 0, 2 base below the SRAM, 3 base above it and
                              // not in the NVM, 4 not CHERIoT, 5 while busy, 6 wrote 0
     logic       st_clamped;
     logic       st_nvm;      // accepted sweep of the NVM
 
-    covergroup cms_trbe_start_cg;
+    covergroup cms_tbre_start_cg;
       cp_outcome: coverpoint st_outcome {
         bins accepted = {0}; bins num_zero = {1}; bins base_low = {2}; bins base_high = {3};
         bins not_cheriot = {4}; bins while_busy = {5}; bins wrote_zero = {6};
@@ -362,12 +365,15 @@ package cms_pkg;
     endgroup
 
     // End of a sweep, as the reference model saw it
-    logic e_failed;     // a fault the test injected ended it with TRBE_STATUS.sweep_err
+    logic e_failed;     // a fault the test injected ended it with TBRE_STATUS.sweep_err
+    logic e_denied;     // ... and that fault was only an error response to a read of the swept
+                        // memory, which raises no alert
     logic e_nvm;
-    logic e_intr_en;    // INTR_ENABLE.trbe_done set as it ended
+    logic e_intr_en;    // INTR_ENABLE.tbre_done set as it ended
 
-    covergroup cms_trbe_end_cg;
+    covergroup cms_tbre_end_cg;
       cp_failed:  coverpoint e_failed;
+      cp_denied:  coverpoint e_denied iff (e_failed);
       cp_nvm:     coverpoint e_nvm;
       cp_intr_en: coverpoint e_intr_en;
       x_failed_intr: cross cp_failed, cp_intr_en;
@@ -440,10 +446,10 @@ package cms_pkg;
     function new();
       cms_core_access_cg = new();
       cms_sweep_cap_cg   = new();
-      cms_trbe_start_cg  = new();
+      cms_tbre_start_cg  = new();
       cms_meta_access_cg = new();
       cms_sweep_race_cg  = new();
-      cms_trbe_end_cg    = new();
+      cms_tbre_end_cg    = new();
       cms_sweep_snoop_cg = new();
       cms_nvm_cap_cg     = new();
     endfunction
@@ -454,7 +460,7 @@ package cms_pkg;
   ////////////////////////////////////////////////////////////////////////////////////////////////
 
   // A granule's predicted tag is a set: bit 0 "may be 0", bit 1 "may be 1". Exact predictions
-  // have one bit; concurrency (core vs TRBE) and reset leave a two-value set, which the next
+  // have one bit; concurrency (core vs TBRE) and reset leave a two-value set, which the next
   // observation (a capability load or a meta SRAM compare) resolves.
   parameter logic [1:0] Tag0   = 2'b01;
   parameter logic [1:0] Tag1   = 2'b10;
@@ -497,7 +503,7 @@ package cms_pkg;
     logic [31:0] csr_base, csr_num;
     bit          csr_base_known, csr_num_known;
     // Interrupt (registers.md INTR_*; programmers_guide.md: a level interrupt, raised when the
-    // engine stops being active) and TRBE_STATUS's sticky flags. Sets, as the tags are: a flag a
+    // engine stops being active) and TBRE_STATUS's sticky flags. Sets, as the tags are: a flag a
     // running sweep may set at any time is a two-value set until the sweep is seen to end.
     bit          intr_enable;
     logic [1:0]  intr_state;
@@ -505,8 +511,11 @@ package cms_pkg;
     bit          start_err;
     logic [1:0]  sweep_err;
     bit          sweep_err_clr_in_sweep;
-    // TRBE_EPOCH.count: sweeps that ended without an error, modulo 2^31
+    // TBRE_EPOCH.count: sweeps that ended without an error, modulo 2^31
     logic [30:0] epoch_count;
+    // ALERT_TEST.regwen (registers.md): cleared by a write of 0 to it, set again only by reset. The
+    // tests check the alert a write of ALERT_TEST.fatal_fault raises while it is set.
+    bit          alert_test_regwen;
 
     // Sweep
     bit              sweep_active;
@@ -514,17 +523,18 @@ package cms_pkg;
     int unsigned     sweep_caps;
     longint unsigned sweep_a_cycle;
     bit              sweep_fail_exp;   // a directed test injected a fault into this sweep
-    logic [31:0]     trbe_exp_reads[$];
-    // TRBE reads seen before the TRBE_START write's response. The engine starts when it accepts
+    bit              sweep_fail_denied; // ... only error responses to reads of the swept memory
+    logic [31:0]     tbre_exp_reads[$];
+    // TBRE reads seen before the TBRE_START write's response. The engine starts when it accepts
     // the write (A channel) but the scoreboard arms the sweep on the D response, so the first reads
     // can arrive first. Held here and replayed by start_write(); left over means no sweep started.
-    trbe_rd_t        trbe_early_reads[$];
-    localparam int unsigned TrbeEarlyMax = 8;
-    int unsigned     trbe_reads_seen;
-    longint unsigned trbe_prev_a;      // handshake of the engine's previous read in this sweep
+    tbre_rd_t        tbre_early_reads[$];
+    localparam int unsigned TbreEarlyMax = 8;
+    int unsigned     tbre_reads_seen;
+    longint unsigned tbre_prev_a;      // handshake of the engine's previous read in this sweep
     // Per swept granule: the earliest cycle the engine can have presented its lower word's read,
-    // and when that read, and the upper word's, were first seen presented on trbe_tl_h. The path
-    // from the engine to trbe_tl_h only passes requests on (theory_of_operation.md "Timing"), so
+    // and when that read, and the upper word's, were first seen presented on tbre_tl_h. The path
+    // from the engine to tbre_tl_h only passes requests on (theory_of_operation.md "Timing"), so
     // the engine presented the read no later than it is seen, and no earlier than the cycle after
     // the handshake of its previous read.
     longint unsigned rd_lb [int unsigned];
@@ -566,7 +576,7 @@ package cms_pkg;
 
     // Scoreboard fault injection (+cms_sb_corrupt=<kind>[,<n>]): corrupt the n-th prediction of the
     // given kind; the run must then fail. Kinds: load_tag, sweep, revbm, err, data, race (the tag
-    // of a swept capability a watched core write keeps), epoch (a TRBE_EPOCH read).
+    // of a swept capability a watched core write keeps), epoch (a TBRE_EPOCH read).
     string       corrupt_kind;
     int unsigned corrupt_n;
     bit          corrupt_done;
@@ -581,7 +591,8 @@ package cms_pkg;
       csr_base = 0; csr_num = 0; csr_base_known = 1; csr_num_known = 1;
       intr_enable = 0; intr_state = Tag0; intr_clr_in_sweep = 0;
       start_err = 0; sweep_err = Tag0; sweep_err_clr_in_sweep = 0; epoch_count = 0;
-      sweep_active = 0; sweep_fail_exp = 0;
+      alert_test_regwen = 1;
+      sweep_active = 0; sweep_fail_exp = 0; sweep_fail_denied = 0;
       wtrc_open = 0; wtrc_g = 0; wtrc_w0_ok = 0;
       exp_core_err = 0; err_tag_effect = 2; err_data_written = 0;
       prev_valid = 0;
@@ -859,7 +870,7 @@ package cms_pkg;
     function void sample_race(int unsigned g, logic [31:0] old_w0, logic [31:0] old_w1);
       logic [31:0] ga, cur;
       ga  = granule_addr(g);
-      cur = sweep_base + (trbe_reads_seen / 2) * 8;
+      cur = sweep_base + (tbre_reads_seen / 2) * 8;
       if (!in_sweep(g, sweep_base, sweep_caps))
         cov.r_kind = 2'd0;
       else if (snap_tag.exists(g) && snap_tag[g][1] && revocable(old_w0, old_w1, 1))
@@ -971,23 +982,25 @@ package cms_pkg;
             intr_state        = Tag1;
             intr_clr_in_sweep = 0;
           end
-          CsrTrbeBase: begin
+          CsrTbreBase: begin
             if (sweep_active) csr_base_known = 0;
             else begin csr_base = t.wdata & 32'hffff_fff8; csr_base_known = 1; end
           end
-          CsrTrbeNum: begin
+          CsrTbreNum: begin
             if (sweep_active) csr_num_known = 0;
             else begin csr_num = t.wdata & 32'h7fff_ffff; csr_num_known = 1; end
           end
-          CsrTrbeStart: start_write(t);
-          CsrTrbeStatus: begin
+          CsrTbreStart: start_write(t);
+          CsrTbreStatus: begin
             if (t.wdata[StatusStartErr]) start_err = 0;
             if (t.wdata[StatusSweepErr]) begin
               sweep_err = Tag0;
               if (sweep_active && sweep_fail_exp) sweep_err_clr_in_sweep = 1;
             end
           end
-          default: ;  // ALERT_TEST (the test checks the alert); the read-only registers
+          // rw0c regwen; the alert a write of fatal_fault raises is the test's to check
+          CsrAlertTest: if (!t.wdata[AlertTestRegwen]) alert_test_regwen = 0;
+          default: ;  // the read-only registers
         endcase
         return;
       end
@@ -995,35 +1008,35 @@ package cms_pkg;
       known = 1;
       case (off)
         CsrIntrState: begin
-          // A running sweep may end, and raise trbe_done, at any time.
+          // A running sweep may end, and raise tbre_done, at any time.
           known = 0;
           s = sweep_active ? (intr_state | Tag1) : intr_state;
           if (t.rdata[31:1] != 0) err($sformatf("%s: reserved bits set", ctx));
           if (!s[t.rdata[0]])
-            err($sformatf("%s: trbe_done %b, expected %s", ctx, t.rdata[0], tagset_str(s)));
+            err($sformatf("%s: tbre_done %b, expected %s", ctx, t.rdata[0], tagset_str(s)));
           else if (!sweep_active) intr_state = tag_exact(t.rdata[0]);
         end
         CsrIntrEnable: exp = {31'h0, intr_enable};
         CsrIntrTest:   exp = 32'h0;
-        CsrAlertTest:  exp = 32'h0;
-        CsrTrbeStart:  exp = 32'h0;
-        CsrTrbeBase:   begin exp = csr_base; known = csr_base_known; end
-        CsrTrbeNum:    begin exp = csr_num;  known = csr_num_known;  end
+        CsrAlertTest:  exp = 32'(alert_test_regwen) << AlertTestRegwen;  // fatal_fault reads 0
+        CsrTbreStart:  exp = 32'h0;
+        CsrTbreBase:   begin exp = csr_base; known = csr_base_known; end
+        CsrTbreNum:    begin exp = csr_num;  known = csr_num_known;  end
         CsrRegwen:     begin
           // Low exactly while the engine is active: high with a sweep running means it is over.
           known = 0;
           if (t.rdata[31:1] != 0) err($sformatf("%s: reserved bits set", ctx));
           if (t.rdata[0] == 1'b0 && !sweep_active)
             err($sformatf("%s: REGWEN low with no sweep running", ctx));
-          if (t.rdata[0] && sweep_active) sweep_done(t, "TRBE_REGWEN high");
+          if (t.rdata[0] && sweep_active) sweep_done(t, "TBRE_REGWEN high");
         end
-        CsrTrbeStatus: begin
+        CsrTbreStatus: begin
           known = 0;
           if ((t.rdata & ~((32'h1 << StatusBusy) | (32'h1 << StatusStartErr) |
                            (32'h1 << StatusSweepErr))) != 0)
             err($sformatf("%s: reserved bits set", ctx));
           if (t.rdata[StatusBusy] && !sweep_active) err($sformatf("%s: busy with no sweep running", ctx));
-          if (!t.rdata[StatusBusy] && sweep_active) sweep_done(t, "TRBE_STATUS.busy low");
+          if (!t.rdata[StatusBusy] && sweep_active) sweep_done(t, "TBRE_STATUS.busy low");
           if (t.rdata[StatusStartErr] != start_err)
             err($sformatf("%s: start_err %b, expected %b", ctx, t.rdata[StatusStartErr], start_err));
           // A fault injected into the running sweep sets sweep_err when it hits.
@@ -1033,9 +1046,9 @@ package cms_pkg;
                           tagset_str(s)));
           else if (!(sweep_active && sweep_fail_exp)) sweep_err = tag_exact(t.rdata[StatusSweepErr]);
         end
-        CsrTrbeEpoch:  begin
+        CsrTbreEpoch:  begin
           // Odd exactly while the engine is active: even with a sweep running means it is over.
-          if (sweep_active && !t.rdata[0]) sweep_done(t, "TRBE_EPOCH even");
+          if (sweep_active && !t.rdata[0]) sweep_done(t, "TBRE_EPOCH even");
           exp = {epoch_count, sweep_active};
           if (corrupt("epoch", ctx)) exp = exp ^ 32'h2;
           n_data_checks++;
@@ -1046,14 +1059,14 @@ package cms_pkg;
         err($sformatf("%s: read 0x%08x, expected 0x%08x", ctx, t.rdata, exp));
     endfunction
 
-    // TRBE_START written: theory_of_operation.md "Revocation Engine".
+    // TBRE_START written: theory_of_operation.md "Revocation Engine".
     function void start_write(cms_txn_t t);
       logic [31:0] top_caps;
       int unsigned caps;
       if (!t.wdata[0])                                    cov.st_outcome = 3'd6;
       else if (sweep_active)                              cov.st_outcome = 3'd5;
       else if (!csr_num_known || !csr_base_known) begin
-        err("TRBE_START with BASE/NUM unknown (written during a sweep): test sequencing error");
+        err("TBRE_START with BASE/NUM unknown (written during a sweep): test sequencing error");
         return;
       end
       else if (csr_num == 0)                              cov.st_outcome = 3'd1;
@@ -1065,14 +1078,14 @@ package cms_pkg;
       if (cov.st_outcome != 3'd0) begin
         cov.st_clamped = 0;
         cov.st_nvm     = 0;
-        cov.cms_trbe_start_cg.sample();
+        cov.cms_tbre_start_cg.sample();
         // An ignored start sets start_err; a write of 0 is no start, and one while the engine is
-        // active is dropped by TRBE_REGWEN.
+        // active is dropped by TBRE_REGWEN.
         if (cov.st_outcome inside {3'd1, 3'd2, 3'd3, 3'd4}) begin
           n_ignored_starts++;
           start_err = 1;
         end
-        if (!sweep_active) flush_trbe_early_reads("TRBE_START was ignored");
+        if (!sweep_active) flush_tbre_early_reads("TBRE_START was ignored");
         return;
       end
       // A sweep that would reach past the top of its region ends there.
@@ -1080,21 +1093,22 @@ package cms_pkg;
       caps     = (csr_num > top_caps) ? top_caps : csr_num;
       cov.st_clamped = csr_num > top_caps;
       cov.st_nvm     = in_nvm(csr_base);
-      cov.cms_trbe_start_cg.sample();
+      cov.cms_tbre_start_cg.sample();
 
       sweep_active    = 1;
       sweep_base      = csr_base;
       sweep_caps      = caps;
       sweep_a_cycle   = t.a_cycle;
       sweep_fail_exp  = 0;
+      sweep_fail_denied = 0;
       intr_clr_in_sweep      = 0;
       sweep_err_clr_in_sweep = 0;
-      trbe_reads_seen = 0;
-      trbe_prev_a     = 0;
-      trbe_exp_reads.delete();
+      tbre_reads_seen = 0;
+      tbre_prev_a     = 0;
+      tbre_exp_reads.delete();
       for (int unsigned i = 0; i < caps; i++) begin
-        trbe_exp_reads.push_back(csr_base + i * 8);
-        trbe_exp_reads.push_back(csr_base + i * 8 + 4);
+        tbre_exp_reads.push_back(csr_base + i * 8);
+        tbre_exp_reads.push_back(csr_base + i * 8 + 4);
       end
       snap_revbm = srevbm;
       race_q.delete(); racy_revbm.delete(); sweep_dc.delete();
@@ -1119,71 +1133,76 @@ package cms_pkg;
           set_tag(g, get_tag(g) | Tag0);
       end
       n_sweeps++;
-      cms_info("sb", $sformatf("sweep %0d: %0d capabilities from 0x%08x (TRBE_NUM_CAPS %0d)",
+      cms_info("sb", $sformatf("sweep %0d: %0d capabilities from 0x%08x (TBRE_NUM_CAPS %0d)",
                                n_sweeps, caps, csr_base, csr_num));
-      // Reads issued between the TRBE accepting this write and its response.
-      while (trbe_early_reads.size() > 0) check_trbe_read(trbe_early_reads.pop_front());
+      // Reads issued between the TBRE accepting this write and its response.
+      while (tbre_early_reads.size() > 0) check_tbre_read(tbre_early_reads.pop_front());
     endfunction
 
-    // Every read the TRBE issues on trbe_tl_h, in order.
-    function void on_trbe_read(trbe_rd_t rd, tl_a_op_e op);
-      if (op != Get) err($sformatf("TRBE issued %s to 0x%08x: the engine must never write memory",
+    // Every read the TBRE issues on tbre_tl_h, in order.
+    function void on_tbre_read(tbre_rd_t rd, tl_a_op_e op);
+      if (op != Get) err($sformatf("TBRE issued %s to 0x%08x: the engine must never write memory",
                                    op.name(), rd.addr));
       if (!sweep_active) begin
-        // Possibly ahead of the TRBE_START response; checked when start_write() runs.
-        trbe_early_reads.push_back(rd);
-        if (trbe_early_reads.size() > TrbeEarlyMax)
-          err($sformatf("TRBE read 0x%08x with no sweep started (%0d reads without a TRBE_START)",
-                        rd.addr, trbe_early_reads.size()));
+        // Possibly ahead of the TBRE_START response; checked when start_write() runs.
+        tbre_early_reads.push_back(rd);
+        if (tbre_early_reads.size() > TbreEarlyMax)
+          err($sformatf("TBRE read 0x%08x with no sweep started (%0d reads without a TBRE_START)",
+                        rd.addr, tbre_early_reads.size()));
         return;
       end
-      check_trbe_read(rd);
+      check_tbre_read(rd);
     endfunction
 
-    function void check_trbe_read(trbe_rd_t rd);
+    function void check_tbre_read(tbre_rd_t rd);
       logic [31:0] exp;
       int unsigned g;
-      if (trbe_exp_reads.size() == 0) begin
-        err($sformatf("TRBE read 0x%08x with no sweep word outstanding", rd.addr));
+      if (tbre_exp_reads.size() == 0) begin
+        err($sformatf("TBRE read 0x%08x with no sweep word outstanding", rd.addr));
         return;
       end
-      exp = trbe_exp_reads.pop_front();
-      if (rd.addr != exp) err($sformatf("TRBE read 0x%08x, expected 0x%08x", rd.addr, exp));
+      exp = tbre_exp_reads.pop_front();
+      if (rd.addr != exp) err($sformatf("TBRE read 0x%08x, expected 0x%08x", rd.addr, exp));
       // When the watch of the capability's core writes starts (sweep_done)
       g = granule(exp);
       if (!exp[2]) begin
-        rd_lb[g] = (trbe_reads_seen == 0) ? sweep_a_cycle : trbe_prev_a + 1;
+        rd_lb[g] = (tbre_reads_seen == 0) ? sweep_a_cycle : tbre_prev_a + 1;
         rd_p0[g] = rd.p_cycle;
       end else begin
         rd_p1[g] = rd.p_cycle;
       end
-      trbe_prev_a = rd.a_cycle;
-      trbe_reads_seen++;
+      tbre_prev_a = rd.a_cycle;
+      tbre_reads_seen++;
     endfunction
 
-    // Reads held by on_trbe_read() that no sweep accounted for.
-    function void flush_trbe_early_reads(string why);
-      foreach (trbe_early_reads[i])
-        err($sformatf("TRBE read 0x%08x with no sweep started (%s)", trbe_early_reads[i].addr, why));
-      trbe_early_reads.delete();
+    // Reads held by on_tbre_read() that no sweep accounted for.
+    function void flush_tbre_early_reads(string why);
+      foreach (tbre_early_reads[i])
+        err($sformatf("TBRE read 0x%08x with no sweep started (%s)", tbre_early_reads[i].addr, why));
+      tbre_early_reads.delete();
     endfunction
 
     // A directed test declares one swept capability's outcome unpredictable (a fault on its read).
     function void sweep_dont_care(int unsigned g);
       sweep_dc[g] = 1;
     endfunction
-    // ... or as kept (an errored read is never invalidated) or revoked (a failed bitmap lookup).
+    // ... or as kept (a read of either word answered with an error, or failing its checks: that
+    // capability is not cleared, programmers_guide.md "Errors") or revoked (a failed bitmap
+    // lookup).
     function void sweep_expect_kept(int unsigned g);
       sweep_keep[g] = 1;
     endfunction
     function void sweep_expect_revoked(int unsigned g);
       sweep_force0[g] = 1;
     endfunction
-    // ... and that a fault it injected ends the running sweep with TRBE_STATUS.sweep_err, so
-    // TRBE_EPOCH does not count it.
-    function void sweep_expect_fail();
+    // ... and that a fault it injected ends the running sweep with TBRE_STATUS.sweep_err, so
+    // TBRE_EPOCH does not count it. `denied`: the only faults are error responses to reads of the
+    // swept memory (e.g. a read-protected NVM page), which raise no alert (for coverage; the test
+    // checks the alert).
+    function void sweep_expect_fail(bit denied = 1'b0);
       if (!sweep_active) err("sweep_expect_fail with no sweep running: test sequencing error");
-      sweep_fail_exp = 1;
+      sweep_fail_denied = (sweep_fail_exp ? sweep_fail_denied : 1'b1) && denied;
+      sweep_fail_exp    = 1;
     endfunction
 
     // The engine is seen inactive: the sweep is over. Every word must have been read; predict the
@@ -1193,9 +1212,9 @@ package cms_pkg;
       int unsigned g, b;
       bit          rv_old, rv_new, inr;
       logic [1:0]  s, s_eval;
-      if (trbe_exp_reads.size() != 0)
+      if (tbre_exp_reads.size() != 0)
         err($sformatf("%s with %0d of %0d sweep reads not issued", why,
-                      trbe_exp_reads.size(), 2 * sweep_caps));
+                      tbre_exp_reads.size(), 2 * sweep_caps));
       for (int unsigned i = 0; i < sweep_caps; i++) begin
         ga = sweep_base + i * 8;
         g  = granule(ga);
@@ -1273,22 +1292,24 @@ package cms_pkg;
         n_sweep_caps++;
         if (cov.s_revoked) n_sweep_revoked++;
       end
-      // registers.md TRBE_EPOCH, TRBE_STATUS; programmers_guide.md: a sweep that ends with an
-      // error sets sweep_err and is not counted; trbe_done is raised either way.
+      // registers.md TBRE_EPOCH, TBRE_STATUS; programmers_guide.md: a sweep that ends with an
+      // error sets sweep_err and is not counted; tbre_done is raised either way.
       if (sweep_fail_exp) sweep_err = sweep_err_clr_in_sweep ? TagAny : Tag1;
       else                epoch_count = epoch_count + 31'd1;
       intr_state = intr_clr_in_sweep ? TagAny : Tag1;
       cov.e_failed  = sweep_fail_exp;
+      cov.e_denied  = sweep_fail_denied;
       cov.e_nvm     = in_nvm(sweep_base);
       cov.e_intr_en = intr_enable;
-      cov.cms_trbe_end_cg.sample();
+      cov.cms_tbre_end_cg.sample();
       sweep_active   = 0;
       sweep_fail_exp = 0;
+      sweep_fail_denied = 0;
       cms_info("sb", $sformatf("sweep %0d done (%s; %0d revoked so far in this run, epoch %0d)",
                                n_sweeps, why, n_sweep_revoked, epoch_count));
     endfunction
 
-    // The level of intr_trbe_done_o, as far as the model knows it (cms_tb checks it whenever the
+    // The level of intr_tbre_done_o, as far as the model knows it (cms_tb checks it whenever the
     // CSR port has been quiet for a few cycles).
     function logic [1:0] intr_pin_expect();
       if (!intr_enable) return Tag0;
@@ -1345,7 +1366,7 @@ package cms_pkg;
       end
     endfunction
 
-    // Data memory: the subsystem forwards core writes unchanged and the TRBE never writes.
+    // Data memory: the subsystem forwards core writes unchanged and the TBRE never writes.
     function void check_data(string why);
       int unsigned bad;
       bad = 0;
@@ -1384,11 +1405,13 @@ package cms_pkg;
       foreach (inflight[g]) set_tag(g, get_tag(g) | tag_exact(inflight[g]));
       sweep_active = 0;
       sweep_fail_exp = 0;
-      trbe_exp_reads.delete();
-      trbe_early_reads.delete();
+      sweep_fail_denied = 0;
+      tbre_exp_reads.delete();
+      tbre_early_reads.delete();
       csr_base = 0; csr_num = 0; csr_base_known = 1; csr_num_known = 1;
       intr_enable = 0; intr_state = Tag0; intr_clr_in_sweep = 0;
       start_err = 0; sweep_err = Tag0; sweep_err_clr_in_sweep = 0; epoch_count = 0;
+      alert_test_regwen = 1;
       wtrc_open = 0;
       exp_core_err = 0;
       prev_valid = 0;

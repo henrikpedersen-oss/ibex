@@ -1,8 +1,8 @@
 # CHERIoT memory subsystem: block-level testbench
 
 A SystemVerilog testbench for the OpenTitan CHERIoT memory subsystem on its own: the top module
-`cheriot` (`opentitan-cheriot/hw/ip/cheriot/rtl/cheriot.sv`, lowRISC/opentitan PR #31515 stacked on
-#31470, as pinned in `opentitan-cheriot/VENDORED_FROM`), unmodified. The testplan is
+`cheriot` (`opentitan-cheriot/hw/ip/cheriot/rtl/cheriot.sv`, lowRISC/opentitan PR #31515 as
+merged, as pinned in `opentitan-cheriot/VENDORED_FROM`), unmodified. The testplan is
 [`../testplans/cheriot_mem_subsys_testplan.hjson`](../testplans/cheriot_mem_subsys_testplan.hjson);
 it also says which obligations are left to the RTOS firmware (`sonata_testplan.hjson`) and to
 formal.
@@ -17,10 +17,10 @@ inject faults, race the revocation engine against a store on a chosen cycle, dri
 ```
 cms_tl_host x4 ──> cored_tl_d (+ tag sideband) ┐
                    revbm_tl_d                  │            ┌──> cored_tl_h ─┐
-                   corerevbm_tl                ├─ cheriot ──┼──> trbe_tl_h  ─┴─ cms_tl_mem x2 (one data store)
+                   corerevbm_tl                ├─ cheriot ──┼──> tbre_tl_h  ─┴─ cms_tl_mem x2 (one data store)
                    regs_tl_d                   ┘            └──> meta_sram_tl ── cms_tl_mem (meta SRAM)
                                                   alert_tx ──> prim_alert_receiver
-                                                  intr_trbe_done_o ──> checked against the model
+                                                  intr_tbre_done_o ──> checked against the model
 ```
 
 | File | What it is |
@@ -28,7 +28,7 @@ cms_tl_host x4 ──> cored_tl_d (+ tag sideband) ┐
 | `tb/cms_tb.sv` | Top: DUT, hosts, memories, alert receiver, `tlul_assert` on all seven ports, always-on checks, helper tasks, main |
 | `tb/cms_tests.svh` | The tests (`make tests` lists them) |
 | `tb/cms_pkg.sv` | Address map, transactions, TB storage, the reference model / scoreboard (`cms_sb`), TB covergroups (`cms_cov`) |
-| `tb/cms_tl_host.sv` | TL-UL host driver: queued requests, up to N outstanding, random gaps and `d_ready`, integrity generation, response checks; holds back after a capability store's second word, as Ibex does |
+| `tb/cms_tl_host.sv` | TL-UL host driver: queued requests, up to N outstanding, random gaps and `d_ready`, integrity generation, response checks (integrity included); holds back after a capability store's second word, as Ibex does |
 | `tb/cms_tl_mem.sv` | TL-UL memory model: random `a_ready`/latency, response integrity, request checks, fault injection; the NVM is read-only on the bus (tests program it through the backdoor) |
 | `tb/cms_fcov_bind.sv` | Binds the RTOS SoC's RTL covergroups (`../cheriot-rtos-test-suites/fcov/`) into this bench |
 | `cms_dv.f` | File list (Verilator): `opentitan-cheriot/cheriot_rtl.f` + the testbench |
@@ -59,16 +59,18 @@ into itself. It keeps:
   store to the NVM never writes it);
 - the **WTRC sequence** of capability stores to the NVM: which word answers d_error, when the tag
   is set;
-- the **CSRs**: INTR_STATE/INTR_ENABLE (and the interrupt pin), TRBE_STATUS's sticky start_err
-  and sweep_err, TRBE_EPOCH, and the sweep in progress: the exact sequence of words the engine
+- the **CSRs**: INTR_STATE/INTR_ENABLE (and the interrupt pin), TBRE_STATUS's sticky start_err
+  and sweep_err, TBRE_EPOCH, and the sweep in progress: the exact sequence of words the engine
   must read and, when the engine is seen inactive (busy 0, REGWEN 1 or an even epoch), the
   predicted tag of every swept capability (its own decode of the base, sealing exemption, bitmap
   range). A core write to a swept capability is timed against the engine's reads seen on
-  `trbe_tl_h`: answered at or after the read of the capability's lower word was presented, the
+  `tbre_tl_h`: answered at or after the read of the capability's lower word was presented, the
   write's tag stands; answered before the engine could have presented it, the engine decides;
   in the few cycles between, either.
 
-It checks every response on the four device ports (data, tag, `d_error`, opcode/size/source), the
+It checks every response on the four device ports (data, tag, `d_error`, opcode/size/source, and
+response and data integrity, which the subsystem regenerates for every response it makes or
+changes), the
 engine's every read, and after each sweep and at the end compares the whole meta SRAM model and data
 memory with its prediction. The memory models check every request's command and data integrity,
 and the meta SRAM model that every tag-word write changes exactly one bit, that requests come only
@@ -83,7 +85,7 @@ scripts enter themselves when `xrun` is not on PATH):
 ```bash
 make cheriot-mem-subsys-xlm                         # build + every run in cms_regress.list (COVERAGE=1 by default)
 make cheriot-mem-subsys-xlm COVERAGE=0 KEEP=1       # no coverage, reuse the build
-make cheriot-mem-subsys-test-xlm TEST=cms_trbe_store_race SEED=3
+make cheriot-mem-subsys-test-xlm TEST=cms_tbre_store_race SEED=3
 make testplan-cheriot-mem-subsys                    # report: cheriot_mem_subsys_report/cheriot_mem_subsys_testplan.html
 make cheriot-mem-subsys-lint                        # Verilator lint only, no simulation
 make cheriot-mem-subsys-mutation-xlm                # plant one RTL bug per run; its tests must fail (below)
@@ -91,7 +93,7 @@ make cheriot-mem-subsys-mutation-check              # grade those runs again, no
 ```
 
 Here, by hand: `make help`; `make build [COV=1] [MAP=earlgrey]`,
-`make run TEST=<t> [SEED=n] [GUI=1] [PLUSARGS="+num_ops=20000"]`, `make regress [FILTER=trbe]`.
+`make run TEST=<t> [SEED=n] [GUI=1] [PLUSARGS="+num_ops=20000"]`, `make regress [FILTER=tbre]`.
 Logs and verdicts: `xlm_out/results/<name>.<seed>.{log,result}`; the last line of a log is
 `CMS_RESULT test=... status=PASS|FAIL errors=N ...`, every failure a `CMS_ERROR` line.
 
@@ -121,19 +123,23 @@ LOG, INACTIVE or a mutation none of its tests caught. Run the unmutated regressi
 |---|---|---|---|
 | `partial_write_keeps_tag` | `cheriot_tag_filter.sv:215` `require_lookup` | A sub-word or PutPartialData store leaves the tag | `cms_tag_clear_subword`, `cms_rmw_same_word`, `cms_random` |
 | `datastore_sets_tag` | `cheriot_tag_filter.sv:328` `tag_m_o` | A full-word data store writes tag 1 | `cms_smoke`, `cms_tag_clear_subword`, `cms_tag_store_load`, `cms_random` |
-| `capstore_drops_tag` | `cheriot_tag_filter.sv:328` `tag_m_o` | A capability store's upper word writes tag 0 | `cms_smoke`, `cms_tag_store_load`, `cms_cap_load_hint`, `cms_trbe_sweep` |
-| `trvk_wrong_bit` | `cheriot_trvk_core.sv:275` `revbm_bit_select` | The engine's bitmap lookup reads the next granule's bit | `cms_trbe_base_decode`, `cms_trbe_sweep` |
-| `trbe_skip_last` | `cheriot.sv:544` `trbe_num_words` | A sweep stops one capability early | `cms_trbe_sweep`, `cms_trbe_base_decode`, `cms_trbe_epoch` |
-| `trbe_no_inval` | `cheriot_trbe_mover.sv:323` `write_a_valid` | The engine never clears a revoked capability's tag | `cms_trbe_sweep`, `cms_trbe_base_decode`, `cms_rmw_core_trbe_same_word`, `cms_trbe_snoop_window` |
-| `trbe_epoch_stuck` | `cheriot.sv:599` `trbe_epoch_en` | TRBE_EPOCH never counts a sweep | `cms_trbe_epoch`, `cms_trbe_csr`, `cms_random` |
-| `trbe_done_early` | `cheriot_trbe_mover.sv:498` `busy_o` | busy, trbe_done and the interrupt drop at the last read, before the last clear | `cms_trbe_sweep`, `cms_trbe_intr` |
-| `snoop_off` | `cheriot.sv:426` `trbe_snoop_valid` | Core writes are not watched: a clear overwrites a racing store's tag | `cms_trbe_store_race`, `cms_trbe_snoop_window` |
-| `meta_intg_unreported` | `cheriot_rmw_filter.sv:354,366` `rsp_intg_error_o`, `data_intg_error_o` | Meta SRAM integrity errors raise no fatal_fault | `cms_err_meta_intg` |
+| `capstore_drops_tag` | `cheriot_tag_filter.sv:328` `tag_m_o` | A capability store's upper word writes tag 0 | `cms_smoke`, `cms_tag_store_load`, `cms_cap_load_hint`, `cms_tbre_sweep` |
+| `trvk_wrong_bit` | `cheriot_trvk_core.sv:275` `revbm_bit_select` | The engine's bitmap lookup reads the next granule's bit | `cms_tbre_base_decode`, `cms_tbre_sweep` |
+| `tbre_skip_last` | `cheriot.sv:545` `tbre_num_words` | A sweep stops one capability early | `cms_tbre_sweep`, `cms_tbre_base_decode`, `cms_tbre_epoch` |
+| `tbre_no_inval` | `cheriot_tbre_mover.sv:326` `write_a_valid` | The engine never clears a revoked capability's tag | `cms_tbre_sweep`, `cms_tbre_base_decode`, `cms_rmw_core_tbre_same_word`, `cms_tbre_snoop_window` |
+| `tbre_epoch_stuck` | `cheriot.sv:600` `tbre_epoch_en` | TBRE_EPOCH never counts a sweep | `cms_tbre_epoch`, `cms_tbre_csr`, `cms_random` |
+| `tbre_done_early` | `cheriot_tbre_mover.sv:501` `busy_o` | busy, tbre_done and the interrupt drop at the last read, before the last clear | `cms_tbre_sweep`, `cms_tbre_intr` |
+| `snoop_off` | `cheriot.sv:427` `tbre_snoop_valid` | Core writes are not watched: a clear overwrites a racing store's tag | `cms_tbre_store_race`, `cms_tbre_snoop_window` |
+| `meta_intg_unreported` | `cheriot_rmw_filter.sv:359,371` `rsp_intg_error_o`, `data_intg_error_o` | Meta SRAM integrity errors raise no fatal_fault | `cms_err_meta_intg` |
 | `data_err_dropped` | `cheriot_tag_filter.sv:392` `tl_d_o` | The data path's d_error does not reach the core | `cms_err_data_path`, `cms_nvm_cap_store`, `cms_tag_store_load` |
-| `alert_dropped` | `cheriot.sv:703` `alert_req_i` | No fatal error raises fatal_fault | `cms_err_tag_path`, `cms_err_csr_intg`, `cms_err_trbe_read`, `cms_nvm_cap_store` |
+| `alert_dropped` | `cheriot.sv:705` `alert_req_i` | No fatal error raises fatal_fault | `cms_err_tag_path`, `cms_err_csr_intg`, `cms_err_tbre_read`, `cms_nvm_cap_store` |
 | `mode_loose_mubi` | `cheriot_access_check.sv:61-72` `allow_forward` (corerevbm) | The core's bitmap window takes any `cheriot_ena_i` but MuBi4False as CHERIoT mode | `cms_mode_gating` |
+| `tbre_read_err_fatal` | `cheriot_tbre_mover.sv:546` `err_o` | An error response to a read of the swept memory (a read-protected page) counts as a mover fault and raises fatal_fault | `cms_err_tbre_read`, `cms_tbre_epoch`, `cms_tbre_intr` |
+| `wtrc_presented_unflagged` | `cheriot_wtrc.sv:366` `req_before_tag_wr` | A request presented between W1 and its tag write is not flagged | `cms_nvm_cap_store` |
+| `alert_test_unlocked` | `cheriot_regs_reg_top.sv:239` `alert_test_gated_we` | ALERT_TEST.regwen is ignored: alert testing cannot be disabled | `cms_alert_test` |
 
-`trbe_done_early` is timing-dependent: it shows only when a busy poll or the interrupt falls
+`tbre_read_err_fatal` and `wtrc_presented_unflagged` are the RTL before PR #31515 was merged.
+`tbre_done_early` is timing-dependent: it shows only when a busy poll or the interrupt falls
 between a sweep's last read and its last clear, with a revoked last capability. Not mutated: the
 core's own load barrier (bit selection and the revoked decision are in Ibex's `ibex_trvk`; the
 subsystem only serves the bitmap word through `corerevbm_tl`). Corrupting that word's address or
@@ -142,7 +148,7 @@ cannot reach one field of a struct variable); `mode_loose_mubi` mutates that win
 
 ## Expected results that are not bugs in the bench
 
-- `cms_trbe_snoop_window` logs, without judging beyond the document, how many revoked capabilities
+- `cms_tbre_snoop_window` logs, without judging beyond the document, how many revoked capabilities
   in the NVM kept their tag through a sweep because a capability store to them failed: the document
   watches every core write, and a failed capability store to the NVM writes nothing.
 - `cms_err_meta_intg` logs, without judging, whether a corrupted response to the software bitmap
@@ -153,9 +159,12 @@ cannot reach one field of a struct variable); `mode_loose_mubi` mutates that win
 - No real core, interconnect or SRAM controller: the RTOS SoC covers integration
   (`sonata_testplan.hjson`).
 - A malformed (wrong opcode/size) bitmap response to the engine is not injected.
-- Capability stores to the NVM with bad command or data integrity, a bad NVM response integrity, a
-  W0 followed by anything but its W1, or a request between W1 and its tag write (which Ibex never
-  issues) are not driven; nor is an error on the NVM read of one or on its tag write.
+- Capability stores to the NVM with bad command or data integrity, a bad NVM response integrity, or
+  a W0 followed by anything but its W1 are not driven; nor is an error on the NVM read of W1 alone
+  or on the tag write. (A request presented between W1 and its tag write, which Ibex never issues,
+  is driven once, in `cms_nvm_cap_store`, with the WTRC's assertions off for it.)
+- A malformed (wrong opcode/size) response to one of the engine's capability reads is not injected
+  either; the TB memories only produce well-formed ones.
 - Writes by other hosts during a sweep (not watched, by the document) need a second host on the
   data memory; the RTOS SoC has the debug module.
 - A capability-hinted load of less than a word: from the RTL it would make the RMW filter's access

@@ -190,16 +190,16 @@ ${OT_CHERIOT_DIR}/hw/ip/cheriot/rtl/cheriot_wtrc.sv
 ${OT_CHERIOT_DIR}/hw/ip/cheriot/rtl/cheriot_tag_filter.sv
 ${OT_CHERIOT_DIR}/hw/ip/cheriot/rtl/cheriot_access_check.sv
 ${OT_CHERIOT_DIR}/hw/ip/cheriot/rtl/cheriot_socket_m1.sv
-${OT_CHERIOT_DIR}/hw/ip/cheriot/rtl/cheriot_trbe_mover.sv
+${OT_CHERIOT_DIR}/hw/ip/cheriot/rtl/cheriot_tbre_mover.sv
 ${OT_CHERIOT_DIR}/hw/ip/cheriot/rtl/cheriot_trvk_core.sv
 ${OT_CHERIOT_DIR}/hw/ip/cheriot/rtl/cheriot_trvk_tlul.sv
-${OT_CHERIOT_DIR}/hw/ip/cheriot/rtl/cheriot_trbe.sv
+${OT_CHERIOT_DIR}/hw/ip/cheriot/rtl/cheriot_tbre.sv
 ${OT_CHERIOT_DIR}/hw/ip/cheriot/rtl/cheriot.sv
 
 // ------ The SoC ----------------------------------------------------------------------------------
-// The Sonata integration glue for the subsystem (cheriot_rev_ctl_trbe, cheriot_mem_subsys) began
+// The Sonata integration glue for the subsystem (cheriot_rev_ctl_tbre, cheriot_mem_subsys) began
 // as an uncommitted addition to a sonata-system checkout; these are this flow's own copies.
-${RTOS_TB_DIR}/rtl/cheriot_rev_ctl_trbe.sv
+${RTOS_TB_DIR}/rtl/cheriot_rev_ctl_tbre.sv
 ${RTOS_TB_DIR}/rtl/cheriot_mem_subsys.sv
 ${RTOS_TB_DIR}/rtl/cheriot_rtos_default_rsp.sv
 ${RTOS_TB_DIR}/rtl/cheriot_rtos_xbar.sv

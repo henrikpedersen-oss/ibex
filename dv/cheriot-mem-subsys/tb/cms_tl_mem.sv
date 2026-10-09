@@ -3,19 +3,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // TL-UL device model for the subsystem's host ports: the data memory behind cored_tl_h and
-// trbe_tl_h (two instances sharing one cms_store, as the interconnect leads both to the same SRAM),
+// tbre_tl_h (two instances sharing one cms_store, as the interconnect leads both to the same SRAM),
 // and the meta SRAM behind meta_sram_tl.
 //
 // In order, up to Depth requests outstanding, a_ready withheld at random (a_ready_pct), response
 // latency lat_min..lat_max cycles (>= 1). Writes are applied, and reads return data, at the A
 // handshake. Responses carry response and data integrity, as OpenTitan's SRAM adapters generate
-// them (the subsystem checks both on the meta SRAM and TRBE paths). The NVM is read-only on the
+// them (the subsystem checks both on the meta SRAM and TBRE paths). The NVM is read-only on the
 // interconnect, as in the system (programmers_guide.md "Storing Capabilities in the NVM"): a write
 // to it is answered with d_error and not applied; tests program it through the backdoor.
 //
 // Checks on every request: command integrity, and data integrity of writes, are correct. The meta
 // SRAM additionally requires CHERIoT mode, an address inside the meta SRAM, a full-word Get or
-// PutFullData (what the access checkers let through); the TRBE port forwards each request, with
+// PutFullData (what the access checkers let through); the TBRE port forwards each request, with
 // the cycle it was first presented, to the scoreboard, which checks the sweep's address sequence
 // and that it never writes, and times core writes against the engine's reads.
 //
@@ -27,7 +27,7 @@ module cms_tl_mem
   import cms_pkg::*;
 #(
   parameter string       Name  = "mem",
-  parameter int unsigned Kind  = 0,  // 0 data (core port), 1 data (TRBE port), 2 meta SRAM
+  parameter int unsigned Kind  = 0,  // 0 data (core port), 1 data (TBRE port), 2 meta SRAM
   parameter int unsigned Depth = 4
 ) (
   input  logic                  clk_i,
@@ -38,7 +38,7 @@ module cms_tl_mem
 );
 
   localparam int unsigned KindCore = 0;
-  localparam int unsigned KindTrbe = 1;
+  localparam int unsigned KindTbre = 1;
   localparam int unsigned KindMeta = 2;
 
 
@@ -153,12 +153,12 @@ module cms_tl_mem
         cms_error(Name, $sformatf("meta SRAM access not a full-word Get/PutFullData: %s 0x%08x "
                                   , h.a_opcode.name(), h.a_address));
     end
-    if (Kind == KindTrbe && sb != null) begin
-      trbe_rd_t rd;
+    if (Kind == KindTbre && sb != null) begin
+      tbre_rd_t rd;
       rd.addr    = h.a_address;
       rd.p_cycle = pres_cycle;
       rd.a_cycle = cms_cycle;
-      sb.on_trbe_read(rd, h.a_opcode);
+      sb.on_tbre_read(rd, h.a_opcode);
     end
   endfunction
 
@@ -205,7 +205,7 @@ module cms_tl_mem
         r.rdata  = 32'h0;
         if (wr) begin
           n_writes++;
-          if (!r.err && !(Kind == KindTrbe)) begin
+          if (!r.err && !(Kind == KindTbre)) begin
             old_w = store.read(tl_i.a_address);
             store.write(tl_i.a_address, tl_i.a_data, tl_i.a_mask);
             if (Kind == KindMeta && sb != null)

@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Code coverage for the CHERIoT memory subsystem block-level bench: the subsystem (`cheriot` and
-// below: tag filters, RMW filter, access checkers, TRBE, CSRs) and nothing of the testbench.
+// below: tag filters, RMW filter, access checkers, TBRE, CSRs) and nothing of the testbench.
 // Built with -covdut cheriot.
 //
 // Same scheme as ../cheriot-rtos-test-suites/cheriot_rtos_cover.ccf: the suite-specific additions

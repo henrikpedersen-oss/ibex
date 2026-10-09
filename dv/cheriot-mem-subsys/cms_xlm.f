@@ -50,8 +50,8 @@ opentitan-cheriot/hw/ip/cheriot/rtl/cheriot_regs_reg_top.sv
 opentitan-cheriot/hw/ip/cheriot/rtl/cheriot_rmw_filter.sv
 opentitan-cheriot/hw/ip/cheriot/rtl/cheriot_socket_m1.sv
 opentitan-cheriot/hw/ip/cheriot/rtl/cheriot_tag_filter.sv
-opentitan-cheriot/hw/ip/cheriot/rtl/cheriot_trbe.sv
-opentitan-cheriot/hw/ip/cheriot/rtl/cheriot_trbe_mover.sv
+opentitan-cheriot/hw/ip/cheriot/rtl/cheriot_tbre.sv
+opentitan-cheriot/hw/ip/cheriot/rtl/cheriot_tbre_mover.sv
 opentitan-cheriot/hw/ip/cheriot/rtl/cheriot_trvk_core.sv
 opentitan-cheriot/hw/ip/cheriot/rtl/cheriot_trvk_tlul.sv
 opentitan-cheriot/hw/ip/cheriot/rtl/cheriot_wtrc.sv

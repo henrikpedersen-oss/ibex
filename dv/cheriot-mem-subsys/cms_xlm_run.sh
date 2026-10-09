@@ -3,7 +3,7 @@
 #
 # Usage: ./cms_xlm_run.sh -t <test> [-s <seed>] [-n <name>] [-c] [-g] [-o <outdir>] [-r <resdir>]
 #                        [-- <plusargs>]
-#   -t <test>    test (cms_tests.svh run_test), e.g. cms_trbe_sweep
+#   -t <test>    test (cms_tests.svh run_test), e.g. cms_tbre_sweep
 #   -s <seed>    seed (default 1): xrun -svseed, and +seed for the log
 #   -n <name>    result name (default the test); cms_regress.list gives fault-injection runs theirs
 #   -c           collect coverage (build with -c) into <outdir>/cov_work/<name>.<seed>

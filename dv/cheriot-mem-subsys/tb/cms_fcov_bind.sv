@@ -3,11 +3,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Binds the CHERIoT memory subsystem covergroups of the RTOS test SoC
-// (../cheriot-rtos-test-suites/fcov/cheriot_mem_subsys_fcov.sv) and the TRBE's TRVK covergroup
+// (../cheriot-rtos-test-suites/fcov/cheriot_mem_subsys_fcov.sv) and the TBRE's TRVK covergroup
 // (../uvm/core_ibex/fcov/core_ibex_trvk_fcov_if.sv) into the unmodified RTL of this block-level
 // bench, so both flows sample the same covergroups. The bind statements are those of
-// ../cheriot-rtos-test-suites/fcov/cheriot_mem_subsys_fcov_bind.sv (lines 16-159) minus the two
-// whose targets (ibex_trvk, cheriot_rev_ctl_trbe) are not in this bench: keep them in step.
+// ../cheriot-rtos-test-suites/fcov/cheriot_mem_subsys_fcov_bind.sv (lines 16-160) minus the two
+// whose targets (ibex_trvk, cheriot_rev_ctl_tbre) are not in this bench: keep them in step.
 // Sampled with +enable_ibex_fcov=1.
 module cms_fcov_bind;
 
@@ -46,10 +46,11 @@ module cms_fcov_bind;
     .bit_sel      (bit_sel_q),
     .data_intg_err(data_intg_error_o),
     .rsp_intg_err (rsp_intg_error_o),
-    .device_err   (device_error_o)
+    .device_err   (device_error_o),
+    .req_on_read_rsp(req_done && is_read_q)
   );
 
-  bind cheriot_trbe_mover cheriot_trbe_mover_fcov_if u_trbe_mover_fcov (
+  bind cheriot_tbre_mover cheriot_tbre_mover_fcov_if u_tbre_mover_fcov (
     .clk_i,
     .rst_ni,
     .sweep_start     (start),
@@ -64,7 +65,7 @@ module cms_fcov_bind;
     .stale           (track_stale_q[track_rptr]),
     .invalidate      (write_a_valid),
     .inflight        (4'(inflight_q)),
-    .errs            ({tl_err.read_tl, tl_err.read_tl_intg, tl_err.write_tl, tl_err.write_tl_intg}),
+    .errs            ({read_d_err, tl_err.read_tl_intg, tl_err.write_tl, tl_err.write_tl_intg}),
     .snoop_read_hit  (tl_r_o.a_valid && !tl_r_o.a_address[WordOffsetW] && snoop_read_hit),
     .snoop_track_mark(|(snoop_track_hit & ~track_frozen)),
     .snoop_frozen_hit(|(snoop_track_hit & track_frozen))
@@ -84,24 +85,24 @@ module cms_fcov_bind;
   bind cheriot cheriot_top_fcov_if u_cheriot_top_fcov (
     .clk_i,
     .rst_ni,
-    .start_write       (reg2hw.trbe_start.qe && reg2hw.trbe_start.q),
-    .start_nonzero     (|reg2hw.trbe_num_caps.q),
-    .start_in_range    (trbe_in_range),
-    .start_in_nvm      (trbe_in_nvm),
+    .start_write       (reg2hw.tbre_start.qe && reg2hw.tbre_start.q),
+    .start_nonzero     (|reg2hw.tbre_num_caps.q),
+    .start_in_range    (tbre_in_range),
+    .start_in_nvm      (tbre_in_nvm),
     .start_cheriot     (prim_mubi_pkg::mubi4_test_true_strict(cheriot_ena_i)),
-    .start_accepted    (trbe_valid_d && !trbe_valid_q),
-    .start_err         (trbe_start_err),
-    .start_clamped     (trbe_sweep_caps != reg2hw.trbe_num_caps.q),
-    // TRBE_REGWEN hides a START write from reg2hw while a sweep is active, so see it on the bus.
-    .start_while_busy  (regs_tl_d_i.a_valid && regs_tl_d_o.a_ready && trbe_active &&
+    .start_accepted    (tbre_valid_d && !tbre_valid_q),
+    .start_err         (tbre_start_err),
+    .start_clamped     (tbre_sweep_caps != reg2hw.tbre_num_caps.q),
+    // TBRE_REGWEN hides a START write from reg2hw while a sweep is active, so see it on the bus.
+    .start_while_busy  (regs_tl_d_i.a_valid && regs_tl_d_o.a_ready && tbre_active &&
                         regs_tl_d_i.a_opcode != tlul_pkg::Get &&
                         regs_tl_d_i.a_address[cheriot_reg_pkg::RegsAw-1:0] ==
-                        cheriot_reg_pkg::CHERIOT_TRBE_START_OFFSET),
-    .trbe_done         (trbe_done),
+                        cheriot_reg_pkg::CHERIOT_TBRE_START_OFFSET),
+    .tbre_done         (tbre_done),
     // An error earlier in the sweep, or in its last cycle
-    .sweep_err         (trbe_failed_q || trbe_sweep_err),
-    .epoch_counted     (trbe_epoch_en),
-    .intr              (intr_trbe_done_o),
+    .sweep_err         (tbre_failed_q || tbre_sweep_err),
+    .epoch_counted     (tbre_epoch_en),
+    .intr              (intr_tbre_done_o),
     .rmw_req           ({tag_mux_in_tl_h2d[1].a_valid, tag_mux_in_tl_h2d[0].a_valid}),
     .meta_req          ({meta_mux_in_tl_h2d[3].a_valid, meta_mux_in_tl_h2d[2].a_valid,
                          meta_mux_in_tl_h2d[1].a_valid, meta_mux_in_tl_h2d[0].a_valid}),
@@ -110,11 +111,11 @@ module cms_fcov_bind;
                           cored_tl_d_i.a_address <  MainSramTopAddr) ||
                          (cored_tl_d_i.a_address >= NvmBaseAddr &&
                           cored_tl_d_i.a_address <  NvmTopAddr))),
-    .trbe_inval_pending(u_cheriot_trbe.u_cheriot_trbe_mover.waddr_fifo_out_valid),
+    .tbre_inval_pending(u_cheriot_tbre.u_cheriot_tbre_mover.waddr_fifo_out_valid),
     .same_cap          (cored_tl_d_i.a_address[31:3] ==
-                        u_cheriot_trbe.u_cheriot_trbe_mover.waddr_fifo_out[31:3]),
-    .clear_stale_mark  (trbe_clear_stale_set),
-    .clear_squash      (trbe_clear_at_rmw && trbe_clear_stale_q && rmw_tl_d2h.a_ready),
+                        u_cheriot_tbre.u_cheriot_tbre_mover.waddr_fifo_out[31:3]),
+    .clear_stale_mark  (tbre_clear_stale_set),
+    .clear_squash      (tbre_clear_at_rmw && tbre_clear_stale_q && rmw_tl_d2h.a_ready),
     .fatal_alert       (|cheriot_fatal_error)
   );
 
@@ -132,9 +133,9 @@ module cms_fcov_bind;
     .err      (err_o)
   );
 
-  // The TRBE's own TRVK filter. Same decision logic and internal names as the core's ibex_trvk;
+  // The TBRE's own TRVK filter. Same decision logic and internal names as the core's ibex_trvk;
   // only the bitmap-port names differ.
-  bind cheriot_trvk_core core_ibex_trvk_fcov_if u_trbe_trvk_fcov (
+  bind cheriot_trvk_core core_ibex_trvk_fcov_if u_tbre_trvk_fcov (
     .clk_i,
     .rst_ni,
     .revbm_revoked,

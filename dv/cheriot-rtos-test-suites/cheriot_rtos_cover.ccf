@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Code coverage for the CHERIoT RTOS test SoC: the core (ibex_top) and the CHERIoT memory
-// subsystem (cheriot_mem_subsys: tag filter, RMW filter, TRBE, rev_ctl shim, meta SRAM), and
+// subsystem (cheriot_mem_subsys: tag filter, RMW filter, TBRE, rev_ctl shim, meta SRAM), and
 // nothing else. The crossbar, memories, UART, timer, PLIC and rev_ctl are scaffolding.
 //
 // The build passes -covdut cheriot_rtos_soc. ibex_top is configured by the shared

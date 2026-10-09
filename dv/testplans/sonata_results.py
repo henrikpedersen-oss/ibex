@@ -87,7 +87,9 @@ EXIT_CODE_LINE = re.compile(r"^Simulation exit code: (?P<code>\d+)$")
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 RTOS_LINE = re.compile(r"^Test runner: (?P<name>.+?) (?P<verdict>finished in \d+ cycles|failed)$")
 REVOCATION_LINE = re.compile(r"^Revocation barrier: (?P<verdict>PASS|FAIL) (?P<what>phase [123]|sweep)\b")
-TRBE_INVAL_LINE = re.compile(r"^Revocation barrier: (?P<verdict>PASS|FAIL) TRBE invalidate-only:")
+# TRBE: the engine's name in firmware built before the upstream rename
+TBRE_INVAL_LINE = re.compile(
+    r"^Revocation barrier: (?P<verdict>PASS|FAIL) T(?:BR|RB)E invalidate-only:")
 JULIET_LINE = re.compile(r"^.*?: (?P<verdict>PASS|FAIL): CWE-(?P<cwe>\d+)\b")
 CHERI_C_LINE = re.compile(r"^.*?: (?P<verdict>PASS|FAIL): clang_purecap_(?P<test>\w+)\b")
 
@@ -106,9 +108,9 @@ def parse_log(path):
             name = "revocation_sweep" if what == "sweep" else "revocation_barrier_" + what
             yield name, m["verdict"] == "PASS"
             continue
-        m = TRBE_INVAL_LINE.match(line)
+        m = TBRE_INVAL_LINE.match(line)
         if m:
-            yield "bus_master_trbe_invalidate_only", m["verdict"] == "PASS"
+            yield "bus_master_tbre_invalidate_only", m["verdict"] == "PASS"
             continue
         m = JULIET_LINE.match(line)
         if m and m["cwe"] in JULIET_TESTS:

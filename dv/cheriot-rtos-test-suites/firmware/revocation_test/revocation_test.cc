@@ -78,7 +78,7 @@ namespace
 
 	/// The hardware revoker's registers (Sonata rev_ctl; same layout as
 	/// platform-hardware_revoker.hh). With the CHERIoT memory subsystem these
-	/// drive its revocation engine (TRBE) through cheriot_rev_ctl_trbe.sv.
+	/// drive its revocation engine (TBRE) through cheriot_rev_ctl_tbre.sv.
 	struct RevokerInterface
 	{
 		uint32_t base;
@@ -220,8 +220,8 @@ bool test_revocation_barrier()
 ///   -> sweptSlot must have lost its tag (the sweep ran and revoked it)
 ///   -> keptSlot must still have its tag (the sweep did not clear everything)
 ///
-/// Then the TRBE invalidate-only check (testplan bus_master_trbe_invalidate_only):
-/// the TRBE writes memory without the core's capability checks, so it must
+/// Then the TBRE invalidate-only check (testplan bus_master_tbre_invalidate_only):
+/// the TBRE writes memory without the core's capability checks, so it must
 /// write nothing but tag clears. After the sweep, compared bit for bit with
 /// CSEQX (__builtin_cheri_equal_exact, which includes the tag):
 ///   -> sweptSlot == p with its tag cleared (no other bit written)
@@ -359,12 +359,12 @@ SweepResult test_revocation_sweep()
 	}
 	if (sweptOnlyTag && keptExact && untaggedKept)
 	{
-		Debug::log("PASS TRBE invalidate-only: the sweep changed only the "
+		Debug::log("PASS TBRE invalidate-only: the sweep changed only the "
 		           "revoked capability's tag");
 	}
 	else
 	{
-		Debug::log("FAIL TRBE invalidate-only: revoked word {} (expected {}), "
+		Debug::log("FAIL TBRE invalidate-only: revoked word {} (expected {}), "
 		           "kept word {}, untagged copies {}",
 		           sweptOnlyTag ? "tag cleared only" : "changed otherwise",
 		           pUntagged,

@@ -10,7 +10,7 @@
 //   0x0010_0000  SRAM, 128 KiB, dual-ported (data + fetch); boot vector at +0x80
 //   0x3000_0000  revocation bitmap window (2 KiB): the CHERIoT memory subsystem's meta SRAM
 //   0x4000_0000  code RAM, 1 MiB, dual-ported: a plain SRAM model where Sonata has HyperRAM
-//   0x8000_a000  rev_ctl (the RTOS hardware-revoker interface), driving the subsystem's TRBE
+//   0x8000_a000  rev_ctl (the RTOS hardware-revoker interface), driving the subsystem's TBRE
 //   0x8004_0000  rv_timer (CLINT: mtime, mtimecmp)
 //   0x8010_0000  UART0 -- the test oracle: the testbench captures it with uartdpi
 //   0x8800_0000  rv_plic
@@ -136,8 +136,8 @@ module cheriot_rtos_soc #(
   tlul_pkg::tl_d2h_t tl_core_lsu_d2h;
   tlul_pkg::tl_h2d_t tl_ibex_lsu_h2d;
   tlul_pkg::tl_d2h_t tl_ibex_lsu_d2h;
-  tlul_pkg::tl_h2d_t tl_cheriot_trbe_h2d;
-  tlul_pkg::tl_d2h_t tl_cheriot_trbe_d2h;
+  tlul_pkg::tl_h2d_t tl_cheriot_tbre_h2d;
+  tlul_pkg::tl_d2h_t tl_cheriot_tbre_d2h;
 
   tlul_pkg::tl_h2d_t tl_sram_a_h2d,  tl_sram_b_h2d;
   tlul_pkg::tl_d2h_t tl_sram_a_d2h,  tl_sram_b_d2h;
@@ -161,8 +161,8 @@ module cheriot_rtos_soc #(
     .rst_ni,
     .tl_lsu_i     (tl_ibex_lsu_h2d),
     .tl_lsu_o     (tl_ibex_lsu_d2h),
-    .tl_trbe_i    (tl_cheriot_trbe_h2d),
-    .tl_trbe_o    (tl_cheriot_trbe_d2h),
+    .tl_tbre_i    (tl_cheriot_tbre_h2d),
+    .tl_tbre_o    (tl_cheriot_tbre_d2h),
     .tl_ifetch_i  (tl_ibex_ins_h2d),
     .tl_ifetch_o  (tl_ibex_ins_d2h),
     .tl_sram_a_o  (tl_sram_a_h2d),
@@ -278,7 +278,7 @@ module cheriot_rtos_soc #(
   logic [31:0] core_revbm_rdata;
   logic [6:0]  core_revbm_rdata_intg;
 
-  // rev_ctl <-> memory subsystem (TRBE shim).
+  // rev_ctl <-> memory subsystem (TBRE shim).
   logic [127:0] hardware_revoker_control_reg_rdata;
   logic [63:0]  hardware_revoker_control_reg_wdata;
 
@@ -412,12 +412,12 @@ module cheriot_rtos_soc #(
   // CHERIoT memory subsystem       //
   ////////////////////////////////////
 
-  // Not wired anywhere (no alert handler). The testbench's trbe_monitor watches the underlying
+  // Not wired anywhere (no alert handler). The testbench's tbre_monitor watches the underlying
   // error state and fails the run on it.
-  logic trbe_ctl_err;
+  logic tbre_ctl_err;
   logic cheriot_fatal_alert;
   logic unused_mem_subsys_err;
-  assign unused_mem_subsys_err = trbe_ctl_err ^ cheriot_fatal_alert;
+  assign unused_mem_subsys_err = tbre_ctl_err ^ cheriot_fatal_alert;
 
   cheriot_mem_subsys #(
     .MainSramBaseAddr(ADDR_SPACE_SRAM),
@@ -436,8 +436,8 @@ module cheriot_rtos_soc #(
     .core_tag_o             (core_data_rcap),
     .lsu_tl_o               (tl_ibex_lsu_h2d),
     .lsu_tl_i               (tl_ibex_lsu_d2h),
-    .trbe_tl_o              (tl_cheriot_trbe_h2d),
-    .trbe_tl_i              (tl_cheriot_trbe_d2h),
+    .tbre_tl_o              (tl_cheriot_tbre_h2d),
+    .tbre_tl_i              (tl_cheriot_tbre_d2h),
     .revbm_tl_i             (tl_rev_tag_h2d),
     .revbm_tl_o             (tl_rev_tag_d2h),
     .trvk_revbm_req_i       (trvk_revbm_req),
@@ -449,7 +449,7 @@ module cheriot_rtos_soc #(
     .trvk_revbm_err_o       (core_revbm_err),
     .rev_ctl_to_core_i      (hardware_revoker_control_reg_rdata),
     .rev_core_to_ctl_o      (hardware_revoker_control_reg_wdata),
-    .trbe_ctl_err_o         (trbe_ctl_err),
+    .tbre_ctl_err_o         (tbre_ctl_err),
     .fatal_alert_o          (cheriot_fatal_alert)
   );
 

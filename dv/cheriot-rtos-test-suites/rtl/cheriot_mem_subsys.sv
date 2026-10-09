@@ -4,13 +4,13 @@
 
 // Derived from sonata-system/rtl/system/cheriot_mem_subsys.sv, where it is an uncommitted local
 // addition, so that this flow does not depend on a local change in another submodule. This copy
-// follows lowRISC/opentitan PR #31515 (the trbe_done interrupt into the shim); the sonata-system
+// follows lowRISC/opentitan PR #31515 (the tbre_done interrupt into the shim); the sonata-system
 // copy still targets PR #31470.
 
 // Sonata integration of the OpenTitan CHERIoT memory subsystem (opentitan-cheriot/hw/ip/cheriot,
 // lowRISC/opentitan PR #31515): capability tags and the revocation bitmap in one meta SRAM, the
-// revocation engine (TRBE) sweeping the SRAM, and the rev_ctl shim so the CHERIoT RTOS drives the
-// TRBE through its existing hardware-revoker interface.
+// revocation engine (TBRE) sweeping the SRAM, and the rev_ctl shim so the CHERIoT RTOS drives the
+// TBRE through its existing hardware-revoker interface.
 //
 // What changes relative to Sonata without it:
 // - Tags live in the meta SRAM, not in the SRAM/HyperRAM models. The core's tag goes to the
@@ -25,7 +25,7 @@
 // - The HyperRAM window is the subsystem's NVM region. The core's tag filter treats it as
 //   read-only (cheriot_wtrc): a capability store there is a read and compare, not a write, and
 //   is answered with a bus error unless the memory already holds the capability's 64 bits.
-// - The subsystem's trbe_done interrupt goes to the rev_ctl shim, which waits on it; the
+// - The subsystem's tbre_done interrupt goes to the rev_ctl shim, which waits on it; the
 //   firmware's revoker interrupt is rev_ctl's.
 module cheriot_mem_subsys #(
   parameter logic [31:0] MainSramBaseAddr = 32'h0010_0000,
@@ -50,9 +50,9 @@ module cheriot_mem_subsys #(
   output tlul_pkg::tl_h2d_t lsu_tl_o,
   input  tlul_pkg::tl_d2h_t lsu_tl_i,
 
-  // Revocation engine read port, to the xbar's cheriot_trbe host port.
-  output tlul_pkg::tl_h2d_t trbe_tl_o,
-  input  tlul_pkg::tl_d2h_t trbe_tl_i,
+  // Revocation engine read port, to the xbar's cheriot_tbre host port.
+  output tlul_pkg::tl_h2d_t tbre_tl_o,
+  input  tlul_pkg::tl_d2h_t tbre_tl_i,
 
   // Software's revocation bitmap window, from the xbar's rev_tag device port.
   input  tlul_pkg::tl_h2d_t revbm_tl_i,
@@ -71,8 +71,8 @@ module cheriot_mem_subsys #(
   input  logic [127:0] rev_ctl_to_core_i,
   output logic [ 63:0] rev_core_to_ctl_o,
 
-  // Sticky: a sweep the shim started did not complete without an error (cheriot_rev_ctl_trbe.sv).
-  output logic trbe_ctl_err_o,
+  // Sticky: a sweep the shim started did not complete without an error (cheriot_rev_ctl_tbre.sv).
+  output logic tbre_ctl_err_o,
   // The subsystem's fatal alert, as a level (alert handshake terminated here).
   output logic fatal_alert_o
 );
@@ -94,8 +94,8 @@ module cheriot_mem_subsys #(
   tlul_pkg::tl_d2h_t regs_d2h;
   tlul_pkg::tl_h2d_t meta_h2d;
   tlul_pkg::tl_d2h_t meta_d2h;
-  tlul_pkg::tl_d2h_t trbe_d2h_intg;
-  logic              intr_trbe_done;
+  tlul_pkg::tl_d2h_t tbre_d2h_intg;
+  logic              intr_tbre_done;
 
   prim_alert_pkg::alert_tx_t [cheriot_reg_pkg::NumAlerts-1:0] alert_tx;
 
@@ -116,7 +116,7 @@ module cheriot_mem_subsys #(
     .clk_i,
     .rst_ni,
     .cheriot_ena_i   (cheriot_ena),
-    .intr_trbe_done_o(intr_trbe_done),
+    .intr_tbre_done_o(intr_tbre_done),
     .alert_rx_i      ({cheriot_reg_pkg::NumAlerts{prim_alert_pkg::ALERT_RX_DEFAULT}}),
     .alert_tx_o      (alert_tx),
     .regs_tl_d_i     (regs_h2d),
@@ -131,8 +131,8 @@ module cheriot_mem_subsys #(
     .revbm_tl_d_o    (revbm_tl_o),
     .cored_tl_h_o    (cored_h_h2d),
     .cored_tl_h_i    (lsu_tl_i),
-    .trbe_tl_h_o     (trbe_tl_o),
-    .trbe_tl_h_i     (trbe_d2h_intg),
+    .tbre_tl_h_o     (tbre_tl_o),
+    .tbre_tl_h_i     (tbre_d2h_intg),
     .meta_sram_tl_o  (meta_h2d),
     .meta_sram_tl_i  (meta_d2h)
   );
@@ -144,17 +144,17 @@ module cheriot_mem_subsys #(
     lsu_tl_o.a_user.capability = 1'b0;
   end
 
-  // The TRBE checks response and data integrity on every word it sweeps and never revokes a
-  // capability whose read failed the check (cheriot_trbe_mover.sv rerr). Sonata's SRAM adapter
+  // The TBRE checks response and data integrity on every word it sweeps and never revokes a
+  // capability whose read failed the check (cheriot_tbre_mover.sv rerr). Sonata's SRAM adapter
   // does not generate integrity (EnableRspIntgGen = 0), so without this every sweep would revoke
   // nothing while reporting success. OpenTitan's SRAM generates it at its adapter; this generates
   // it at the same point of the path, as Sonata's SRAM stores no ECC to protect either way.
   tlul_rsp_intg_gen #(
     .EnableRspIntgGen (1'b1),
     .EnableDataIntgGen(1'b1)
-  ) u_trbe_rsp_intg_gen (
-    .tl_i(trbe_tl_i),
-    .tl_o(trbe_d2h_intg)
+  ) u_tbre_rsp_intg_gen (
+    .tl_i(tbre_tl_i),
+    .tl_o(tbre_d2h_intg)
   );
 
   // Load barrier bitmap reads.
@@ -182,19 +182,19 @@ module cheriot_mem_subsys #(
     .tl_i         (corerevbm_d2h)
   );
 
-  cheriot_rev_ctl_trbe u_rev_ctl_trbe (
+  cheriot_rev_ctl_tbre u_rev_ctl_tbre (
     .clk_i,
     .rst_ni,
     .ctl_to_core_i(rev_ctl_to_core_i),
     .core_to_ctl_o(rev_core_to_ctl_o),
     .tl_o         (regs_h2d),
     .tl_i         (regs_d2h),
-    .trbe_done_i  (intr_trbe_done),
-    .err_o        (trbe_ctl_err_o)
+    .tbre_done_i  (intr_tbre_done),
+    .err_o        (tbre_ctl_err_o)
   );
 
   // Meta SRAM. Requests from Sonata's hosts carry no command integrity, so it is not checked;
-  // responses carry response and data integrity, which the RMW filter, the TRBE's TRVK filter and
+  // responses carry response and data integrity, which the RMW filter, the TBRE's TRVK filter and
   // the core (MemECC) all check.
   logic              meta_req, meta_we, meta_rvalid;
   logic [MetaAw-1:0] meta_addr;

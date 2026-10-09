@@ -16,7 +16,7 @@
 #
 # Why Sonata's TL-UL and not opentitan-cheriot/hw/ip/tlul: Sonata's tlul_pkg carries the CHERIoT
 # capability bit in a_user/d_user, and its tlul_adapter_host / tlul_adapter_sram have the
-# wdata_cap/rdata_cap ports the SoC (cheriot_mem_subsys.sv, cheriot_rev_ctl_trbe.sv) and the SRAM
+# wdata_cap/rdata_cap ports the SoC (cheriot_mem_subsys.sv, cheriot_rev_ctl_tbre.sv) and the SRAM
 # model (sram.sv) connect. OpenTitan's has neither. A build has one tlul_pkg, so the OpenTitan
 # CHERIoT subsystem builds against this one (opentitan-cheriot/patches/0001).
 #
@@ -60,7 +60,7 @@ FILES=(
   vendor/lowrisc_ip/dv/dpi/uartdpi/uartdpi.sv
   vendor/lowrisc_ip/dv/dpi/uartdpi/uartdpi.c
   vendor/lowrisc_ip/dv/dpi/uartdpi/uartdpi.h
-  # Hardware revoker interface the RTOS drives (cheriot_rev_ctl_trbe.sv sits behind it)
+  # Hardware revoker interface the RTOS drives (cheriot_rev_ctl_tbre.sv sits behind it)
   rtl/ip/rev_ctl/rtl/rev_ctl_reg_pkg.sv
   rtl/ip/rev_ctl/rtl/rev_ctl_reg_top.sv
   rtl/ip/rev_ctl/rtl/rev_ctl.sv
