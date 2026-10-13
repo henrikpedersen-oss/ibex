@@ -37,10 +37,10 @@ import hjson  # noqa: E402
 
 # flow tag -> (JasperGold project relative to the repo, how tests are named)
 FLOWS = {
-    "riscv": ("formal/formal-riscv/jgproject-riscv", "family"),
-    "cheriot": ("formal/formal-cheriot/jgproject-cheriot", "family"),
-    "transition": ("formal/formal-cheriot/jgproject-cheriot-transition", "named"),
-    "vericheri": ("formal/formal-vericheri/jgproject-vericheri", "named"),
+    "riscv": ("ibex/dv/formal_ibex_cheriot/formal-riscv/jgproject-riscv", "family"),
+    "cheriot": ("ibex/dv/formal_ibex_cheriot/formal-cheriot/jgproject-cheriot", "family"),
+    "transition": ("ibex/dv/formal_ibex_cheriot/formal-cheriot/jgproject-cheriot-transition", "named"),
+    "vericheri": ("ibex/dv/formal_ibex_cheriot/formal-vericheri/jgproject-vericheri", "named"),
 }
 TEST_PREFIX = {"riscv": "formal_riscv", "cheriot": "formal_cheriot",
                "transition": "formal_transition", "vericheri": "vericheri"}

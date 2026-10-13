@@ -6,3 +6,7 @@
 	path = dv/cheriot-rtos-test-suites/cheri-c-tests
 	url = https://github.com/CTSRD-CHERI/cheri-c-tests
 	ignore = dirty
+[submodule "dv/formal_ibex_cheriot"]
+	path = dv/formal_ibex_cheriot
+	url = git@github.com:lowRISC/formal_ibex_cheriot.git
+	branch = main
