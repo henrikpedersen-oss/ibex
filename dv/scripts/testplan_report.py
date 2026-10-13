@@ -159,9 +159,9 @@ def report(testplan_path, results_path, cg_detail, cov_testplans):
         out.append("<h2>Code coverage</h2>")
         out.append("<p>Main core (<code>ibex_top/u_ibex_core</code>) of the merged regression. "
                    "\"jasper unr excl.\" rows: the same database with "
-                   "<code>formal_cov/unr/unr_excludes.vRefine</code> applied, so items JasperGold UNR "
-                   "proved unreachable leave the denominator; a secondary view until those exclusions "
-                   "are reviewed.</p>")
+                   "<code>dv/formal_ibex_cheriot/unr/out/unr_excludes.vRefine</code> applied, so items "
+                   "JasperGold UNR proved unreachable leave the denominator; a secondary view until "
+                   "those exclusions are reviewed.</p>")
         out.append("<table><tr><th>Metric</th><th>Covered</th></tr>"
                    + "".join(f"<tr><td>{html.escape(c['name'])}</td><td>{html.escape(c['result'])}</td></tr>"
                              for c in cov) + "</table>")

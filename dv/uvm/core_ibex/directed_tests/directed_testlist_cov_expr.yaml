@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Expression-coverage closure: directed tests for the expression rows of ibex_top.u_ibex_core that
-# the full UVM regression never hit (formal_cov/unr/uncovered_after_exclude.txt, 2026-10-09, after
+# the full UVM regression never hit (UNR's unr/out/uncovered_after_exclude.txt, 2026-10-09, after
 # the Jasper UNR exclusions and the waivers of waivers/coverage_waivers_xlm.tcl). Each test header
 # names the expressions and rows it targets and where its expected values come from. Rows that
 # cannot occur in the verified configuration are waived, with their reasons, in

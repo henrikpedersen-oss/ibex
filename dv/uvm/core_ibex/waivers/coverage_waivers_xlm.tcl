@@ -130,7 +130,7 @@ proc ibex_waive_blocks {inst type line count kind reason {excl_insts {}}} {
     return
   }
   # eval, not {*}: IMC's Tcl is 8.4, which reads {*}$ids as "extra characters after close-brace"
-  # (formal_cov/unr/imc_unr_vrefine.log, 2026-10-09) and aborts the rest of this file.
+  # (UNR's unr/out/imc_unr_vrefine.log, 2026-10-09) and aborts the rest of this file.
   if {[llength $excl_insts] == 0} {
     eval [list ibex_waive exclude -type $type -block] $ids [list -comment $reason]
   } else {

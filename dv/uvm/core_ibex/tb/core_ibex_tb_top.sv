@@ -225,7 +225,7 @@ module core_ibex_tb_top;
   logic [31:0] hart_id = 32'b0;
   initial void'($value$plusargs("hart_id=%h", hart_id));
 
-  // The first reset pulse, for tools that start from a simulated state (superlint unr-cfg-reset
+  // The first reset pulse, for tools that start from a simulated state (UNR's unr-cfg-reset
   // loads the design state from waves.shm at a time inside it).
   initial begin
     @(negedge rst_n);

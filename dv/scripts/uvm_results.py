@@ -221,7 +221,7 @@ def main():
             print("Coverage (cov_riscv.txt, ibex_top.u_ibex_core): "
                   + ", ".join(f"{c['name']} {c['result']}" for c in cov_results))
             # The code metrics again with the JasperGold UNR exclusions applied
-            # (formal_cov/unr/unr_excludes.vRefine). run_all_tests.sh deletes cov_combined_unr.txt
+            # (UNR's unr/out/unr_excludes.vRefine). run_all_tests.sh deletes cov_combined_unr.txt
             # before every merge and writes it only when the UNR run's coverage model matches, so
             # present means current. A secondary view: the columns above stay the headline.
             unr = next((cells for n, cells in parse_summary(args.cov_dir / "cov_combined_unr.txt")
