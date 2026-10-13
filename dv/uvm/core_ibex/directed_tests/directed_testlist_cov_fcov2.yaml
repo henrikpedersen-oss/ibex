@@ -29,8 +29,11 @@
     uncompressed illegal and a CSR-illegal instruction behind a faulting access at every
     response timing, irq and debug combination; a fetch error on a faulting access's response
     with debug_req and the timer pending; mret and ebreak into debug mode unstalling with
-    debug_req; an NMI pending while ebreak (ebreakm), wfi, a fetch error or a dcsr read waits
-    behind a faulting access (taken right after its FLUSH); IF empty and idle behind c.ebreak
+    debug_req; a PMP-faulting load (locked no-permission word) reporting with ebreak into debug
+    mode in its first ID cycle and nothing pending (the case pmp_fault_hazard reaches only when
+    its random debug request at PMP faults misses); an NMI pending while ebreak (ebreakm), wfi,
+    a fetch error or a dcsr read waits behind a faulting access (taken right after its FLUSH);
+    IF empty and idle behind c.ebreak
     (into debug mode and not) and c.unimp for each WB state, with instruction-side responses
     40..84 cycles apart (+mem_mode_on_write V[23:16]) so nothing is fetched behind them.
     Targets uarch_cg exception_stall_instr_cross, interrupt_taken_instr_cross and pipe_cross.

@@ -10,9 +10,12 @@
 // __builtin_cheri_perms_and() to narrow the permissions explicitly, which
 // is the canonical CHERIoT way to produce a read-only capability at runtime.
 //
-// The attempted store triggers a CHERI store-permission fault; the
-// compartment_error_handler returns ForceUnwind.  The orchestrator verifies
-// the returned capability is invalid (address == -1).
+// The attempted store must raise a CHERI store-permission violation (capcause
+// 0x13: CHERIoT-Sail checks tag, seal, then Permit_Store before bounds). The
+// compartment_error_handler returns ForceUnwind; the orchestrator verifies the
+// returned capability is invalid (address == -1) and then asks
+// run_fault_input_failures() whether the fault was that one, and whether the
+// permission check below passed (../common/expected_fault.hh).
 
 // This wrapper defines its own compartment_error_handler (cheri_c_test_framework.h).
 #define CHERI_C_OWN_ERROR_HANDLER
@@ -23,11 +26,15 @@
 
 using Debug = ConditionalDebug<true, "cc-input">;
 
+#include "../common/expected_fault.hh"
+
+// This wrapper does not include the CHERI-C framework, so it counts its own failed checks.
+static int test_failures = 0;
+
 extern "C" ErrorRecoveryBehaviour
 compartment_error_handler(ErrorState *frame, size_t mcause, size_t mtval)
 {
-	Debug::log("CHERI fault caught: mcause={} mtval={} pcc={}: ForceUnwind", mcause, mtval, frame->pcc);
-	return ErrorRecoveryBehaviour::ForceUnwind;
+	return expected_fault_handler(frame, mcause, mtval, CHERI::CauseCode::PermitStoreViolation);
 }
 
 // Strip STORE and STORE_CAPABILITY from *p, then attempt a store through the
@@ -47,6 +54,7 @@ __attribute__((noinline)) static void attempt_store_through_readonly(int *p)
 	if ((__builtin_cheri_perms_get(ro) & __CHERI_CAP_PERMISSION_PERMIT_STORE__) != 0)
 	{
 		Debug::log("FAIL: cc_input: CAndPerm left Store in place: perms {}", __builtin_cheri_perms_get(ro));
+		test_failures++;
 		return;
 	}
 
@@ -56,8 +64,16 @@ __attribute__((noinline)) static void attempt_store_through_readonly(int *p)
 
 void *__cheri_compartment("cc_input") run_fault_input(void)
 {
+	test_failures = 0;
+	expected_fault_begin();
 	int x = 47;
 	attempt_store_through_readonly(&x);
 	Debug::log("WARNING: no CHERI fault triggered in cc_input test");
 	return nullptr;
+}
+
+// A failed permission check, a fault that is not a store-permission violation, or no fault.
+int __cheri_compartment("cc_input") run_fault_input_failures(void)
+{
+	return expected_fault_failures(test_failures);
 }

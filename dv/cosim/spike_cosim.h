@@ -71,6 +71,8 @@ class SpikeCosim : public simif_t, public Cosim {
   // reported when it took the trap. Later items may sample mip again after the line has dropped.
   uint32_t pending_irq_pre_mip;
 
+  // Register writes from the non-final operations of an expanded (Zcmp) instruction.
+  //
   // Zcmp instructions write several GPRs in a single Spike instruction, but Ibex
   // expands them into one RVFI retirement per register at the same PC. RVFI
   // carries one rd per retirement, so the DUT cannot present them all at once
@@ -79,21 +81,12 @@ class SpikeCosim : public simif_t, public Cosim {
   //   cm.mvsa01 / cm.mva01s  2 GPRs
   //   cm.popret / cm.pop     up to 13 (ra, s0-s11), e.g. cm.pop {ra, s0-s7} = 9
   //
-  // The first DUT retirement is checked against whichever of Spike's writes it
-  // carries; the rest are queued here. Each subsequent step() at the same PC
-  // consumes one entry and returns WITHOUT stepping Spike again -- otherwise the
-  // ISS would run ahead of the DUT by a whole instruction.
-  //
-  // Matching is by register number throughout: Spike does not list the writes in
-  // Ibex's micro-op order, so position cannot be relied on.
-  // Register writes from the non-final operations of an expanded instruction.
-  //
-  // Ibex retires one RVFI item per operation of a Zcmp instruction, all at the
-  // same PC, while the ISS executes the whole thing in one step. step() is told
-  // via `more_ops` when further operations are coming; it records the DUT's
-  // write here and does NOT step the ISS. On the final operation it steps once
-  // and matches the ISS's register writes against this set plus the final
-  // write.
+  // step() is told via `more_ops` when further operations are coming; it records
+  // the DUT's write here and does NOT step the ISS. On the final operation it
+  // steps once and matches the ISS's register writes against this set plus the
+  // final write. (An earlier version stepped the ISS on the first operation and
+  // queued the ISS's remaining writes for the later ones; the memory side below
+  // is why that was replaced.)
   //
   // Deferring the step is what makes the memory side work: by the final
   // operation every access the instruction performs has been observed on the
@@ -183,7 +176,7 @@ class SpikeCosim : public simif_t, public Cosim {
   bool check_retired_instr(uint32_t write_reg, uint32_t write_reg_data,
                            uint32_t dut_pc, bool suppress_reg_write);
   bool check_sync_trap(uint32_t write_reg, uint32_t pc,
-                       uint32_t initial_spike_pc);
+                       uint32_t initial_spike_pc, bool trap_in_debug_mode);
   void set_mip(uint32_t pre_mip, uint32_t post_mip) override;
   void set_nmi(bool nmi) override;
   void set_nmi_int(bool nmi_int, uint32_t mtval) override;

@@ -135,6 +135,9 @@ bool test_revocation_barrier()
 	size_t base = __builtin_cheri_base_get(p);
 	size_t word, bit;
 	shadow_index(base, word, bit);
+	// The testbench reads the base from this line ("base 0x... -> shadow word"): with
+	// +sonata_mutate=barrier_all it makes the barrier revoke this object regardless of its bit
+	// (tb/cheriot_rtos_tb.sv). Keep the wording in step with it.
 	Debug::log("object {} base {} -> shadow word {} bit {}", p, base, word, bit);
 
 	if (base < RevokableMemoryStart)
@@ -156,6 +159,18 @@ bool test_revocation_barrier()
 	// clear, and the results are logged afterwards.
 	set_shadow_bit(base, false);
 	barrierSlot = p;
+
+	// Let the object line above reach the testbench before phase 1. The UART sends a character
+	// every ~430 cycles and the firmware runs ahead of it by up to its FIFO, while the phases
+	// take a few hundred cycles: without the wait, barrier_all would arm after they ran.
+	// Two ticks so the sleep is at least one full tick (400k cycles at 100 Hz); NoEarlyWake, or
+	// the only runnable thread is woken at once. Here, after the store, so that the copy the
+	// phases reload was stored with its tag whatever the sleep's register restore does to `p`
+	// once the barrier revokes it.
+	{
+		Timeout s{2};
+		thread_sleep(&s, ThreadSleepNoEarlyWake);
+	}
 
 	// Phase 1: bit clear -> tag must survive. Guards against a barrier that
 	// clears every tag, and against one wired to a constant "always revoked".

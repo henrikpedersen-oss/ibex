@@ -49,13 +49,35 @@ ibex_waive exclude -type "ibex_top" -toggle "ram_cfg_icache_data_o*"
 ibex_waive exclude -type "ibex_top" -toggle "scan_rst_ni"
 # trvk_heap_base_addr_i and trvk_revbm_err_i are NOT waived (both were, as tie-offs, until
 # 2026-10-01): ibex_revbm_responder now drives them from ibex_revbm_pkg -- the heap base is
-# drawn per seed (or +revbm_heap_base), revbm_err from +revbm_err_pct/+revbm_err_list. Bits the
-# heap-base draw cannot reach (it is 8-byte aligned, [2:0] always 0 per HeapBaseAligned_A, and
-# only a few values are drawn per regression) will show as toggle holes; waive those bits
-# individually if they are judged unreachable, not the whole port.
+# drawn per seed (or +revbm_heap_base), revbm_err from +revbm_err_pct/+revbm_err_list. Only
+# [2:0] are waived (below); the other bits are reached by the per-seed draw.
 # Not waived either: trvk_revbm_rdata_i / trvk_revbm_rdata_intg_i. Driven by the responder,
 # which revokes only with +revbm_mode=random|range: their toggle coverage records whether the
 # regression ran the revocation tests (cheriot_revoke_load_barrier*).
+#
+# Port bits held constant by the RTL or by the configuration, never by stimulus: the 36 bits of
+# cov_toggle_uncovered.txt on 2026-10-12, each seen only as X->0 at reset. Waived bit by bit, so
+# the other bits of each port stay scored. A bit select IMC rejects shows as
+# IBEX_WAIVER_NOT_APPLIED in merge_combined.log; check for it after the next cov-merge.
+# Word-aligned buses: IbexInstrAddrUnaligned (ibex_if_stage.sv) and IbexDataAddrUnaligned
+# (ibex_load_store_unit.sv, data_addr_o = {data_addr[31:2], 2'b00}; byte lanes are data_be_o).
+foreach port {instr_addr_o instr_addr_shadow_o data_addr_o data_addr_shadow_o} {
+  foreach b {0 1} { ibex_waive exclude -type "ibex_top" -toggle "${port}\[$b\]" }
+}
+# PC bit 0 is always 0 (instructions are 16-bit aligned). A bit of a struct member needs the member
+# path in double quotes: IMC rejects crash_dump_o.current_pc[0] with *E,INVPTH, which is a message,
+# not a Tcl error, so ibex_waive cannot see it (unapplied until 2026-10-13; IMC 24.03 test on nyx).
+ibex_waive exclude -type "ibex_top" -toggle {"crash_dump_o.current_pc"[0]}
+ibex_waive exclude -type "ibex_top" -toggle {"crash_dump_o.exception_pc"[0]}
+# Heap base [2:0]: HeapBaseAligned_A (ibex_trvk.sv) requires 8-byte alignment.
+foreach b {0 1 2} { ibex_waive exclude -type "ibex_top" -toggle "trvk_heap_base_addr_i\[$b\]" }
+# revbm_addr_o = RevBitmapBaseAddr + {'0, revbm_addr, 2'b00} (ibex_trvk.sv): [1:0] are the literal
+# zeros; [31:11] are zero because ibex_revbm_pkg sets RevBitmapAddrWidth 11 and RevBitmapBaseAddr
+# 0, so the word index only reaches bits [10:2]. Revisit if either parameter changes.
+foreach b {0 1} { ibex_waive exclude -type "ibex_top" -toggle "trvk_revbm_addr_o\[$b\]" }
+for {set b 11} {$b <= 31} {incr b} {
+  ibex_waive exclude -type "ibex_top" -toggle "trvk_revbm_addr_o\[$b\]"
+}
 
 # ── ECC error coverpoints ────────────────────────────────────────────────────
 # No waivers. cp_rf_a_ecc_err, cp_rf_b_ecc_err and rf_ecc_err_cross now sample the lockstep
@@ -142,11 +164,23 @@ proc ibex_waive_blocks {inst type line count kind reason {excl_insts {}}} {
 
 # ibex_compressed_decoder, Zcmp micro-op FSM: Xcelium gives a multi-label case item one block copy
 # per label, nesting included. In the popretz/popret/pop arm (5'b11010, 5'b11100, 5'b11110) the
-# copies whose outer label does not match the inner state are unreachable; the matching copies
-# are covered. The FSM defaults (682, 773, 804, 832) are states cm_state_q never holds.
+# copies whose outer label does not match the inner state are unreachable (CmPopZeroA0 759/763
+# outside popretz, CmPopRetRa 767/769 for cm.pop): instr_i stays the same cm.* until its last
+# micro-op, and CmPopIncrSp picks the next state from instr_i[12:8]. The matching copies are
+# covered. The FSM defaults (683, 775, 812, 840) are states cm_state_q does not hold while instr_i
+# is that instruction (each FSM leaves CmIdle only for a state of its own instruction).
+# One of the three blocks on 769 is a diagonal copy: popretz's CmPopRetRa `if (id_in_ready_i)`
+# implicit else (popret's is covered). It needs ID not ready while it holds popretz's `li a0, 0`
+# micro-op: that micro-op reads x0 only (no load-use stall), entered ID only after `addi sp`
+# finished, which needs the last pop load completed (ready_wb_i), so nothing is outstanding;
+# irq, NMI and debug entry are held off for INSTR_EXPANDED_COMMIT (ibex_controller.sv handle_irq,
+# enter_debug_mode_prio_d), and an ALU micro-op raises no exception, so no halt_if or pc_set.
+# Jasper reached it only from an arbitrary initial state.
+# Lines re-mapped for 83926a94/f8f0d3b3 (2026-10-10; were 682 757 761 765 767 773 804 832: the
+# reserved-rlist and mvsa01 r1s == r2s branches added lines above them). Same blocks and counts.
 set _cdec ibex_top/u_ibex_core/if_stage_i/compressed_decoder_i
 set _zcmp "Zcmp: per-label copy of a multi-label case item, or FSM default (unreachable state)"
-foreach {line count} {682 1  757 2  761 4  765 1  767 3  773 3  804 1  832 1} {
+foreach {line count} {683 1  759 2  763 4  767 1  769 3  775 3  812 1  840 1} {
   ibex_waive_blocks $_cdec ibex_compressed_decoder $line $count "" $_zcmp
 }
 # ibex_controller: the CHERIoT ID-stage exception. cheriot_ex_err_raw is 1'b0 in every assignment
@@ -166,17 +200,59 @@ ibex_waive_blocks $_ctrl ibex_controller 929 1 "true part" $_dead
 # (ibex_cs_registers.sv mstatus_d.mpp / dcsr_d.prv); this core has no S or H mode.
 ibex_waive_blocks $_ctrl ibex_controller 483 1 "" "priv_mode_i is only ever M or U"
 # ibex_load_store_unit: the 2'b11 copy of '2'b10,2'b11:'. The decoder only issues data types
-# 2'b00, 2'b01 and 2'b10, and data_type_q is loaded from lsu_type_i.
-ibex_waive_blocks ibex_top/u_ibex_core/load_store_unit_i ibex_load_store_unit 377 1 "" \
+# 2'b00, 2'b01 and 2'b10, and data_type_q is loaded from lsu_type_i. (Line 379 since 83926a94;
+# was 377.)
+ibex_waive_blocks ibex_top/u_ibex_core/load_store_unit_i ibex_load_store_unit 379 1 "" \
   "data_type_q 2'b11 is never issued (decoder: word 00, half 01, byte 10)"
-# No waiver for ibex_icache.sv:1303 (OUT_OF_RESET, scramble key request): it was waived as
-# unreachable from reset (ibex_top resets scramble_key_valid_q to 1), but the 2026-10-09
-# regression hit it, so that reasoning does not hold and the block stays scored.
+# ibex_counter, mhpmcounter12 (gen_cntrs[9], div_wait_i): the true part of `counter_inc_i ?
+# counter[31:0] + 32'd1 : counter[31:0]` in the counterh_we_i branch. It needs a write to
+# mhpmcounter12h (csr_op_en_i: a CSR instruction in ID/EX) in the same cycle as perf_div_wait
+# (ibex_id_stage.sv stall_multdiv & div_en_dec: a DIV/REM in ID/EX). One instruction is never
+# both: div_en_dec is decoded from instr_rdata_alu_id (OPCODE_OP), csr_access from instr_rdata_id
+# (OPCODE_SYSTEM), and ibex_if_stage.sv loads both from the same instr_out. Jasper "covered" it in
+# 1 cycle from an arbitrary initial state (unr::config_reset), which lets the two copies differ;
+# for mhpmcounter11 (mul_wait) the same block is UNR. Instance-specific: the block is covered in
+# other counters of the type, so it is excluded by instance, not by type.
+ibex_waive_blocks {ibex_top/u_ibex_core/cs_registers_i/"gen_cntrs[9]"/gen_imp/mcounters_variable_i} \
+  ibex_counter 46 1 "ternary 1 true" \
+  "mhpmcounter12h is written by a CSR instruction, div_wait needs a DIV in the same ID/EX slot" \
+  [list {ibex_top/u_ibex_core/cs_registers_i/"gen_cntrs[9]"/gen_imp/mcounters_variable_i} \
+    {ibex_top/gen_lockstep/u_ibex_lockstep/u_shadow_core/cs_registers_i/"gen_cntrs[9]"/gen_imp/mcounters_variable_i}]
+# ibex_icache.sv:1303 (OUT_OF_RESET, `if (~ic_scr_key_valid_i)`): the main core's cache gets
+# ibex_top's scramble_key_valid_q (ibex_top.sv:460), which resets to 1 (ibex_top.sv:644, the reset
+# key RndCnstIbexKey is valid; 1'b1 outright without ICacheScramble), and OUT_OF_RESET lasts only
+# the first cycle after reset, so the main core never requests a key there. The lockstep shadow
+# core does: its delayed inputs reset to 0 (ibex_lockstep.sv:286), ic_scr_key_valid included, so
+# its copy of the block is hit, and stays scored. That shadow-core hit is why a by-type waiver here
+# was refused on 2026-10-09; this one is for the main core's instance only.
+ibex_waive_blocks ibex_top/u_ibex_core/if_stage_i/gen_icache/icache_i ibex_icache 1303 1 "true part" \
+  "unreachable in the main core: ic_scr_key_valid_i is ibex_top's scramble_key_valid_q, reset to 1, during OUT_OF_RESET (shadow core: delayed input resets to 0, scored)" \
+  [list ibex_top/u_ibex_core/if_stage_i/gen_icache/icache_i]
 unset _cdec _zcmp _ctrl _dead
+
+# ── Assertions that can never complete in the verified configuration ──────────────────────────────
+# Assertion coverage counts an assertion once it has completed (its antecedent fired and the
+# consequent was checked). These three never can here, by construction; each is excluded by type
+# (main and lockstep shadow core) or by instance, with the reason. Left after the 2026-10-11
+# regression (UNR's unr/out/uncovered_assertions.txt).
+# NoMispredBranch (ibex_if_stage.sv:296) and AlwaysInstrClearOnMispredict (ibex_controller.sv:1101)
+# are both triggered by nt_branch_mispredict, which is constant 0 without the branch predictor
+# (BranchPredictor = 0 in the opentitan configuration, ibex/ibex_configs.yaml).
+ibex_waive exclude -type "ibex_if_stage" -assertion "NoMispredBranch" \
+  -comment "vacuous: nt_branch_mispredict_i is constant 0 with BranchPredictor = 0"
+ibex_waive exclude -type "ibex_controller" -assertion "AlwaysInstrClearOnMispredict" \
+  -comment "vacuous: nt_branch_mispredict_o is constant 0 with BranchPredictor = 0"
+# selKnown1 (prim_clock_mux2.sv:28) is clocked on clk1_i, which the lockstep's shadow-reset mux
+# connects to scan_rst_ni (ibex_lockstep.sv:234); every bench ties scan_rst_ni to 1, so the
+# assertion never sees a clock edge.
+ibex_waive exclude -inst "ibex_top/gen_lockstep/u_ibex_lockstep/u_prim_rst_shadow_n_mux2" \
+  -assertion "selKnown1" -comment "never clocked: clk1_i is scan_rst_ni, tied to 1 (no scan mode)"
 
 # ── Expression rows that cannot occur in the verified configuration ─────────────────────────────
 # Left after the Jasper UNR pass and the regression of 2026-10-09
-# (formal_cov/unr/uncovered_after_exclude.txt). Rows that can occur have directed tests in
+# (UNR's unr/out/uncovered_after_exclude.txt); second round after regression 26231 (2026-10-11):
+# the SHUFFLE_MASK_NOT event-or rows, the ibex_counter rows of gen_cntrs[6]/[9] and the RVFI
+# IRQ_TAKEN rows of lines 2049-2050. Rows that can occur have directed tests in
 # directed_tests/directed_testlist_cov_expr.yaml instead; rows still open are listed there.
 #
 # Xcelium scores an expression per operand row ("is each input shown to control the result").
@@ -337,12 +413,12 @@ set _core ibex_top/u_ibex_core
 # never be that event. These rows carry no design intent.
 #
 # Written by the block itself (it changes only because the block ran):
-ibex_waive_expr $_core/id_stage_i/decoder_i ibex_decoder 230 "instr\[6:0\] or opcode or ..." \
+ibex_waive_expr $_core/id_stage_i/decoder_i ibex_decoder 231 "instr\[6:0\] or opcode or ..." \
   [list event:opcode] "event-or: opcode is assigned in this always_comb (opcode_e'(instr\[6:0\]))"
-ibex_waive_expr $_core/id_stage_i/decoder_i ibex_decoder 880 \
+ibex_waive_expr $_core/id_stage_i/decoder_i ibex_decoder 881 \
   "instr_alu\[6:0\] or opcode_alu or ..." [list event:opcode_alu] \
   "event-or: opcode_alu is assigned in this always_comb (opcode_e'(instr_alu\[6:0\]))"
-ibex_waive_expr $_core/ex_block_i/alu_i ibex_alu 253 "shift_left or operand_a_rev or ..." \
+ibex_waive_expr $_core/ex_block_i/alu_i ibex_alu 253 "shift_sbmode or shift_left or ..." \
   [list event:shift_result_rev] "event-or: shift_result_rev is assigned in this always_comb"
 ibex_waive_expr $_core/if_stage_i/compressed_decoder_i ibex_compressed_decoder 213 \
   "instr_i or cm_rlist_q or ..." [list event:cm_rlist_d event:cm_sp_offset_d] \
@@ -359,6 +435,15 @@ ibex_waive_expr $_core/if_stage_i/gen_icache/icache_i ibex_icache 507 \
   "tag_match_ic1 or ic_data_rdata_i or data_tweak_lw_ic1" [list event:data_tweak_lw_ic1] \
   "event-or: ICacheTweakInfection = 0 (core_ibex_tb_top.sv), so gen_no_tweak_infection ties\
    data_tweak_lw_ic1 to 0"
+# ibex_alu.sv gen_alu_rvb_full, the zip/unzip shuffle always_comb (line 583): SHUFFLE_MASK_NOT[i]
+# is a continuous assignment of ~(SHUFFLE_MASK_L[i] | SHUFFLE_MASK_R[i]), both localparams
+# (gen_shuffle_mask_not), so it never changes. Generate-scope type: by instance.
+ibex_waive_expr $_core/ex_block_i/alu_i/g_alu_rvb/gen_alu_rvb_full \
+  ibex_alu.g_alu_rvb_T.gen_alu_rvb_full_T 583 "operand_a_i or shuffle_flip or ..." \
+  [list "event:SHUFFLE_MASK_NOT\[0\]" "event:SHUFFLE_MASK_NOT\[1\]" \
+        "event:SHUFFLE_MASK_NOT\[2\]" "event:SHUFFLE_MASK_NOT\[3\]"] \
+  "event-or: SHUFFLE_MASK_NOT\[i\] is assigned from localparams (gen_shuffle_mask_not), a constant" \
+  [ibex_both_cores ex_block_i/alu_i/g_alu_rvb/gen_alu_rvb_full]
 
 # ---- ibex_decoder: ~illegal_c_insn_i in the JAL, AUIPC, AUICGP and CSC arms (CHERIoT on).
 # illegal_c_insn_i = 1 needs an expanded instruction the compressed decoder flags illegal. Its
@@ -375,7 +460,7 @@ foreach l {{279 280} {439 440} {835 836}} {
     "((BaseIsa == BaseIsaRV32IorCHERIoT) & (cheriot_enable_i == IbexMuBiOn))\
      & (~ illegal_c_insn_i)" [list "0 | 1 1 1"] $_cinsn
 }
-foreach l {368 369 370} {
+foreach l {369 370 371} {
   ibex_waive_expr $_dec ibex_decoder $l "~ illegal_c_insn_i" [list "1"] $_cinsn
 }
 
@@ -474,14 +559,56 @@ ibex_waive_expr $_core/cs_registers_i/gen_scr ibex_cs_registers.gen_scr_T 2084 \
   "(csr_save_cause_i | csr_restore_mret_i) | (csr_restore_dret_i & debug_mode_i)" \
   [list "0 | 0 0 1 0"] $_dret [ibex_both_cores cs_registers_i/gen_scr]
 
+# ---- ibex_counter line 46, `counter_inc_i ? counter[31:0] + 32'd1 : counter[31:0]` in the
+# counterh_we_i branch, the rows with counter_inc_i = 1 of two event counters. The upper-half
+# write is made by a CSR instruction in ID/EX (mhpmcounterh_we under csr_we_int, which needs
+# csr_op_en_i = csr_access_o & instr_executing, ibex_id_stage.sv:742); the event needs another
+# instruction there in the same cycle. Same reason as the block waiver on gen_cntrs[9] above;
+# Jasper proved the matching rows of mhpmcounter4/5/8/11 unreachable (unr_excludes.vRefine) but
+# not these two. The other counters' rows stay scored, so these are excluded by instance (main and
+# lockstep shadow core). The sibling row 1 | 1 1 - has hits in some counters, gen_cntrs[1]
+# (iside_wait, which needs ID empty) among them: no settled cycle gives that, so those hits are
+# presumably zero-delay evaluation order inside one time step and do not weaken the argument.
+# mhpmcounter9 (gen_cntrs[6], branch_taken_i = perf_tbranch): set only in DECODE from branch_set
+# (ibex_controller.sv:686), which only a branch in ID raises (ibex_id_stage.sv branch_in_dec;
+# with data_ind_timing the flopped copy is that branch's own second cycle). Row: low half
+# 0xFFFFFFFF (counter + 1 = 0).
+ibex_waive_expr {ibex_top/u_ibex_core/cs_registers_i/"gen_cntrs[6]"/gen_imp/mcounters_variable_i} \
+  ibex_counter 46 "counter_inc_i ? (counter\[31:0\] + 32'd1) : counter\[31:0\]" \
+  [list "0 | 1 0 -"] \
+  "mhpmcounter9h is written by a CSR instruction, a taken branch needs a branch in the same ID/EX slot" \
+  [ibex_both_cores {cs_registers_i/"gen_cntrs[6]"/gen_imp/mcounters_variable_i}]
+# mhpmcounter12 (gen_cntrs[9], div_wait_i = stall_multdiv & div_en_dec, ibex_id_stage.sv:1216):
+# a DIV/REM in ID. Both inc = 1 rows.
+ibex_waive_expr {ibex_top/u_ibex_core/cs_registers_i/"gen_cntrs[9]"/gen_imp/mcounters_variable_i} \
+  ibex_counter 46 "counter_inc_i ? (counter\[31:0\] + 32'd1) : counter\[31:0\]" \
+  [list "1 | 1 1 -" "0 | 1 0 -"] \
+  "mhpmcounter12h is written by a CSR instruction, div_wait needs a DIV in the same ID/EX slot" \
+  [ibex_both_cores {cs_registers_i/"gen_cntrs[9]"/gen_imp/mcounters_variable_i}]
+
 # ---- ibex_core RVFI (verification instrumentation, `ifdef RVFI) ----
 # Stage-0 update `(instr_valid_id_d & instr_new_id_d) | rvfi_irq_valid` with an instruction held
 # in ID: rvfi_irq_valid is set only for the cycle after IRQ_TAKEN with handle_irq and ID empty.
 # IRQ_TAKEN raises pc_set, so nothing enters ID at that edge and instr_valid_id_q is 0 in the next
 # cycle, where instr_valid_id_d is therefore instr_new_id_d (ibex_if_stage.sv).
-ibex_waive_expr $_core ibex_core 2073 \
+ibex_waive_expr $_core ibex_core 2077 \
   "(if_stage_i.instr_valid_id_d & if_stage_i.instr_new_id_d) | rvfi_irq_valid" [list "1 | 1 0 1"] \
   "rvfi_irq_valid follows IRQ_TAKEN (pc_set): ID is empty, instr_valid_id_d = instr_new_id_d"
+# The IRQ_TAKEN notification `IRQ_TAKEN & handle_irq & ~instr_valid_id & ready_wb &
+# ~captured_taken` (lines 2049-2050) with an instruction in ID, or with writeback not ready. The
+# controller enters IRQ_TAKEN only with ID empty and writeback ready (PipeEmptyOnIrq,
+# ibex_controller.sv:1078; from DECODE that is ~id_wb_pending = ~instr_valid_i & ready_wb_i, and
+# FIRST_FETCH follows reset or SLEEP), and sets halt_if on that transition, so nothing enters ID
+# at the edge (id_in_ready_o = ~stall & ~halt_if & ~retain_id; ibex_if_stage.sv instr_valid_id_d).
+# IRQ_TAKEN lasts one cycle (ctrl_fsm_ns = DECODE), and writeback, ready and handed nothing by an
+# empty ID (en_wb_o = instr_done needs instr_valid_i), is still ready in it (ibex_wb_stage.sv
+# ready_wb_o = ~wb_valid_q | wb_done). The row with captured_taken = 1 is reachable and has a test
+# (cov_expr_nmi_capture section E).
+ibex_waive_expr $_core ibex_core {2049 2050} \
+  "((((id_stage_i.controller_i.ctrl_fsm_cs == IRQ_TAKEN) & id_stage_i.controller_i.handle_irq) &\
+   (~ instr_valid_id)) & ready_wb) & (~ captured_taken)" \
+  [list "0 | 1 1 0 0 -" "0 | 1 1 1 - -"] \
+  "IRQ_TAKEN is entered with ID empty and writeback ready (PipeEmptyOnIrq) and lasts one cycle"
 
 unset _core _dec _cinsn _ctrl _ic _onehot _dret
 

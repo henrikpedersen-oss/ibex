@@ -46,16 +46,17 @@
 #     values and cm_rlist_top_reg every legal item including the internal rlist 16
 #     (cm_rlist_init 15 -> 16, s11 = x27); cm_sp_addi with decr = 1. Three cases sit
 #     behind a DIV, so the next cm.* waits in IF with valid_i && !id_in_ready_i.
-#   Section 2 POP (42 cases): CmIdle -> CmPopIncrSp (rlist 4) and
+#   Section 2 POP (44 cases): CmIdle -> CmPopIncrSp (rlist 4) and
 #     CmIdle -> CmPopLoadReg -> CmPopIncrSp; CmPopIncrSp -> CmIdle (cm.pop),
 #     -> CmPopZeroA0 -> CmPopRetRa (cm.popretz), -> CmPopRetRa (cm.popret); every
 #     kind x rlist 4..15, every kind x spimm 0..3; cm_sp_addi with decr = 0,
-#     cm_stack_adj_word, cm_zero_a0, cm_ret_ra. Four cases sit behind a DIV: every kind
+#     cm_stack_adj_word, cm_zero_a0, cm_ret_ra. Six cases sit behind a DIV: every kind
 #     with rlist > 4 (the CmIdle `if (valid_i && id_in_ready_i)` before CmPopLoadReg
-#     with its implicit else) and popretz with rlist 4 (the one before CmPopIncrSp).
+#     with its implicit else) and every kind with rlist 4 (the one before CmPopIncrSp).
 #     Xcelium scores that CmIdle code once per case label (pop, popretz, popret), so
-#     each kind needs its own stalled case; popretz rlist > 4 was the one missing
-#     (block coverage after UNR, 2026-10-09).
+#     each kind needs its own stalled case at both rlist arms; popretz rlist > 4 and
+#     popret rlist 4 (ibex_compressed_decoder.sv:711) were the ones missing (block
+#     coverage after UNR).
 #   Section 3 MV (126 cases): cm.mvsa01 for all 56 r1s != r2s pairs and cm.mva01s for
 #     all 64 pairs: CmIdle -> CmMvSecondReg -> CmIdle, cm_mvsa01/cm_mva01s/cm_mv_reg
 #     with every sreg on both sides. Three of each again with the first move's source
@@ -602,6 +603,8 @@ zcmp_start:
     POP_CASE KPOPRETZ,  4, 0, 1
     POP_CASE KPOPRET,   9, 1, 1
     POP_CASE KPOPRETZ, 10, 2, 1
+    POP_CASE KPOPRET,   4, 1, 1
+    POP_CASE KPOP,      4, 2, 1
 
 # ---- Section 3: cm.mvsa01 (r1s != r2s) and cm.mva01s (all pairs) --------------
 .irp r1, 0,1,2,3,4,5,6,7

@@ -14,6 +14,8 @@
 #     cs_registers_i.minstret_counter_i                     (minstreth, 0xB82)
 #     cs_registers_i.gen_cntrs[0..9].gen_imp.mcounters_variable_i
 #                                                           (mhpmcounter3h..12h, 0xB83..0xB8C)
+#   ibex_cs_registers.sv the counter-upper-half write case item (one block per CSR label):
+#     the unimplemented mhpmcounter13h..31h (0xB8D..0xB9F) as well
 #   and the low-half carry into the upper half of mcycle and minstret.
 #
 # Expected behaviour (not taken from the RTL):
@@ -46,6 +48,7 @@
 #   10 minstret low half after the carry not in [1, 256)
 #   20+N  mhpmcounterNh != 0 after writing 0xFFFFFFFF (N = 3..12)
 #   40+N  mhpmcounterN low half not in [0x1000+N, 0x1000+N+256) after the upper-half write
+#   60+N  unimplemented mhpmcounterNh != 0 after writing 0xFFFFFFFF (N = 13..31)
 #   99    liveness: fewer checks executed than assembled
 #   0x100 | code  unexpected trap while check `code` was in progress
 
@@ -162,6 +165,15 @@ RVTEST_CODE_BEGIN
   # ── mhpmcounter3h..12h (32-bit event counters) ──────────────────────────────
   .irp n, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12
     HPM_CHECK \n
+  .endr
+
+  # ── mhpmcounter13h..31h: not implemented (MHPMCounterNum = 10), read as 0 (gen_unimp) ──
+  # Xcelium scores the multi-label write case item once per label, so each CSR is written.
+  .irp n, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31
+    li    t1, 0xFFFFFFFF
+    csrw  0xB80 + \n, t1
+    csrr  a0, 0xB80 + \n
+    CHK_EQ a0, zero, 60 + \n
   .endr
 
   li    TESTNUM, 99

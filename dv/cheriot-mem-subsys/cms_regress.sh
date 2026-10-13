@@ -61,9 +61,12 @@ done < "${SCRIPT_DIR}/cms_regress.list"
 
 if [[ ${COV} -eq 1 ]]; then
   IMC_TCL=$(mktemp /tmp/cms_imc_XXXXXX.tcl)
-  # Then the per-covergroup report the testplan report reads (xlm_out/cg_detail.txt).
-  printf 'merge %s/xlm_out/cov_work/cms/* -out %s/xlm_out/coverage_merged -overwrite -initial_model union_all\nload -run %s/xlm_out/coverage_merged\ncatch {report -detail -type -all -metrics covergroup -source off -out %s/xlm_out/cg_detail.txt -overwrite}\nexit\n' \
-    "${SCRIPT_DIR}" "${SCRIPT_DIR}" "${SCRIPT_DIR}" "${SCRIPT_DIR}" > "${IMC_TCL}"
+  # Then the per-covergroup report the testplan report reads (xlm_out/cg_detail.txt), and the code
+  # coverage of the subsystem: -covdut cheriot roots the model at the subsystem, so 'cheriot' is
+  # the whole of it (cov_summary.txt) and its children give the per-block split (cov_hier.txt).
+  # Until 2026-10-10 the merge collected code coverage but no report ever showed it.
+  printf 'merge %s/xlm_out/cov_work/cms/* -out %s/xlm_out/coverage_merged -overwrite -initial_model union_all\nload -run %s/xlm_out/coverage_merged\ncatch {report -detail -type -all -metrics covergroup -source off -out %s/xlm_out/cg_detail.txt -overwrite}\ncatch {report -summary -inst cheriot -metrics all -all -cumulative on -local off -grading covered -out %s/xlm_out/cov_summary.txt}\ncatch {report -summary -inst {cheriot cheriot/*} -metrics all -all -cumulative on -local off -grading covered -out %s/xlm_out/cov_hier.txt}\nexit\n' \
+    "${SCRIPT_DIR}" "${SCRIPT_DIR}" "${SCRIPT_DIR}" "${SCRIPT_DIR}" "${SCRIPT_DIR}" "${SCRIPT_DIR}" > "${IMC_TCL}"
   imc -64bit -licqueue -exec "${IMC_TCL}" -logfile "${SCRIPT_DIR}/xlm_out/coverage_merge.log" \
     || echo "[cms_regress] WARNING: coverage merge failed; see xlm_out/coverage_merge.log" >&2
   rm -f "${IMC_TCL}"

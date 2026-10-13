@@ -29,6 +29,14 @@
 // CHERIoT's permission bits for the __CHERI_CAP_PERMISSION_*__ macros the tests use.
 #include "cheriot_perms.h"
 
+// CHERIoT has no CGetOffset ("The CGetOffset and CSetOffset instructions are not present",
+// CHERIoT ISA), and the core raises an illegal instruction for it, as CHERIoT-Sail does. This
+// toolchain still lowers __builtin_cheri_offset_get to CGetOffset, so capcmp, capretaddr, intcap
+// and null crashed with mcause 2 at their first offset read. The offset is the address minus the
+// base by definition; compute it from the two instructions CHERIoT has.
+#define __builtin_cheri_offset_get(c) \
+	((size_t)(__builtin_cheri_address_get(c) - __builtin_cheri_base_get(c)))
+
 // BSD compat: __uint64_t used in clang_purecap_intcap.c
 #ifndef __uint64_t
 typedef uint64_t __uint64_t;
@@ -41,9 +49,11 @@ typedef uint64_t __uint64_t;
 
 // ── Fault-tracking state (defined here, extern-declared in cheri_c_test.h) ──
 // Each compartment gets its own copy (one TU per compartment).
-// For DECLARE_TEST_FAULT compartments the compartment_error_handler
-// increments faults and returns ForceUnwind; the orchestrator then checks
-// that the compartment call resulted in a ForceUnwind (address == -1).
+// For DECLARE_TEST_FAULT compartments the compartment_error_handler checks
+// the fault's cause and returns ForceUnwind; the orchestrator then checks
+// that the compartment call resulted in a ForceUnwind (address == -1) and
+// that the fault was the expected one (../common/expected_fault.hh). faults
+// itself is only touched by upstream's (unused) FreeBSD handlers.
 volatile int faults = 0;
 
 // cheri_handler is typedef'd in cheri_c_test.h before the #ifdef block.

@@ -125,6 +125,14 @@
     +num_of_sub_program=20
     +directed_instr_0=riscv_load_store_rand_instr_stream,8
   rtl_test: core_ibex_base_test
+  # Slow, not hung: the generated call graph can call sub-programs twice at several levels, so the
+  # dynamic length grows as a power of two. Seed 30528 (2026-10-10) runs its ~12k-instruction
+  # sub_14 subtree 64 times (main->sub_1 x2, sub_2->sub_5/sub_4->sub_7 x2, sub_7->sub_9 x2,
+  # sub_10->sub_12 x2, sub_12->sub_13 x2, sub_13->sub_14 x2); it had entered sub_14 47 times, at a
+  # steady ~47k retirements per 10 ms of sim time, when the 1800 s default expired (119 ms, 565k
+  # trace lines; the other seeds retire 16k-46k instructions). No cosim error up to the timeout.
+  # 64 x 12k instructions at that rate is ~2450 s; nyx load has varied the rate by 1.5x.
+  timeout_s: 5400
 
 - test: riscv_jump_stress_test
   description: >

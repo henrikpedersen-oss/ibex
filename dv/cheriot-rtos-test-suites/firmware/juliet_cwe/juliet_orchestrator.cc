@@ -28,19 +28,31 @@ using namespace CHERI;
 using Debug = ConditionalDebug<true, "Juliet CWE tests">;
 
 /**
- * Check that a call to an inner compartment resulted in ForceUnwind.
+ * Check that a call to an inner compartment resulted in ForceUnwind, on the
+ * expected fault.
  *
  * On a successful ForceUnwind, the CHERIoT switcher returns an untagged
  * capability whose address field is set to -1.  Anything else means the
- * CHERI exception did not fire (the vulnerability was not caught).
+ * CHERI exception did not fire (the vulnerability was not caught). The
+ * sentinel does not say which fault fired: `failures` is the compartment's own
+ * verdict on that (test_cweNNN_*_failures(), ../common/expected_fault.hh), 0
+ * only if it was the CWE's expected cause.
  *
- * @param name   Short CWE label for diagnostic output.
- * @param ret    Return value from the inner compartment call.
- * @returns true if the compartment faulted and unwound as expected.
+ * @param name     Short CWE label for diagnostic output.
+ * @param ret      Return value from the inner compartment call.
+ * @param failures The inner compartment's failure count, read after the call.
+ * @returns true if the compartment faulted as expected and unwound.
  */
 static bool
-check_compartment_faulted(const char *name, Capability<void> ret)
+check_compartment_faulted(const char *name, Capability<void> ret, int failures)
 {
+	if (failures != 0)
+	{
+		Debug::log("FAIL: {} did not end on its expected CHERI exception ({} check(s) failed)",
+		           name,
+		           failures);
+		return false;
+	}
 	if (ret.is_valid())
 	{
 		Debug::log(
@@ -55,9 +67,20 @@ check_compartment_faulted(const char *name, Capability<void> ret)
 		  "FAIL: {} unwound but return address is {} (expected -1)", name, ret.address());
 		return false;
 	}
-	Debug::log("PASS: {} raised CHERI exception, switcher performed ForceUnwind", name);
+	Debug::log("PASS: {} raised the expected CHERI exception, switcher performed ForceUnwind",
+	           name);
 	return true;
 }
+
+// Each inner compartment call is made before its *_failures() call: the second reads what the
+// first left in the compartment's globals.
+#define JULIET_CHECK(name, test)                                                                   \
+	do                                                                                             \
+	{                                                                                              \
+		Capability<void> ret      = test(0);                                                       \
+		int              failures = test##_failures();                                             \
+		allPassed &= check_compartment_faulted(name, ret, failures);                               \
+	} while (0)
 
 /**
  * Run all five Juliet CWE tests and report pass/fail via UART.
@@ -74,23 +97,23 @@ check_compartment_faulted(const char *name, Capability<void> ret)
 
 	// ── CWE-121: Stack Buffer Overflow ──────────────────────────────────────
 	Debug::log("-- CWE-121: Stack Buffer Overflow --");
-	allPassed &= check_compartment_faulted("CWE-121", test_cwe121_bof(0));
+	JULIET_CHECK("CWE-121", test_cwe121_bof);
 
 	// ── CWE-122: Heap Buffer Overflow ───────────────────────────────────────
 	Debug::log("-- CWE-122: Heap Buffer Overflow --");
-	allPassed &= check_compartment_faulted("CWE-122", test_cwe122_heap_bof(0));
+	JULIET_CHECK("CWE-122", test_cwe122_heap_bof);
 
 	// ── CWE-416: Use After Free ─────────────────────────────────────────────
 	Debug::log("-- CWE-416: Use After Free --");
-	allPassed &= check_compartment_faulted("CWE-416", test_cwe416_uaf(0));
+	JULIET_CHECK("CWE-416", test_cwe416_uaf);
 
 	// ── CWE-415: Double Free ────────────────────────────────────────────────
 	Debug::log("-- CWE-415: Double Free (use-after-double-free) --");
-	allPassed &= check_compartment_faulted("CWE-415", test_cwe415_double_free(0));
+	JULIET_CHECK("CWE-415", test_cwe415_double_free);
 
 	// ── CWE-190: Integer Overflow → OOB Write ───────────────────────────────
 	Debug::log("-- CWE-190: Integer Overflow to Out-of-Bounds Write --");
-	allPassed &= check_compartment_faulted("CWE-190", test_cwe190_int_overflow(0));
+	JULIET_CHECK("CWE-190", test_cwe190_int_overflow);
 
 	// ── Summary ─────────────────────────────────────────────────────────────
 	Debug::log("=== Summary: {} / 5 tests passed ===", allPassed ? 5 : 0);

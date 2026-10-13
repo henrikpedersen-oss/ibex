@@ -136,8 +136,12 @@ FAMILIES = [
      "(cov_expr_pmp_tor). A 32-bit instruction at 0xFFFFFFFE whose second half wraps to address "
      "0 executes, and with address 0 denied faults with mepc 0xFFFFFFFE and mtval 0 "
      "(cov_expr_fetch_wrap). With mseccfg.MML = 1 and RLB = 0, writes of every executable MML "
-     "configuration to locked entries are ignored (cov_fcov_pmp_mml_locked_wr).",
-     directed(lambda t: t["name"].startswith("pmp_mseccfg_test") or
+     "configuration to locked entries are ignored (cov_fcov_pmp_mml_locked_wr). Every one of the 16 "
+     "regions, in turn the highest-priority match, sees every mode, permission-bit encoding "
+     "(MML 0 and 1), privilege and access type on the fetch and data channels, each outcome "
+     "checked, all 32 NAPOT sizes and the locked-entry edits; and every locked-entry write "
+     "that would make it executable, per region (cov_fcov_pmp_region_*).",
+     directed(lambda t: t["name"].startswith(("pmp_mseccfg_test", "cov_fcov_pmp_region_")) or
               t["name"] in ("access_pmp_overlap", "pmp_fault_hazard", "cov_expr_pmp_tor",
                             "cov_expr_fetch_wrap", "cov_fcov_pmp_mml_locked_wr"))),
     ("counters_and_user_mode", "V2", ["directed"],
@@ -145,10 +149,13 @@ FAMILIES = [
      "every CSR read and written from M-mode and from U-mode, illegal accesses trapping "
      "(csr_access_sweep). minstret and mhpmcounter10 (compressed instructions retired) count "
      "exactly, stay frozen while their mcountinhibit bits are set and count again once cleared "
-     "(cov_expr_counter_inhibit, self-checking: this Spike does not inhibit minstret).",
+     "(cov_expr_counter_inhibit, self-checking: this Spike does not inhibit minstret). Upper-half "
+     "writes with the low half 0 while inhibited, and with the low half at 0xFFFFFFFF as it "
+     "counts (mcycle, minstret, the 32-bit mhpmcounter10 wrapping to 0) "
+     "(cov_expr_counter_hwrite).",
      directed(lambda t: t["name"] in ("mcounteren_test", "mcounteren_lock_test",
                                       "u_mode_exec_test", "csr_access_sweep",
-                                      "cov_expr_counter_inhibit"))),
+                                      "cov_expr_counter_inhibit", "cov_expr_counter_hwrite"))),
     ("cheriot_isa_directed", "V2", ["directed", "cheriot"],
      "CHERIoT instructions and capability state, self-checking: capability fields (base, length, "
      "type, permissions, address, high word), CIncAddr/CSetAddr/CSetBounds variants and "
@@ -177,8 +184,15 @@ FAMILIES = [
      "link is untagged or keeps exactly the PCC's bounds. AUICGP, CIncAddrImm and CIncAddr on "
      "an untagged sealed E = 0 capability whose base decodes above its address (0xFFFFFF00 "
      "for address 0x10), and CGetBase of the memory root at address 0xFFFFFFFF, against "
-     "CHERIoT-Sail (cov_fcov2_cheri_isa).",
-     directed(lambda t: t["name"] == "cov_fcov2_cheri_isa" or
+     "CHERIoT-Sail (cov_fcov2_cheri_isa). CSeal through a tagged authority without SE whose "
+     "cursor is above its top, CUnseal of an unsealed capability through a tagged sealed one, "
+     "and CSetBounds with every request 0..8 on E = 2 and E = 24 sources with the cursor "
+     "inside or above the top (cov_fcov3_cheri_isa). The Zcb instructions in CHERIoT mode: "
+     "c.lbu/c.lhu/c.lh/c.sb/c.sh with every immediate through bounded capabilities, and their "
+     "bounds, tag, LD and SD faults (mcause 28, mtval, MEPCC, nothing written); "
+     "c.zext.b/c.sext.b/c.zext.h/c.sext.h/c.not at the extension edges and c.mul "
+     "(cheriot_zcb).",
+     directed(lambda t: t["name"] in ("cov_fcov2_cheri_isa", "cov_fcov3_cheri_isa") or
               t["name"].startswith("cheriot_") and
               t["name"] not in ("cheriot_enable_transition", "cheriot_bck_nocheck",
                                 "cheriot_mshwm", "cheriot_enable_on_off",
@@ -219,9 +233,10 @@ FAMILIES = [
     ("cheriot_illegal_instructions", "V2", ["directed", "cheriot"],
      "Illegal instructions with the expected cause, mtval and MEPCC: in CHERIoT mode a sweep of "
      "every reserved encoding class on which CHERIoT-Sail and the RTL agree (mcause 2, mtval 0), "
-     "a second sweep of the encodings Sail rejects and the RTL executes (Zcb, CSRs absent from "
-     "the Sail platform; GAP-CS-3, expected to fail until each "
-     "disagreement is resolved), one unwaived test per encoding the specification makes illegal "
+     "a second sweep of the encodings Sail rejected and the RTL executes (GAP-CS-3: the draft "
+     "bit-manipulation encodings, now illegal in both, and the CSRs the Sail platform now "
+     "implements too, expected to fail until they leave the table), one unwaived test per "
+     "encoding the specification makes illegal "
      "and the RTL accepted (CGetOffset: cheriot_cgetoffset_illegal; every CSR instruction form "
      "on cdbg_ctrl: cheriot_cdbg_ctrl_illegal), and with the pin Off every CHERIoT-only "
      "encoding (opcodes 0x5B and 0x7B, CLC/CSC, the CHERIoT CSRs, compressed capability "
@@ -265,21 +280,28 @@ FAMILIES = [
      "switch the capability checks off silently. After a CSC/CLC round trip in CHERIoT mode the "
      "testbench slows the d-side grants and lowers the pin while a CSC waits for its first grant "
      "(LSU CTX_WAIT_GNT1 -> IDLE, otherwise never taken), and requires the alert within 100 "
-     "cycles (+cheriot_disable_on_write). Cosim off: neither model has the pin.",
-     directed(lambda t: t["name"] == "cheriot_enable_on_off")),
+     "cycles (+cheriot_disable_on_write). The same with the pin lowered in the cycle the LSU "
+     "reports a CHERIoT access fault (+cheriot_disable_on_fault, cov_expr_cheriot_off_fault): "
+     "the alert, one trap at the faulting load, no hang. Cosim off: neither model has the pin.",
+     directed(lambda t: t["name"] in ("cheriot_enable_on_off", "cov_expr_cheriot_off_fault"))),
     ("zcmp_push_pop_mv", "V2", ["directed"],
      "Every Zcmp instruction in RISC-V mode: cm.push/cm.pop/cm.popret/cm.popretz over all rlist "
      "values (ra .. ra,s0-s11) and all spimm values, cm.mvsa01/cm.mva01s over all sreg pairs, the "
      "reserved rlist 0-3 and mv forms (illegal instruction), and back-to-back sequences. Checks "
      "sp, every saved/loaded slot and register, and that nothing else changed. Self-checking, cosim "
-     "off: Spike cannot pair Zcmp's multi-register accesses (GAP-RV-6).",
-     directed(lambda t: t["name"] == "zcmp_push_pop_mv")),
+     "off: Spike cannot pair Zcmp's multi-register accesses (GAP-RV-6). Upstream's "
+     "zcmp_reserved_test adds the reserved Zcmp encodings with PMP on, in both Zcmp "
+     "configurations: each traps as an illegal instruction and is not expanded. Zcmp sequences "
+     "with dummy instruction insertion on give the same results (cov_block_zcmp_dummy).",
+     directed(lambda t: t["name"] in ("zcmp_push_pop_mv", "zcmp_reserved_test",
+                                      "cov_block_zcmp_dummy"))),
     ("counter_high_half_write", "V2", ["directed"],
      "Writes to the high halves of mcycle, minstret and mhpmcounter3-12 (mcycleh, minstreth, "
      "mhpmcounterNh): mcycleh/minstreth read back, the low half is unchanged, both counters carry "
      "into the high half; the 32-bit event counters read 0 in their high half. Checked against "
-     "Spike.",
-     directed(lambda t: t["name"] == "counter_high_half_write")),
+     "Spike. With mcountinhibit.CY set, an mcycleh write reads back, the low half stays frozen, "
+     "and mcycle counts again once CY is cleared (cov_block_mcycleh_inhibit, self-checking).",
+     directed(lambda t: t["name"] in ("counter_high_half_write", "cov_block_mcycleh_inhibit"))),
     ("cheriot_fatal_err_mtcc", "V2", ["directed", "cheriot"],
      "A trap taken with MTCC untagged sets the sticky cheriot_fatal_err: alert_major_internal_o "
      "rises within 4 cycles of the trap and stays high; no alert before it, no minor or bus alert "
@@ -336,8 +358,11 @@ FAMILIES = [
      "illegal-instruction exception with mtval = the instruction and leave rd unwritten; every "
      "mhpmcounter low half is writable and the unavailable ones read 0. rori and bexti with "
      "shamt[5] = 1 likewise "
-     "(cov_expr_rv_misc).",
-     directed(lambda t: t["name"] in ("ibex_decode_holes", "cov_expr_rv_misc"))),
+     "(cov_expr_rv_misc). The Zbkb/Zbkx instructions riscv-dv never generates: zip, unzip, "
+     "brev8, pack with rs2 != x0, xperm4 and xperm8 give the ratified results (all-valid, mixed "
+     "and all-invalid xperm selectors), and the reserved shfli/unshfli/grevi/gorci immediates are "
+     "illegal (cov_block_zbk).",
+     directed(lambda t: t["name"] in ("ibex_decode_holes", "cov_expr_rv_misc", "cov_block_zbk"))),
     ("trap_timing_hazards", "V2", ["directed", "cheriot"],
      "Debug requests, NMIs and fetch-enable drops placed in an exact cycle of the instruction "
      "behind a data access rather than at random: the bench acts on the access's grant "
@@ -354,8 +379,14 @@ FAMILIES = [
      "bus error, at each response timing, with and without the interrupt and a debug request. "
      "Self-checking (trap, NMI and debug-entry counts, causes, NMI mepc); the bench fails the "
      "test if a configured trigger never fires. Spike cosim on in RISC-V mode; cosim off in "
-     "CHERIoT mode (CHERIoT-Sail has no debug mode and no bus errors).",
-     directed(lambda t: t["name"] in ("cov_fcov2_rv_hazard", "cov_fcov2_cheri_hazard"))),
+     "CHERIoT mode (CHERIoT-Sail has no debug mode and no bus errors). Also "
+     "(cov_fcov3_rv_hazard): an NMI taken in U-mode with mstatus.MIE set; c.unimp unstalling "
+     "and fence.i on a bus-error response, each with a debug request and the timer pending; "
+     "wfi waiting in ID behind a load with IF empty and idle. And (cov_fcov3_cheri_irq) a "
+     "maskable interrupt timed from a grant (+gnt_trig offset 0x08) taken right behind a CHERI "
+     "instruction, unstalled or just unstalled from a load hazard.",
+     directed(lambda t: t["name"] in ("cov_fcov2_rv_hazard", "cov_fcov2_cheri_hazard",
+                                      "cov_fcov3_rv_hazard", "cov_fcov3_cheri_irq"))),
     ("integrity_directed", "V2S", ["directed"],
      "Bus integrity errors injected by address (+dside_intg_err_lo/hi, +iside_intg_err_lo/hi): "
      "a load with bad integrity raises the internal NMI (mcause 0xFFFFFFE0, mtval its address, "
@@ -363,8 +394,12 @@ FAMILIES = [
      "blocks it and is taken right after the handler's mret; the instructions after the first "
      "load each execute once. Zcmp encodings fetched with bad integrity raise an instruction "
      "access fault and change nothing. A bus alert per integrity error and no other alert "
-     "(core_ibex_cheriot_mem_err_test). Self-checking (cov_expr_intg_err).",
-     directed(lambda t: t["name"] == "cov_expr_intg_err")),
+     "(core_ibex_cheriot_mem_err_test). Self-checking (cov_expr_intg_err). The external NMI "
+     "taken over a pending internal one, which follows after the handler's mret; NMIs, an "
+     "interrupt and a withdrawn halt request around an empty ID stage, including an NMI taken "
+     "before an interrupt handler's first instruction (recoverable NMI: that handler then sees "
+     "its own mepc and mcause) (cov_expr_nmi_capture, core_ibex_stall_events_test).",
+     directed(lambda t: t["name"] in ("cov_expr_intg_err", "cov_expr_nmi_capture"))),
     ("debug_module", "V2", ["directed", "cheriot"],
      "The real RISC-V debug module (vendor/pulp_riscv_dbg dm_top with the CHERIoT patches) "
      "behind the core's instruction and data buses, driven over its DMI port: dmstatus, "

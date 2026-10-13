@@ -196,11 +196,25 @@ ${OT_CHERIOT_DIR}/hw/ip/cheriot/rtl/cheriot_trvk_tlul.sv
 ${OT_CHERIOT_DIR}/hw/ip/cheriot/rtl/cheriot_tbre.sv
 ${OT_CHERIOT_DIR}/hw/ip/cheriot/rtl/cheriot.sv
 
+// ------ RISC-V debug module (ibex/vendor/pulp_riscv_dbg, CHERIoT patches) ------------------------
+// dm_top and what it instantiates, as the UVM testbench's DM build compiles them
+// (dv/uvm/core_ibex/ibex_dv_dm.f). Not compiled: dmi_jtag*.sv, dmi_cdc.sv, dmi_bscane_tap.sv (no
+// JTAG DTM: the testbench drives the DMI) and sva/. dm_pkg before the SoC, whose ports use it.
+${IBEX_ROOT_DIR}/vendor/pulp_riscv_dbg/src/dm_pkg.sv
+${IBEX_ROOT_DIR}/vendor/pulp_riscv_dbg/debug_rom/debug_rom.sv
+${IBEX_ROOT_DIR}/vendor/pulp_riscv_dbg/debug_rom/debug_rom_one_scratch.sv
+${IBEX_ROOT_DIR}/vendor/pulp_riscv_dbg/debug_rom/debug_rom_cheriot.sv
+${IBEX_ROOT_DIR}/vendor/pulp_riscv_dbg/src/dm_csrs.sv
+${IBEX_ROOT_DIR}/vendor/pulp_riscv_dbg/src/dm_sba.sv
+${IBEX_ROOT_DIR}/vendor/pulp_riscv_dbg/src/dm_mem.sv
+${IBEX_ROOT_DIR}/vendor/pulp_riscv_dbg/src/dm_top.sv
+
 // ------ The SoC ----------------------------------------------------------------------------------
 // The Sonata integration glue for the subsystem (cheriot_rev_ctl_tbre, cheriot_mem_subsys) began
 // as an uncommitted addition to a sonata-system checkout; these are this flow's own copies.
 ${RTOS_TB_DIR}/rtl/cheriot_rev_ctl_tbre.sv
 ${RTOS_TB_DIR}/rtl/cheriot_mem_subsys.sv
+${RTOS_TB_DIR}/rtl/cheriot_rtos_dbg_gate.sv
 ${RTOS_TB_DIR}/rtl/cheriot_rtos_default_rsp.sv
 ${RTOS_TB_DIR}/rtl/cheriot_rtos_xbar.sv
 ${RTOS_TB_DIR}/rtl/cheriot_rtos_soc.sv
@@ -212,4 +226,5 @@ ${RTOS_TB_DIR}/fcov/cheriot_mem_subsys_fcov_bind.sv
 
 // ------ Testbench --------------------------------------------------------------------------------
 ${RTOS_TB_DIR}/vendor/sonata-system/vendor/lowrisc_ip/dv/dpi/uartdpi/uartdpi.sv
+${RTOS_TB_DIR}/tb/cheriot_rtos_dbg_host.sv
 ${RTOS_TB_DIR}/tb/cheriot_rtos_tb.sv

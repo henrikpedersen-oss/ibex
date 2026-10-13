@@ -1,0 +1,19 @@
+dvsim: let the HTML report load its external CSS file
+
+Newer premailer refuses to load external files unless allowed, so md_results_to_html failed when
+writing the report (seen on the NixOS toolchain).
+
+diff --git a/utils.py b/utils.py
+index ee8f0d5c..cdd90323 100644
+--- a/utils.py
++++ b/utils.py
+@@ -351,7 +351,8 @@ def md_results_to_html(title, css_file, md_text):
+     # this function converts css style to inline html style
+     html_text = transform(html_text,
+                           external_styles=css_file,
+-                          cssutils_logging_level=log.ERROR)
++                          cssutils_logging_level=log.ERROR,
++                          allow_loading_external_files=True)
+     return html_text
+ 
+ 

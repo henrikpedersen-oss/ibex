@@ -15,7 +15,9 @@ class ibex_mem_intf_seq_item extends uvm_sequence_item;
   rand bit [DATA_WIDTH/8-1:0]   be;
   rand bit [3:0]                gnt_delay;
   rand bit [3:0]                req_delay;
-  rand bit [5:0]                rvalid_delay;
+  // 8 bits: +mem_mode_on_write sets instruction-side delays up to 2 * 125 + 4 = 254 cycles
+  // (core_ibex_test_lib.sv set_mem_mode); with 6 bits any range above 63 cannot be randomised.
+  rand bit [7:0]                rvalid_delay;
   rand bit                      error;
        bit                      spurious_response;
        bit                      misaligned_first;

@@ -123,6 +123,11 @@ main:
     csrr    a5, minstreth           # 0xB82
     csrr    s0, cycle               # 0xC00 -- already covered by the old safe-list
     csrr    a3, instret             # 0xC02
+    # The unprivileged counters exist in CHERIoT mode: the CHERIoT ISA's CSR allowlist names
+    # cycle(h) and instret(h) as readable without ASR. Upstream CHERIoT-Sail defines them only with
+    # U-mode (spec GAP-MF-2); the cosim model has the local fix, so a trap here is a mismatch.
+    csrr    s1, cycleh              # 0xC80
+    csrr    a5, instreth            # 0xC82
 
     # ── Test 3: mcycle actually produced a value. mcycle is free-running, so
     # a second read must differ from the first; a trapping read would leave t0

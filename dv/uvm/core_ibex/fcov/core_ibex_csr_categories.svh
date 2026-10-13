@@ -5,10 +5,13 @@
 // List of CSRs to ignore for coverage purposes. These CSRs are ignored as they
 // are less critical and achieving full coverage isn't necessary.
 //
-// The user-mode read-only aliases (CSR_INSTRET, CSR_HPMCOUNTER*, CSR_CYCLEH, CSR_INSTRETH,
-// CSR_HPMCOUNTER*H) and the HPM counters: CHERIoT is M-mode only and the opentitan config has no
-// HPM hardware, so accesses to these CSRs trap as illegal instructions and are never counted as
-// completed reads/writes by the CSR coverpoints.
+// The user-mode read-only counter aliases (CSR_INSTRET, CSR_HPMCOUNTER*, CSR_CYCLEH, CSR_INSTRETH,
+// CSR_HPMCOUNTER*H) are ignored for the same reason. They are reachable: in RISC-V mode U-mode reads
+// them when the matching mcounteren bit is set (priv_mode_instr_cross covers that), the opentitan
+// configuration has 10 HPM counters, and the unavailable ones read 0. What matters about them --
+// which accesses are legal in which privilege mode and with which mcounteren bits -- is checked
+// by csr_access_sweep and covered by priv_mode_instr_cross, not by which counter address a
+// completed read named. In CHERIoT mode (M-mode only) the U-mode accesses do not arise.
 //
 // Every line inside the macro, comment lines included, must end in '\': a comment line without
 // one ends the macro there and the rest of the list is parsed as code.

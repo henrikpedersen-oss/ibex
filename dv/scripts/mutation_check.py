@@ -8,6 +8,10 @@ Each mutation (ibex/dv/cheriot-rtos-test-suites/tb/cheriot_rtos_tb.sv, +sonata_m
 forces one check off. For each, RUNS lists the runs that exercise it and the tests that must then
 report FAIL. A test that still passes with the check broken is not testing that check.
 
+A test that fails on the unmutated design (a finding) has the opposite problem: it must be shown
+to be able to pass. CONTROLS lists runs with a fix model instead of a mutation (also selected with
++sonata_mutate=<name>), and the tests that must then report PASS.
+
   --list-runs   print "<mutation>|<make arguments>" per run, in build order, for the Makefile
   --check       read <results>/<mutation>/ and report, per expectation:
                   CAUGHT   the test reported FAIL
@@ -15,8 +19,11 @@ report FAIL. A test that still passes with the check broken is not testing that 
                   NO LOG   the run left no UART log (it did not run, or died before the UART)
                   CRASHED  the log never reports the test: the run failed before reaching it,
                            so the suite noticed, but not through this test
+                and for a control, per expectation:
+                  PASSES       the test reported PASS with the fix model
+                  STILL FAILS  the test reported FAIL even with the fix model
                 and INACTIVE if the run's simulator summary lacks "MUTATION <name> active".
-                Exits non-zero on any MISSED or INACTIVE.
+                Exits non-zero on any MISSED, STILL FAILS, CRASHED control or INACTIVE.
 """
 
 import argparse
@@ -32,22 +39,41 @@ from sonata_results import parse_log  # noqa: E402  (same verdict parsing as the
 # and the revocation_test barrier mutations now run with the memory subsystem in.
 # (mutation, make arguments, [(test, build) that must FAIL]). REBUILD=1 on the first run only; the
 # mutation itself is a plusarg and needs no rebuild.
+#
+# The CHERI-C and Juliet fault tests pass only on their expected capcause (firmware/common/
+# expected_fault.hh), so a broken check that lets the access through and faults later is a FAIL.
 RUNS = [
     ("bounds_off", "sonata-cheri-c-xlm REBUILD=1", [("cheri_c_array", "cheriot_mem")]),
     ("ldst_perm_off", "sonata-cheri-c-xlm", [("cheri_c_input", "cheriot_mem"),
                                              ("cheri_c_output", "cheriot_mem")]),
-    ("exec_off", "sonata-cheri-c-xlm", [("cheri_c_badcall", "cheriot_mem")]),
+    # Not cheri_c_badcall: its call is through an untagged pointer, which CJALR rejects on the tag
+    # before it checks Permit_Execute, in the mutated design as in the unmutated one.
+    ("exec_off", "sonata-cheri-c-xlm", [("cheri_c_noexec_call", "cheriot_mem")]),
     ("datastore_tag", "sonata-cheri-c-xlm", [("cheri_c_union", "cheriot_mem")]),
     ("barrier_none", "sonata-revocation-xlm", [("revocation_barrier_phase2", "cheriot_mem")]),
+    # barrier_all revokes only revocation_test's barrier object (an unrestricted force strips
+    # every SRAM capability and the RTOS cannot boot; see the testbench).
     ("barrier_all", "sonata-revocation-xlm", [("revocation_barrier_phase1", "cheriot_mem"),
                                               ("revocation_barrier_phase3", "cheriot_mem")]),
-    ("tbre_no_inval", "sonata-revocation-xlm", [("revocation_sweep", "cheriot_mem"),
-                                                ("bus_master_tbre_invalidate_only",
-                                                 "cheriot_mem")]),
+    # Not bus_master_tbre_invalidate_only: it checks that the sweep writes nothing but tag
+    # clears, which a TBRE that writes nothing at all satisfies. revocation_sweep checks that the
+    # revoked capability was cleared.
+    ("tbre_no_inval", "sonata-revocation-xlm", [("revocation_sweep", "cheriot_mem")]),
+    # Not juliet_cwe190_int_overflow: its wrapped cursor is unrepresentable, so the tag is
+    # cleared and the store faults on the tag before it reaches the bounds check.
     ("bounds_off", "sonata-juliet-xlm", [("juliet_cwe121_bof", "cheriot_mem"),
-                                         ("juliet_cwe122_heap_bof", "cheriot_mem"),
-                                         ("juliet_cwe190_int_overflow", "cheriot_mem")]),
+                                         ("juliet_cwe122_heap_bof", "cheriot_mem")]),
     ("barrier_none", "sonata-rtos-tests-xlm", [("rtos_test_allocator", "cheriot_mem")]),
+    # The debug-access gate on the debug module's system bus access stuck open.
+    ("dbg_lock_open", "sonata-dbg-host-xlm", [("bus_master_dbg_host_locked", "cheriot_mem")]),
+]
+
+# Fix models: (name, make arguments, [(test, build) that must PASS]). bus_master_dbg_host_tag_clear
+# fails on the design (SBA bypasses the memory subsystem's tag filter); with the testbench clearing
+# the tag of every SBA write to the SRAM it must pass, or the test cannot tell the two apart.
+CONTROLS = [
+    ("sba_tag_clear_model", "sonata-dbg-host-xlm",
+     [("bus_master_dbg_host_tag_clear", "cheriot_mem")]),
 ]
 
 # Make target -> the SONATA_RESULT name it saves its log under (Makefile).
@@ -56,12 +82,14 @@ RESULT_NAME = {
     "sonata-juliet-xlm": "juliet",
     "sonata-revocation-xlm": "revocation",
     "sonata-rtos-tests-xlm": "rtos-tests",
+    "sonata-dbg-host-xlm": "dbg-host",
 }
 
 
 def check(results):
     ok = True
-    for mutation, args, expects in RUNS:
+    runs = [(m, a, e, False) for m, a, e in RUNS] + [(m, a, e, True) for m, a, e in CONTROLS]
+    for mutation, args, expects, control in runs:
         target = args.split()[0]
         builds = {b for _, b in expects}
         for build in sorted(builds):
@@ -85,6 +113,16 @@ def check(results):
             for test, b in expects:
                 if b != build:
                     continue
+                if control:
+                    if test not in verdicts:
+                        print(f"CRASHED   {head}: {test} never reported -- the run failed before it")
+                        ok = False
+                    elif verdicts[test]:
+                        print(f"PASSES    {head}: {test} PASSED with the fix model")
+                    else:
+                        print(f"STILL FAILS {head}: {test} FAILED even with the fix model")
+                        ok = False
+                    continue
                 if test not in verdicts:
                     print(f"CRASHED   {head}: {test} never reported -- the run failed before it")
                 elif verdicts[test]:
@@ -107,7 +145,7 @@ def main():
                     default=Path("ibex/dv/cheriot-rtos-test-suites/xlm_rtos_out/results/mutations"))
     args = ap.parse_args()
     if args.list_runs:
-        for mutation, make_args, _ in RUNS:
+        for mutation, make_args, _ in RUNS + CONTROLS:
             print(f"{mutation}|{make_args}")
     if args.check:
         sys.exit(0 if check(args.results) else 1)

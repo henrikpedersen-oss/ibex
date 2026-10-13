@@ -64,7 +64,11 @@
 
         {from: "hw/lint",            to: "lint"},
 
-        {from: "util/dvsim",         to: "util/dvsim"},
+        {
+            from:      "util/dvsim",
+            to:        "util/dvsim",
+            patch_dir: "dvsim",
+        },
         {from: "util/uvmdvgen",      to: "util/uvmdvgen"},
     ]
 

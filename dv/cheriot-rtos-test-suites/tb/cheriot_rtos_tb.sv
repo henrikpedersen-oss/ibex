@@ -19,6 +19,7 @@
 //   +enable_ibex_fcov=1        sample the functional covergroups (fcov/)
 //   +ibex_tracer_enable=0|1    ibex instruction tracer (ibex_top_tracing)
 //   +uart_idle_cycles=<n>      end the run after n cycles of UART silence (0 disables; see below)
+//   +dbg_host_drv=0            do not serve the firmware's debug host requests (tb/cheriot_rtos_dbg_host.sv)
 
 `timescale 1ns/10ps
 
@@ -76,12 +77,65 @@ module cheriot_rtos_tb;
   // ── DUT ──────────────────────────────────────────────────────────────────────────────────────
   logic uart_soc_tx, uart_soc_rx;
 
+  // Debug module DMI and debug access enable, driven by u_dbg_host (below).
+  ibex_pkg::ibex_mubi_t dbg_en;
+  logic                 dmi_req_valid, dmi_req_ready, dmi_resp_valid, dmi_resp_ready;
+  dm::dmi_req_t         dmi_req;
+  dm::dmi_resp_t        dmi_resp;
+
   cheriot_rtos_soc u_soc (
-    .clk_i      (clk),
-    .rst_ni     (rst_n),
-    .cheri_en_i (1'b1),
-    .uart_rx_i  (uart_soc_rx),
-    .uart_tx_o  (uart_soc_tx)
+    .clk_i            (clk),
+    .rst_ni           (rst_n),
+    .cheri_en_i       (1'b1),
+    .dbg_en_i         (dbg_en),
+    .dmi_req_valid_i  (dmi_req_valid),
+    .dmi_req_ready_o  (dmi_req_ready),
+    .dmi_req_i        (dmi_req),
+    .dmi_resp_valid_o (dmi_resp_valid),
+    .dmi_resp_ready_i (dmi_resp_ready),
+    .dmi_resp_o       (dmi_resp),
+    .uart_rx_i        (uart_soc_rx),
+    .uart_tx_o        (uart_soc_tx)
+  );
+
+  // ── Debug host ──────────────────────────────────────────────────────────────────────────────
+  // The debug transport for the SoC's debug module, serving the requests the firmware prints on
+  // UART0 ("DBGHOST REQ ...", decoded in uart_watch below). Only firmware/dbg_host_test prints
+  // them: for every other firmware the DMI stays idle and debug access disabled.
+  localparam string DbgHostReq = "DBGHOST REQ ";
+  int unsigned dbg_req_count = 0;
+  logic [31:0] dbg_req_op, dbg_req_slot, dbg_req_value, dbg_req_flag;
+
+  // The base of firmware/revocation_test's barrier object, from the line it prints before its
+  // three barrier phases ("object <cap> base 0x<base> -> shadow word ..."; decoded in uart_watch
+  // below). Only +sonata_mutate=barrier_all uses it. Until the line arrives it is a value no
+  // capability in the revocable window (the SRAM) has.
+  localparam string BarrierObjLine = "-> shadow word ";
+  localparam string BarrierObjBase = " base 0x";
+  logic [31:0] barrier_obj_base = 32'hffff_ffff;
+
+  // Index of the first `pat` in `s`, or -1.
+  function automatic int str_find(string s, string pat);
+    for (int p = 0; p + pat.len() <= s.len(); p++)
+      if (s.substr(p, p + pat.len() - 1) == pat) return p;
+    return -1;
+  endfunction
+
+  cheriot_rtos_dbg_host u_dbg_host (
+    .clk_i            (clk),
+    .rst_ni           (rst_n),
+    .req_count_i      (dbg_req_count),
+    .req_op_i         (dbg_req_op),
+    .req_slot_i       (dbg_req_slot),
+    .req_value_i      (dbg_req_value),
+    .req_flag_i       (dbg_req_flag),
+    .dbg_en_o         (dbg_en),
+    .dmi_req_valid_o  (dmi_req_valid),
+    .dmi_req_ready_i  (dmi_req_ready),
+    .dmi_req_o        (dmi_req),
+    .dmi_resp_valid_i (dmi_resp_valid),
+    .dmi_resp_ready_o (dmi_resp_ready),
+    .dmi_resp_i       (dmi_resp)
   );
 
   // Elaborates the bind statements for the memory-subsystem and TRVK covergroups
@@ -132,6 +186,7 @@ module cheriot_rtos_tb;
   initial begin : uart_watch
     string  line;
     byte    ch;
+    int     base_pos;
     line = "";
     uart_seen_byte = 1'b0;
     @(posedge rst_n);
@@ -167,6 +222,30 @@ module cheriot_rtos_tb;
               end
             join_none
             break;
+          end
+        end
+        // A debug host request from firmware/dbg_host_test: "DBGHOST REQ <op> <slot> <value>
+        // <flag>", after the debug context's prefix. u_dbg_host serves it.
+        for (int p = 0; p + DbgHostReq.len() <= line.len(); p++) begin
+          if (line.substr(p, p + DbgHostReq.len() - 1) == DbgHostReq) begin
+            if ($sscanf(line.substr(p + DbgHostReq.len(), line.len() - 1), "0x%h 0x%h 0x%h 0x%h",
+                        dbg_req_op, dbg_req_slot, dbg_req_value, dbg_req_flag) == 4) begin
+              dbg_req_count++;
+            end else begin
+              $error("[cheriot_rtos_tb] cannot decode the debug host request \"%s\"", line);
+            end
+            break;
+          end
+        end
+        // revocation_test's barrier object (barrier_obj_base above).
+        if (str_find(line, BarrierObjLine) >= 0) begin
+          base_pos = str_find(line, BarrierObjBase);
+          if (base_pos >= 0 &&
+              $sscanf(line.substr(base_pos + BarrierObjBase.len(), line.len() - 1), "%h",
+                      barrier_obj_base) == 1) begin
+            $display("[cheriot_rtos_tb] revocation_test barrier object base %h", barrier_obj_base);
+          end else begin
+            $error("[cheriot_rtos_tb] cannot decode the barrier object line \"%s\"", line);
           end
         end
         line = "";
@@ -298,6 +377,29 @@ module cheriot_rtos_tb;
 `define RTOS_LSU_S `RTOS_CORE.gen_lockstep.u_ibex_lockstep.u_shadow_core.load_store_unit_i
 `define RTOS_TRVK  `RTOS_CORE.gen_cheriot_trvk.i_ibex_trvk
 `define RTOS_MOVER u_soc.u_cheriot_mem_subsys.u_cheriot.u_cheriot_tbre.u_cheriot_tbre_mover
+`define RTOS_META  u_soc.u_cheriot_mem_subsys.meta_mem
+  // sba_tag_clear_model: the meta SRAM word holding the tag of SRAM granule 0. The meta SRAM is
+  // the revocation bitmap (MemSizeRevbm = 2 KiB), then the code RAM's tags (1 MiB / 256 bytes per
+  // word = 4096 words), then the SRAM's (cheriot.sv MetaMainSramTagBase); one bit per 8 bytes,
+  // bit [7:3] of the offset within a word (cheriot_tag_filter.sv addr_stem).
+  localparam int unsigned MetaSramTagWord0 = (2048 + 1024 * 1024 / 256 * 4) / 4;
+
+  task automatic sba_tag_clear_model();
+    logic [31:0] off;
+    forever begin
+      @(negedge clk);
+      if (rst_n && u_soc.tl_dbg_host_h2d.a_valid && u_soc.tl_dbg_host_d2h.a_ready &&
+          u_soc.tl_dbg_host_h2d.a_opcode != tlul_pkg::Get &&
+          (u_soc.tl_dbg_host_h2d.a_address & ~tl_main_pkg::ADDR_MASK_SRAM) ==
+          tl_main_pkg::ADDR_SPACE_SRAM) begin
+        off = u_soc.tl_dbg_host_h2d.a_address - tl_main_pkg::ADDR_SPACE_SRAM;
+        `RTOS_META[MetaSramTagWord0 + int'(off[16:8])][off[7:3]] = 1'b0;
+        $display("[cheriot_rtos_tb] sba_tag_clear_model: SBA write to %h clears its tag",
+                 u_soc.tl_dbg_host_h2d.a_address);
+      end
+    end
+  endtask
+
   initial begin : mutate
     string m;
     if ($value$plusargs("sonata_mutate=%s", m)) begin
@@ -334,16 +436,47 @@ module cheriot_rtos_tb;
           force `RTOS_LSU_S.data_tag_o = `RTOS_LSU_S.lsu_is_cap_i ?
                                          `RTOS_LSU_S.data_wdata_tag : 1'b1;
         end
-        // The core's load barrier never revokes / always revokes a capability it looks up.
+        // The core's load barrier never revokes a capability it looks up.
         "barrier_none": force `RTOS_TRVK.revbm_revoked = 1'b0;
-        "barrier_all":  force `RTOS_TRVK.revbm_revoked = 1'b1;
+        // The core's load barrier revokes a capability whatever its shadow bit says -- for the
+        // one capability firmware/revocation_test checks it with: the barrier object, whose base
+        // the firmware prints before its phases (barrier_obj_base, uart_watch). Phases 1 and 3
+        // (bit clear, tag must survive) must then fail.
+        //
+        // Forcing revbm_revoked = 1 outright cannot show that: the barrier only consults it for
+        // a lookup it made, and it looks up every capability whose base is in the revocable
+        // window -- here all of the SRAM (trvk_heap_base_addr_i = SRAM base, bitmap = 128 KiB),
+        // so every global, stack and heap capability. Restricting the force to "in range" is
+        // therefore no restriction (ibex_trvk.sv: no lookup, and no revbm_rvalid_i, when
+        // revbm_out_of_range). Every capability load from boot on lost its tag, the RTOS never
+        // reached the test, and the run printed ~26M lines until the cycle limit. Only code and
+        // MMIO capabilities lie outside the window.
+        //
+        // The bitmap term is the RTL's own revbm_revoked expression (ibex_trvk.sv), restated
+        // because a force cannot refer to the value it replaces: keep it in step with the RTL.
+        // cap_base is the looked-up capability's base, which revbm_bit_select is taken from too.
+        "barrier_all":
+          force `RTOS_TRVK.revbm_revoked =
+            `RTOS_TRVK.revbm_rdata_i[`RTOS_TRVK.revbm_bit_select] || `RTOS_TRVK.revbm_err_i ||
+            (|`RTOS_TRVK.revbm_rsp_data_intg_error) ||
+            (`RTOS_TRVK.cap_base == barrier_obj_base);
         // The TBRE sweeps but never issues an invalidation: every revoked capability is treated
         // as needing no write (cheriot_tbre_mover word_dropped), so the sweep completes cleanly.
         "tbre_no_inval": force `RTOS_MOVER.write_a_valid = 1'b0;
+        // The debug-access gate on the debug module's system bus access is stuck open: SBA
+        // reaches the crossbar while the SoC's debug access enable is off.
+        "dbg_lock_open": force u_soc.u_dbg_sba_gate.en = 1'b1;
+        // Not a mutation but the opposite, a fix model for bus_master_dbg_host_tag_clear (run by
+        // mutation_check.py as a control that must PASS): every debug-host write the crossbar
+        // accepts for the SRAM clears the tag of the 8-byte granule it writes, in the memory
+        // subsystem's meta SRAM, as a write through the tag filter would. It shows that the
+        // test's check passes when SBA writes clear tags, i.e. that the test can go green.
+        "sba_tag_clear_model": fork sba_tag_clear_model(); join_none
         default: $fatal(1, "[cheriot_rtos_tb] unknown mutation '%s'", m);
       endcase
     end
   end
+`undef RTOS_META
 `undef RTOS_MOVER
 `undef RTOS_TRVK
 `undef RTOS_LSU_S
@@ -372,6 +505,22 @@ module cheriot_rtos_tb;
                cycle_count, alerts[2], alerts[1], alerts[0]);
       end
       alerts_prev = alerts;
+    end
+  end
+
+  // ── Debug access monitor ────────────────────────────────────────────────────────────────────
+  // Independent of the firmware's verdict: no system bus access may reach the crossbar while the
+  // testbench holds debug access disabled. u_dbg_host only changes the enable with SBA idle, so
+  // any request past the gate in that state is a breach (as with +sonata_mutate=dbg_lock_open).
+  initial begin : dbg_access_monitor
+    @(posedge rst_n);
+    forever begin
+      @(posedge clk);
+      if (u_soc.tl_dbg_host_h2d.a_valid && dbg_en !== ibex_pkg::IbexMuBiOn) begin
+        $error("[dbg_access_monitor] %0d: SBA %s to %h reached the crossbar with debug access disabled",
+               cycle_count, u_soc.tl_dbg_host_h2d.a_opcode == tlul_pkg::Get ? "read" : "write",
+               u_soc.tl_dbg_host_h2d.a_address);
+      end
     end
   end
 

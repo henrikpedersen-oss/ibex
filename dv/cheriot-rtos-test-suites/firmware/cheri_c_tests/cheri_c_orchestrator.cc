@@ -7,7 +7,9 @@
 //
 // Normal tests  (DECLARE_TEST): compartment returns int; 0 == PASS.
 // Fault tests (DECLARE_TEST_FAULT): compartment ForceUnwinds; the switcher
-//   returns an untagged capability with address() == -1.
+//   returns an untagged capability with address() == -1. A pass also needs
+//   the compartment's run_fault_NAME_failures() to return 0: the fault was the
+//   expected one and no check before it failed (../common/expected_fault.hh).
 //
 // Output matches test_runner.py convention:
 //   "All tests finished" → PASS
@@ -59,10 +61,12 @@ static bool check_fault(const char *name, Capability<void> ret)
 	return false;
 }
 
-// A fault test whose compartment also counts the checks it makes before and in the fault
+// A fault test: its compartment also counts the checks it makes before and in the fault
 // (assertions that ran before it, and the handler's check of the fault's cause). Those are
 // lost in the unwind otherwise, so a fault of the wrong kind, or a failed assertion before
-// the right one, would still pass check_fault(). One verdict line either way.
+// the right one, would still pass check_fault() -- as clang_purecap_array did with the bounds
+// check broken, faulting on its overwritten return capability instead. One verdict line either
+// way.
 static bool check_fault_and_checks(const char *name, Capability<void> ret, int failures)
 {
 	if (failures != 0)
@@ -246,33 +250,54 @@ static bool check_fault_and_checks(const char *name, Capability<void> ret, int f
 
 	// ── Fault tests ─────────────────────────────────────────────────────────
 
-	Debug::log("-- clang_purecap_array: OOB array → CHERI length fault --");
+	// Each compartment call below is made before its *_failures() call: the second reads what
+	// the first left in the compartment's globals.
+
+	Debug::log("-- clang_purecap_array: OOB array → CHERI bounds violation --");
 	{
-		bool ok = check_fault("clang_purecap_array", run_fault_array());
+		Capability<void> ret      = run_fault_array();
+		int              failures = run_fault_array_failures();
+		bool ok = check_fault_and_checks("clang_purecap_array", ret, failures);
 		allPassed &= ok;
 		if (ok) passed++;
 		total++;
 	}
 
-	Debug::log("-- clang_purecap_badcall: non-function call → CHERI exec fault --");
+	Debug::log("-- clang_purecap_badcall: call through an integer-derived pointer → CHERI tag violation --");
 	{
-		bool ok = check_fault("clang_purecap_badcall", run_fault_badcall());
+		Capability<void> ret      = run_fault_badcall();
+		int              failures = run_fault_badcall_failures();
+		bool ok = check_fault_and_checks("clang_purecap_badcall", ret, failures);
 		allPassed &= ok;
 		if (ok) passed++;
 		total++;
 	}
 
-	Debug::log("-- clang_purecap_input: write through read-only cap → store fault --");
+	Debug::log("-- clang_purecap_noexec_call: jump through a data cap → CHERI execute-permission violation --");
 	{
-		bool ok = check_fault("clang_purecap_input", run_fault_input());
+		Capability<void> ret      = run_fault_noexec_call();
+		int              failures = run_fault_noexec_call_failures();
+		bool ok = check_fault_and_checks("clang_purecap_noexec_call", ret, failures);
 		allPassed &= ok;
 		if (ok) passed++;
 		total++;
 	}
 
-	Debug::log("-- clang_purecap_output: read through write-only cap → load fault --");
+	Debug::log("-- clang_purecap_input: write through read-only cap → store-permission violation --");
 	{
-		bool ok = check_fault("clang_purecap_output", run_fault_output());
+		Capability<void> ret      = run_fault_input();
+		int              failures = run_fault_input_failures();
+		bool ok = check_fault_and_checks("clang_purecap_input", ret, failures);
+		allPassed &= ok;
+		if (ok) passed++;
+		total++;
+	}
+
+	Debug::log("-- clang_purecap_output: read through write-only cap → load-permission violation --");
+	{
+		Capability<void> ret      = run_fault_output();
+		int              failures = run_fault_output_failures();
+		bool ok = check_fault_and_checks("clang_purecap_output", ret, failures);
 		allPassed &= ok;
 		if (ok) passed++;
 		total++;

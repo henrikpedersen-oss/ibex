@@ -10,7 +10,8 @@
 //
 // CHERIoT protection: heap_allocate returns a capability bounded to exactly the
 // requested size (64 bytes).  Accessing c[128] is outside those bounds →
-// CHERI bounds exception.
+// CHERI bounds exception (capcause 0x01), which the handler requires
+// (../common/expected_fault.hh).
 
 #include "juliet_cwe.h"
 #include <compartment.h>
@@ -20,16 +21,23 @@
 
 using Debug = ConditionalDebug<true, "CWE-122 Heap BOF">;
 
+#include "../common/expected_fault.hh"
+
 extern "C" ErrorRecoveryBehaviour
 compartment_error_handler(ErrorState *frame, size_t mcause, size_t mtval)
 {
-	Debug::log(
-	  "CHERI exception caught: mcause={} mtval={} pcc={}", mcause, mtval, frame->pcc);
-	return ErrorRecoveryBehaviour::ForceUnwind;
+	return expected_fault_handler(frame, mcause, mtval, CHERI::CauseCode::BoundsViolation);
+}
+
+// 0 only if test_cwe122_heap_bof ended on a bounds violation.
+int test_cwe122_heap_bof_failures()
+{
+	return expected_fault_failures(0);
 }
 
 void *test_cwe122_heap_bof(int)
 {
+	expected_fault_begin();
 	Timeout t{5};
 	void   *p = heap_allocate(&t, MALLOC_CAPABILITY, 64);
 	if (p == nullptr)

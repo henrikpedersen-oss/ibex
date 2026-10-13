@@ -544,6 +544,8 @@ package cms_pkg;
     logic [1:0]      snap_tag   [int unsigned];   // swept granules' predicted tags at the start
     store_rec_t      race_q     [int unsigned][$]; // core writes to a swept granule during the sweep
     bit              racy_revbm [int unsigned];   // granule whose base bit changed during the sweep
+    bit              trace_en;                    // +cms_trace
+    logic [31:0]     trace_ga;
     bit              sweep_dc   [int unsigned];   // granule a directed test declared don't-care
     bit              sweep_keep [int unsigned];   // granule whose clear a fault must suppress
     bit              sweep_force0 [int unsigned]; // granule a fault must revoke
@@ -609,10 +611,20 @@ package cms_pkg;
         cms_info("sb", $sformatf("scoreboard fault injection armed: %s, occurrence %0d",
                                  corrupt_kind, corrupt_n));
       end
+      // +cms_trace=<hex address>: log every event that decides that granule's tag (debug only).
+      trace_en = $value$plusargs("cms_trace=%h", trace_ga);
+      if (trace_en) cms_info("sb", $sformatf("tracing granule 0x%08x", trace_ga & ~32'h7));
     endfunction
 
     function void err(string msg);
       cms_error("sb", msg);
+    endfunction
+
+    function bit traced(logic [31:0] ga);
+      return trace_en && granule(ga) == granule(trace_ga);
+    endfunction
+    function void trace(string msg);
+      cms_info("trace", msg);
     endfunction
 
     // True once, on the corrupt_n-th call for `kind`: the caller then inverts its prediction.
@@ -846,6 +858,9 @@ package cms_pkg;
       r.w0 = get_data(ga); r.w1 = get_data(ga + 4);
       recent_stores.push_back(r);
       if (recent_stores.size() > 16) void'(recent_stores.pop_front());
+      if (traced(ga)) trace($sformatf("core write 0x%08x tag %0d accepted @%0d answered @%0d -> %s%s",
+                                      t.addr, t.tag, t.a_cycle, t.d_cycle, tagset_str(nset),
+                                      sweep_active ? " (sweep running)" : ""));
 
       if (sweep_active) sample_race(g, old_w0, old_w1);
       if (sweep_active && in_sweep(g, sweep_base, sweep_caps)) begin
@@ -921,6 +936,16 @@ package cms_pkg;
       if (is_write(t)) begin
         old = get_revbm(w);
         srevbm[w] = t.wdata;
+        if (trace_en) begin
+          int unsigned tb;
+          logic [31:0] tga;
+          tga = trace_ga & ~32'h7;
+          if (revbm_index(cap_base(get_data(tga), get_data(tga + 4)), tb) && tb / 32 == w &&
+              old[tb % 32] != t.wdata[tb % 32])
+            trace($sformatf("bitmap: base bit %0d of 0x%08x %0d -> %0d, write accepted @%0d%s", tb,
+                            tga, old[tb % 32], t.wdata[tb % 32], t.a_cycle,
+                            sweep_active ? " (sweep running)" : ""));
+        end
         if (sweep_active && old != t.wdata) note_revbm_change(w, old ^ t.wdata);
       end else begin
         exp = get_revbm(w);
@@ -942,6 +967,8 @@ package cms_pkg;
             changed[b % 32]) begin
           racy_revbm[granule(ga)] = 1;
           set_tag(granule(ga), get_tag(granule(ga)) | Tag0);
+          if (traced(ga)) trace($sformatf("0x%08x: base bit %0d changed during the sweep, now %0d",
+                                          ga, b, get_revbm(w)[b % 32]));
         end
       end
     endfunction
@@ -1171,6 +1198,8 @@ package cms_pkg;
       end else begin
         rd_p1[g] = rd.p_cycle;
       end
+      if (traced(exp)) trace($sformatf("TBRE read 0x%08x presented @%0d accepted @%0d", rd.addr,
+                                       rd.p_cycle, rd.a_cycle));
       tbre_prev_a = rd.a_cycle;
       tbre_reads_seen++;
     endfunction
@@ -1225,9 +1254,12 @@ package cms_pkg;
         rv_new = revocable(w0, w1, 0);
         // What the engine decides from the words it reads: revocable with the bitmap as it was
         // and as it is, cleared; with only one of them (a bitmap write during the sweep), either;
-        // otherwise the tag is untouched.
+        // otherwise the tag is untouched. A base bit that changed during the sweep may have changed
+        // back by its end (set, cleared, set again): the engine read it at some point in between,
+        // so either outcome, even though the start and end values agree (note_revbm_change).
         s_eval = s;
-        if (rv_old && rv_new)      s_eval = Tag0;
+        if (racy_revbm.exists(g))  s_eval = s | Tag0;
+        else if (rv_old && rv_new) s_eval = Tag0;
         else if (rv_old || rv_new) s_eval = s | Tag0;
         if (sweep_force0.exists(g)) begin
           s = Tag0;
@@ -1279,6 +1311,12 @@ package cms_pkg;
           if (corrupt("sweep", $sformatf("granule 0x%08x", ga))) s = (s == Tag0) ? Tag1 : Tag0;
         end
         set_tag(g, s);
+        if (traced(ga))
+          trace($sformatf({"0x%08x sweep done: words 0x%08x 0x%08x, revocable at start %0d / end %0d,",
+                           " base bit changed during the sweep %0d, racing core writes %0d,",
+                           " expected tag %s"},
+                          ga, w0, w1, rv_old, rv_new, racy_revbm.exists(g),
+                          race_q.exists(g) ? race_q[g].size() : 0, tagset_str(s)));
         // Coverage of what the sweep saw
         cov.s_tag        = snap_tag.exists(g) ? snap_tag[g][1] : 1'b0;
         cov.s_sealing    = cap_is_sealing(w1);
@@ -1323,6 +1361,13 @@ package cms_pkg;
     // Every write the subsystem makes to a tag word changes exactly one bit (RMW: the write-back
     // is skipped when the tag already has its value, and only the addressed bit is modified).
     function void on_meta_write(logic [31:0] addr, logic [31:0] old_w, logic [31:0] new_w);
+      int unsigned tg;
+      if (trace_en) begin
+        tg = granule(trace_ga);
+        if (addr == tag_word_addr(tg) && old_w[tag_bit(tg)] != new_w[tag_bit(tg)])
+          trace($sformatf("meta SRAM: tag of 0x%08x %0d -> %0d", granule_addr(tg),
+                          old_w[tag_bit(tg)], new_w[tag_bit(tg)]));
+      end
       if (addr >= MetaNvmTagBase && addr < MetaTop) begin
         n_meta_writes++;
         if ($countones(old_w ^ new_w) != 1)

@@ -6,7 +6,8 @@
 -- Each Cambridge purecap test is wrapped in its own compartment.  Normal tests
 -- (DECLARE_TEST) return int: 0 = PASS.  Fault tests (DECLARE_TEST_FAULT) are
 -- expected to ForceUnwind; the orchestrator verifies the return capability is
--- invalid (address == -1).
+-- invalid (address == -1) and that the fault was the expected one, with no
+-- failed check before it (../common/expected_fault.hh).
 --
 -- Include paths required by every compartment that includes an original .c:
 --   "."                    → cheri_c_test_framework.h (angle-bracket include)
@@ -103,6 +104,11 @@ compartment("cc_badcall")
     add_files("test_clang_purecap_badcall.cc")
     add_cheri_c_incdirs()
 
+-- noexec_call has no upstream file: the execute-permission case of upstream badcall, which on
+-- CHERIoT never runs (test_clang_purecap_noexec_call.cc).
+compartment("cc_noexec_call")
+    add_files("test_clang_purecap_noexec_call.cc")
+
 compartment("cc_va_list_global")
     add_files("test_clang_purecap_va_list_global.cc")
     add_cheri_c_incdirs()
@@ -163,6 +169,7 @@ firmware("cheri_c_tests")
              -- the matching comment in cheri_c_orchestrator.cc.
              "cc_array",
              "cc_badcall",
+             "cc_noexec_call",
              "cc_va_list_global",
              "cc_input",
              "cc_output",

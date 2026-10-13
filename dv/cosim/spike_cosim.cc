@@ -408,13 +408,15 @@ bool SpikeCosim::step(uint32_t write_reg, uint32_t write_reg_data, uint32_t pc,
         initial_spike_pc = DEBUG_ROM_ENTRY;
       }
 
-      if (!check_sync_trap(write_reg, pc, initial_spike_pc)) {
+      // An exception taken in debug mode leaves cpuctrlsts and mcause alone (ibex_cs_registers.sv,
+      // Spike's take_trap()), and after debug_entry_before_fetch the trap was taken in debug mode.
+      const bool trap_in_debug_mode = pre_step_debug_mode || debug_entry_before_fetch;
+
+      if (!check_sync_trap(write_reg, pc, initial_spike_pc, trap_in_debug_mode)) {
         return false;
       }
 
-      // An exception taken in debug mode leaves cpuctrlsts alone (ibex_cs_registers.sv), and
-      // after debug_entry_before_fetch the trap was taken in debug mode.
-      handle_cpuctrl_exception_entry(pre_step_debug_mode || debug_entry_before_fetch);
+      handle_cpuctrl_exception_entry(trap_in_debug_mode);
 
       // This is all the checking possible when consider a
       // synchronously-trapping instruction that never retired.
@@ -598,7 +600,7 @@ bool SpikeCosim::check_retired_instr(uint32_t write_reg,
 }
 
 bool SpikeCosim::check_sync_trap(uint32_t write_reg, uint32_t dut_pc,
-                                 uint32_t initial_spike_pc) {
+                                 uint32_t initial_spike_pc, bool trap_in_debug_mode) {
   // Check if an synchronously-trapping instruction matches
   // between Spike and the DUT.
 
@@ -630,7 +632,16 @@ bool SpikeCosim::check_sync_trap(uint32_t write_reg, uint32_t dut_pc,
 
   // If we see an internal NMI, that means we receive an extra memory intf item.
   // Deleting that is necessary since next Load/Store would fail otherwise.
-  if (processor->get_state()->mcause->read() == 0xFFFFFFE0) {
+  //
+  // Only for a trap taken outside debug mode: an exception in debug mode does not write mcause
+  // (it only jumps to the debug exception entry), so mcause still holds whatever was there before
+  // and says nothing about this trap. A debug-mode `csrrw mcause` of 0xffff8000 (bits 31:30 set,
+  // legalised to 0xFFFFFFE0 by fixup_csr, as Ibex does) made every later illegal instruction in
+  // the debug ROM erase a pending DUT access -- here from an EMPTY queue, which is undefined
+  // behaviour -- and the next load then found "no pending accesses"
+  // (riscv_debug_single_step_test.30535, 2026-10-10).
+  if (!trap_in_debug_mode && !pending_dside_accesses.empty() &&
+      processor->get_state()->mcause->read() == 0xFFFFFFE0) {
     pending_dside_accesses.erase(pending_dside_accesses.begin());
   }
 

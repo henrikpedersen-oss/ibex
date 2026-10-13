@@ -17,7 +17,8 @@
 //      goes through the load barrier.  The tag is cleared (chunk is freed),
 //      so the store raises a CHERI tag exception.
 //
-// The compartment_error_handler returns ForceUnwind, so the orchestrator
+// The compartment_error_handler requires that tag violation (capcause 0x02,
+// ../common/expected_fault.hh) and returns ForceUnwind, so the orchestrator
 // sees an invalid return capability.
 
 #include "juliet_cwe.h"
@@ -28,16 +29,23 @@
 
 using Debug = ConditionalDebug<true, "CWE-415 Double-Free">;
 
+#include "../common/expected_fault.hh"
+
 extern "C" ErrorRecoveryBehaviour
 compartment_error_handler(ErrorState *frame, size_t mcause, size_t mtval)
 {
-	Debug::log(
-	  "CHERI exception caught: mcause={} mtval={} pcc={}", mcause, mtval, frame->pcc);
-	return ErrorRecoveryBehaviour::ForceUnwind;
+	return expected_fault_handler(frame, mcause, mtval, CHERI::CauseCode::TagViolation);
+}
+
+// 0 only if test_cwe415_double_free ended on a tag violation.
+int test_cwe415_double_free_failures()
+{
+	return expected_fault_failures(0);
 }
 
 void *test_cwe415_double_free(int)
 {
+	expected_fault_begin();
 	Timeout t{5};
 	// volatile forces every access to `p` to reload from memory (load barrier).
 	void *volatile p = heap_allocate(&t, MALLOC_CAPABILITY, 16);

@@ -9,9 +9,12 @@
 // that a load traps.  We replicate the semantic using
 // __builtin_cheri_perms_and() to narrow the permissions explicitly.
 //
-// The attempted load triggers a CHERI load-permission fault; the
-// compartment_error_handler returns ForceUnwind.  The orchestrator verifies
-// the returned capability is invalid (address == -1).
+// The attempted load must raise a CHERI load-permission violation (capcause
+// 0x12: CHERIoT-Sail checks tag, seal, then Permit_Load before bounds). The
+// compartment_error_handler returns ForceUnwind; the orchestrator verifies the
+// returned capability is invalid (address == -1) and then asks
+// run_fault_output_failures() whether the fault was that one, and whether the
+// permission check below passed (../common/expected_fault.hh).
 
 // This wrapper defines its own compartment_error_handler (cheri_c_test_framework.h).
 #define CHERI_C_OWN_ERROR_HANDLER
@@ -22,11 +25,15 @@
 
 using Debug = ConditionalDebug<true, "cc-output">;
 
+#include "../common/expected_fault.hh"
+
+// This wrapper does not include the CHERI-C framework, so it counts its own failed checks.
+static int test_failures = 0;
+
 extern "C" ErrorRecoveryBehaviour
 compartment_error_handler(ErrorState *frame, size_t mcause, size_t mtval)
 {
-	Debug::log("CHERI fault caught: mcause={} mtval={} pcc={}: ForceUnwind", mcause, mtval, frame->pcc);
-	return ErrorRecoveryBehaviour::ForceUnwind;
+	return expected_fault_handler(frame, mcause, mtval, CHERI::CauseCode::PermitLoadViolation);
 }
 
 // Strip LOAD and LOAD_CAPABILITY from *p, then attempt a load through the
@@ -45,6 +52,7 @@ attempt_load_through_writeonly(int *p)
 	if ((__builtin_cheri_perms_get(wo) & __CHERI_CAP_PERMISSION_PERMIT_LOAD__) != 0)
 	{
 		Debug::log("FAIL: cc_output: CAndPerm left Load in place: perms {}", __builtin_cheri_perms_get(wo));
+		test_failures++;
 		return 0;
 	}
 
@@ -54,8 +62,16 @@ attempt_load_through_writeonly(int *p)
 
 void *__cheri_compartment("cc_output") run_fault_output(void)
 {
+	test_failures = 0;
+	expected_fault_begin();
 	int x = 47;
 	(void)attempt_load_through_writeonly(&x);
 	Debug::log("WARNING: no CHERI fault triggered in cc_output test");
 	return nullptr;
+}
+
+// A failed permission check, a fault that is not a load-permission violation, or no fault.
+int __cheri_compartment("cc_output") run_fault_output_failures(void)
+{
+	return expected_fault_failures(test_failures);
 }

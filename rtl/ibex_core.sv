@@ -2563,12 +2563,16 @@ module ibex_core import ibex_pkg::*; import ibex_cheriot_pkg::*; #(
       `DV_FCOV_SIGNAL(logic, pmp_region_dchan_access,
           g_pmp.pmp_i.region_match_all[PMP_D][i_region] & data_req_out)
       // pmp_cfg[5:6] is reserved and because of that the width of it inside cs_registers module
-      // is 6-bit.
+      // is 6-bit. The written value legalised (WARL): the stored pmp_cfg_t is {L, A, X, W, R}, so
+      // the raw byte compares as {wdata[7], wdata[4:0]}, and only on a write to this region's own
+      // pmpcfg (pmp_cfg_we). Was {wdata[4:0], wdata[7]} -- the same bits rotated, unequal for
+      // almost any value -- qualified by any CSR write, so the bin counted nearly every CSR write
+      // and never measured legalisation (also in upstream lowRISC/ibex, f21b6545).
       `DV_FCOV_SIGNAL(logic, warl_check_pmpcfg,
-          fcov_csr_write &&
+          cs_registers_i.g_pmp_registers.pmp_cfg_we[i_region] &&
           (cs_registers_i.g_pmp_registers.g_pmp_csrs[i_region].u_pmp_cfg_csr.wr_data_i !=
-          {cs_registers_i.csr_wdata_int[(i_region%4)*PMP_CFG_W+:5],
-           cs_registers_i.csr_wdata_int[(i_region%4)*PMP_CFG_W+7]}))
+          {cs_registers_i.csr_wdata_int[(i_region%4)*PMP_CFG_W+7],
+           cs_registers_i.csr_wdata_int[(i_region%4)*PMP_CFG_W+:5]}))
 
       if (i_region > 0) begin : g_region_priority
         assign fcov_pmp_region_ichan_priority[i_region] =

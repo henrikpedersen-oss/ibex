@@ -22,11 +22,9 @@
 #       handle_cheri_pcc_exception(0x18) -> mtval 0x418.
 #   cheri_sys_exceptions.sail handle_trap_extension: MEPCC = PCC with the
 #       faulting address, so MEPCC carries the SR-less permissions.
-# The user counters cycle/time/instret (0xC00-0xC82) are deliberately not read:
-# in CHERIoT-Sail they are only defined when misa.U = 1 (is_CSR_defined:
-# haveUsrMode()), and the cosim model runs with misa.U = 0, so there a read is an
-# illegal instruction, while ibex (ibex_decoder.sv csr_cheriot_always_ok_o) reads
-# the whole 0xC00-0xC9F block without SR.
+# The user counters cycle/time/instret (0xC00-0xC82) are not read here: their reads
+# without SR are cheriot_asr_counter_csr's (cycle(h)/instret(h) readable, spec GAP-MF-2),
+# and time(h), which Ibex does not implement, is in cheriot_illegal_sweep.
 #
 # Running without SR: ca0 = CAndPerm(MTCC, 0xF7F) = 0x16B (executable format
 # keeps SR/LM/LG individually, so exactly SR is removed -- test 1 checks it).

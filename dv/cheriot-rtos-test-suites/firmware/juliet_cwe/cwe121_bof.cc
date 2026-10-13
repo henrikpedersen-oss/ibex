@@ -10,9 +10,10 @@
 //
 // CHERIoT protection: a stack object whose address escapes gets a capability
 // narrowed to its own bounds.  Writing at byte offset 128 of a 64-byte buffer is
-// outside those bounds → CHERI exception (mcause = 0x1c, MTVAL = bounds
-// violation).  See write_past_end() below for why the store lives in a separate
-// function; putting it inline with the array lets the optimiser delete the test.
+// outside those bounds → CHERI exception (mcause = 0x1c, capcause 0x01 bounds
+// violation), which the handler requires (../common/expected_fault.hh).  See
+// write_past_end() below for why the store lives in a separate function; putting
+// it inline with the array lets the optimiser delete the test.
 
 #include "juliet_cwe.h"
 #include <compartment.h>
@@ -20,12 +21,12 @@
 
 using Debug = ConditionalDebug<true, "CWE-121 Stack BOF">;
 
+#include "../common/expected_fault.hh"
+
 extern "C" ErrorRecoveryBehaviour
 compartment_error_handler(ErrorState *frame, size_t mcause, size_t mtval)
 {
-	Debug::log(
-	  "CHERI exception caught: mcause={} mtval={} pcc={}", mcause, mtval, frame->pcc);
-	return ErrorRecoveryBehaviour::ForceUnwind;
+	return expected_fault_handler(frame, mcause, mtval, CHERI::CauseCode::BoundsViolation);
 }
 
 // Writes past the end of a caller-supplied buffer. Deliberately a separate,
@@ -59,7 +60,14 @@ write_past_end(int *p)
 
 void *test_cwe121_bof(int)
 {
+	expected_fault_begin();
 	int buf[16]; // 64 bytes
 	write_past_end(buf);
 	return nullptr; // unreachable: the bounds exception fires in write_past_end
+}
+
+// 0 only if test_cwe121_bof ended on a bounds violation.
+int test_cwe121_bof_failures()
+{
+	return expected_fault_failures(0);
 }

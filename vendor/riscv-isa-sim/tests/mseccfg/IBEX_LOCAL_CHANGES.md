@@ -87,4 +87,35 @@ self-check that failed. Worth reporting upstream.
 
 The 5 failing `test_pmp_csr_1_*_mml1_*` tests are unrelated — `gen_pmp_test.cc`
 sets `m_mode_rwx(0)` unconditionally for that family, so `pmp0` is `PMP_OFF` and
-this change is compiled out for all 528 of them.
+this change is compiled out for all 528 of them. They are fixed by section 4.
+
+## 4. `gen_pmp_test.cc`: a write to the locked `pmpaddr7` must fail (2026-09-24)
+
+For invalid configurations the generator picks its write-test target from entry
+7 upwards. When MML is pre-set the skeleton locks entry 7 in both `M_MODE_RWX`
+branches, so with RLB clear a write to `pmpaddr7` is correctly ignored by the
+hardware (a locked rule is immutable unless RLB permits bypass). The generator
+never set `pmpaddr_fail` for that case, so the generated test expected the write
+to stick and reported TEST_FAIL. Now `pmpaddr_fail = 1` when `!pre_rlb && pre_mml
+&& addr_idx == 7`.
+
+Seen on nyx on 2026-09-24: 5 of the `test_pmp_csr_1_*_mml1_*` variants failed with
+ret=2 (expected != actual `pmpaddr_fail`) while every mml0 sibling passed, with
+zero DUT/Spike mismatches. A generator bug, not an Ibex defect; worth reporting
+upstream. The affected `outputs/*.c` were regenerated from the fixed generator.
+
+## 5. `syscalls.c`: a failing test reports FAIL
+
+`tohost_exit` wrote the exit code into the CORE_STATUS word but hard-coded the
+TEST_RESULT payload to TEST_PASS, so every test passed whatever its self-check
+found. The payload is now TEST_FAIL for a non-zero code. Without this none of the
+other fixes here could have been seen to work.
+
+## 6. `crt_cheriot.S`: CHERIoT start-up (new file)
+
+A copy of `crt.S` for the CHERIoT runs of these tests. In CHERIoT mode every load
+and store is authorised by the capability in its base register, and `crt.S` sets
+up only the integer stack pointer, so the first stack store in `_init` would take
+a tag fault. After computing SP it reads MTDC (SCR 29, the memory root) into c2
+and sets c2's address to SP. Used by the CHERIoT directed-test configs
+(`cheriot-c-tests` and others in `directed_testlist*.yaml`).

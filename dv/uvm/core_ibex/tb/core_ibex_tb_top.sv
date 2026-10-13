@@ -833,6 +833,10 @@ module core_ibex_tb_top;
   assign dut_if.wb_exception     = dut.u_ibex_top.u_ibex_core.id_stage_i.wb_exception;
   assign dut_if.lsu_ctx_wait_gnt1 =
     (dut.u_ibex_top.u_ibex_core.load_store_unit_i.ls_fsm_cs == ibex_pkg::CTX_WAIT_GNT1);
+  // cheriot_err_d is 1 only in IDLE for a request whose CHERIoT check failed (cpu_req_erred): no
+  // request goes out and cheriot_err_q reports the error next cycle (ibex_load_store_unit.sv)
+  assign dut_if.lsu_cheriot_err_next =
+    dut.u_ibex_top.u_ibex_core.load_store_unit_i.cheriot_err_d;
   assign dut_if.id_instr_held    = dut.u_ibex_top.u_ibex_core.id_stage_i.instr_valid_i &
                                    ~dut.u_ibex_top.u_ibex_core.id_stage_i.instr_valid_clear_o;
   assign dut_if.id_stall_mem     = dut.u_ibex_top.u_ibex_core.id_stage_i.stall_mem;

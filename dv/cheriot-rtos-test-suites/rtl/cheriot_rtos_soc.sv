@@ -14,15 +14,26 @@
 //   0x8004_0000  rv_timer (CLINT: mtime, mtimecmp)
 //   0x8010_0000  UART0 -- the test oracle: the testbench captures it with uartdpi
 //   0x8800_0000  rv_plic
+//   0xb000_0000  debug module memory (4 KiB, Sonata's dbg_dev window): data and instruction side
 //   anything else: cheriot_rtos_default_rsp (logged; reads 0, writes dropped)
 //
 // The core and memory-subsystem integration is Sonata's, taken from sonata_system.sv with
 // UseNewIbexCore = 1 and UseCheriotMemSubsys = 1 (the gen_new_ibex_core / gen_cheriot_mem_subsys
 // branches): same core parameters, same bus adapters, same memory-integrity encoding, same
-// subsystem parameters. What is gone: the debug module (and so ndmreset and debug_req), the
-// debug host, GPIO, pinmux, I2C, SPI, USB, PWM, XADC, the RGB LED controller, system_info,
-// UARTs 1 and 2, the HyperRAM controller, Sonata's own tag stores and revocation RAM, the legacy
-// ibexc core and the REVOCATION_CONNECT stub path.
+// subsystem parameters. What is gone: GPIO, pinmux, I2C, SPI, USB, PWM, XADC, the RGB LED
+// controller, system_info, UARTs 1 and 2, the HyperRAM controller, Sonata's own tag stores and
+// revocation RAM, the legacy ibexc core and the REVOCATION_CONNECT stub path.
+//
+// The debug module is ibex/vendor/pulp_riscv_dbg's dm_top (OpenTitan's rv_dm core with Samuel
+// Riedel's CHERIoT patches), connected as in sonata_system.sv: its memory at 0xb000_0000 on both
+// crossbars, debug_req to the core, and its system bus access (SBA) as the crossbar's dbg_host,
+// which reaches the SRAM and the code RAM and bypasses the memory subsystem's tag filter. Unlike
+// Sonata there is no JTAG TAP: the DMI is a port of the SoC, which the testbench drives. Debug
+// access is gated as in OpenTitan's rv_dm by dbg_en_i, the SoC's model of lc_hw_debug_en: SBA
+// through cheriot_rtos_dbg_gate (tlul_lc_gate), debug_req and instruction fetch from the debug
+// memory by the same enable. ndmreset is not routed (the testbench owns the reset), as in the UVM
+// testbench's DM build. With the DMI idle the debug module is inert: dmactive stays 0, nothing
+// requests debug, and SBA issues no access.
 //
 // Core configuration: the parameters below come from ibex/ibex_configs.yaml through
 // util/ibex_config.py (cheriot_rtos_xlm_build.sh: IBEX_CFG_* defines for the enum-typed ones,
@@ -73,6 +84,19 @@ module cheriot_rtos_soc #(
   // CHERIoT enable pin of the core (Sonata's cheri_en_i).
   input  logic cheri_en_i,
 
+  // Debug access enable: the SoC's model of OpenTitan's lc_hw_debug_en, with lc_tx_t's encoding
+  // (On = 4'b0101 = ibex_pkg::IbexMuBiOn, Off = 4'b1010). Only a strict On opens SBA, debug_req
+  // and instruction fetch from the debug memory; anything else closes them.
+  input  ibex_pkg::ibex_mubi_t dbg_en_i,
+
+  // Debug module DMI: the testbench is the debug transport module (no JTAG TAP here).
+  input  logic          dmi_req_valid_i,
+  output logic          dmi_req_ready_o,
+  input  dm::dmi_req_t  dmi_req_i,
+  output logic          dmi_resp_valid_o,
+  input  logic          dmi_resp_ready_i,
+  output dm::dmi_resp_t dmi_resp_o,
+
   // UART0 serial lines.
   input  logic uart_rx_i,
   output logic uart_tx_o
@@ -89,12 +113,17 @@ module cheriot_rtos_soc #(
   localparam int unsigned RevTagDepth     = (MemSize / 8) / BusDataWidth;
   localparam int unsigned RevTagAddrWidth = $clog2(RevTagDepth);
 
-  // Debug is not in this SoC, but the core keeps Sonata's debug addresses: dm::HaltAddress =
-  // 0x800, dm::ExceptionAddress = 0x808 in the debug module's window at
-  // tl_ifetch_pkg::ADDR_SPACE_DBG_DEV. Nothing raises debug_req. DbgHwBreakNum is ibex_top's
-  // default (1), as in the UVM testbench, compliance and TestRIG; Sonata has 2.
-  localparam logic [31:0] DmHaltAddr      = tl_ifetch_pkg::ADDR_SPACE_DBG_DEV + 32'h800;
-  localparam logic [31:0] DmExceptionAddr = tl_ifetch_pkg::ADDR_SPACE_DBG_DEV + 32'h808;
+  // The debug module's entry points in its window at tl_ifetch_pkg::ADDR_SPACE_DBG_DEV, from the
+  // vendored debug module's own package, as sonata_system.sv takes them from Sonata's:
+  // dm::HaltAddress = 0x800, dm::ExceptionAddress = 0x810. (Before the debug module was added this
+  // was a hard-coded 0x808, Sonata's older layout; in this debug module 0x808 is the resume
+  // address.) DmBaseAddr/DmAddrMask tell the core's PMP which window debug mode may always reach.
+  // DbgHwBreakNum is ibex_top's default (1), as in the UVM testbench, compliance and TestRIG;
+  // Sonata has 2.
+  localparam logic [31:0] DmBaseAddr      = tl_ifetch_pkg::ADDR_SPACE_DBG_DEV;
+  localparam logic [31:0] DmAddrMask      = tl_ifetch_pkg::ADDR_MASK_DBG_DEV;
+  localparam logic [31:0] DmHaltAddr      = DmBaseAddr + dm::HaltAddress[31:0];
+  localparam logic [31:0] DmExceptionAddr = DmBaseAddr + dm::ExceptionAddress[31:0];
 
   // The crossbar decodes with Sonata's masks; the memories must be the size those masks imply.
   initial begin
@@ -155,6 +184,11 @@ module cheriot_rtos_soc #(
   tlul_pkg::tl_d2h_t tl_rv_plic_d2h;
   tlul_pkg::tl_h2d_t tl_default_h2d;
   tlul_pkg::tl_d2h_t tl_default_d2h;
+  // Debug module: SBA host (after the debug-access gate) and its memory, one port per crossbar.
+  tlul_pkg::tl_h2d_t tl_dbg_host_h2d;
+  tlul_pkg::tl_d2h_t tl_dbg_host_d2h;
+  tlul_pkg::tl_h2d_t tl_dbg_dev_us_h2d [2]; // [0] instruction side, [1] data side (Sonata's order)
+  tlul_pkg::tl_d2h_t tl_dbg_dev_us_d2h [2];
 
   cheriot_rtos_xbar u_xbar (
     .clk_i,
@@ -165,6 +199,8 @@ module cheriot_rtos_soc #(
     .tl_tbre_o    (tl_cheriot_tbre_d2h),
     .tl_ifetch_i  (tl_ibex_ins_h2d),
     .tl_ifetch_o  (tl_ibex_ins_d2h),
+    .tl_dbg_host_i(tl_dbg_host_h2d),
+    .tl_dbg_host_o(tl_dbg_host_d2h),
     .tl_sram_a_o  (tl_sram_a_h2d),
     .tl_sram_a_i  (tl_sram_a_d2h),
     .tl_code_a_o  (tl_code_a_h2d),
@@ -179,12 +215,16 @@ module cheriot_rtos_soc #(
     .tl_uart0_i   (tl_uart0_d2h),
     .tl_rv_plic_o (tl_rv_plic_h2d),
     .tl_rv_plic_i (tl_rv_plic_d2h),
+    .tl_dbg_dev_lsu_o (tl_dbg_dev_us_h2d[1]),
+    .tl_dbg_dev_lsu_i (tl_dbg_dev_us_d2h[1]),
     .tl_default_o (tl_default_h2d),
     .tl_default_i (tl_default_d2h),
     .tl_sram_b_o  (tl_sram_b_h2d),
     .tl_sram_b_i  (tl_sram_b_d2h),
     .tl_code_b_o  (tl_code_b_h2d),
-    .tl_code_b_i  (tl_code_b_d2h)
+    .tl_code_b_i  (tl_code_b_d2h),
+    .tl_dbg_dev_if_o (tl_dbg_dev_us_h2d[0]),
+    .tl_dbg_dev_if_i (tl_dbg_dev_us_d2h[0])
   );
 
   ///////////////////////////////
@@ -282,6 +322,13 @@ module cheriot_rtos_soc #(
   logic [127:0] hardware_revoker_control_reg_rdata;
   logic [63:0]  hardware_revoker_control_reg_wdata;
 
+  // Debug request from the debug module, gated by the debug access enable (rv_dm's
+  // debug_req_en, lc_hw_debug_en). Low unless a debugger sets dmcontrol.haltreq over the DMI.
+  logic dm_debug_req, core_debug_req;
+  logic dbg_en;
+  assign dbg_en         = (dbg_en_i == ibex_pkg::IbexMuBiOn);
+  assign core_debug_req = dm_debug_req & dbg_en;
+
   // ICacheScramble = 1: out of reset, and again on every fence.i, the ICache requests a scrambling
   // key and keeps its tag RAM blocked (no allocation, no hits) until scramble_key_valid_i
   // (ibex_icache.sv AWAIT_SCRAMBLE_KEY). There is no key manager here: answer each request one
@@ -316,6 +363,8 @@ module cheriot_rtos_soc #(
     .DbgTriggerEn    ( DbgTriggerEn     ),
     .MHPMCounterNum  ( MHPMCounterNum   ),
     .ICache          ( ICache           ),
+    .DmBaseAddr      ( DmBaseAddr       ),
+    .DmAddrMask      ( DmAddrMask       ),
     .DmHaltAddr      ( DmHaltAddr       ),
     .DmExceptionAddr ( DmExceptionAddr  ),
     // The barrier addresses the subsystem's bitmap port directly: the bitmap is the first bytes
@@ -384,7 +433,7 @@ module cheriot_rtos_soc #(
     .scramble_nonce_i       ('0),
     .scramble_req_o         (scramble_req),
 
-    .debug_req_i            (1'b0),
+    .debug_req_i            (core_debug_req),
     .crash_dump_o           (  ),
     .double_fault_seen_o    (  ),
 
@@ -611,5 +660,177 @@ module cheriot_rtos_soc #(
     .rst_ni,
     .tl_i (tl_default_h2d),
     .tl_o (tl_default_d2h)
+  );
+
+  //////////////////
+  // Debug module //
+  //////////////////
+
+  // Its memory (debug ROM at +0x800, flags, abstract commands, program buffer, data0/1 at +0x380)
+  // is one single-ported device shared by the instruction and data sides, as in sonata_system.sv
+  // (u_debug_module_tl_socket, debug_module_device_adapter).
+  localparam int unsigned DRegAddrWidth = 12;
+
+  tlul_pkg::tl_h2d_t tl_dbg_dev_ds_h2d;
+  tlul_pkg::tl_d2h_t tl_dbg_dev_ds_d2h;
+
+  tlul_socket_m1 #(
+    .HReqDepth (8'h0),
+    .HRspDepth (8'h0),
+    .DReqDepth (4'h0),
+    .DRspDepth (4'h0),
+    .M         (2)
+  ) u_dbg_dev_socket (
+    .clk_i,
+    .rst_ni,
+    .tl_h_i (tl_dbg_dev_us_h2d),
+    .tl_h_o (tl_dbg_dev_us_d2h),
+    .tl_d_o (tl_dbg_dev_ds_h2d),
+    .tl_d_i (tl_dbg_dev_ds_d2h)
+  );
+
+  logic        dm_dev_re, dm_dev_we, dm_dev_err;
+  logic [3:0]  dm_dev_be;
+  logic [31:0] dm_dev_addr, dm_dev_wdata, dm_dev_rdata;
+
+  // Instruction fetch from the debug memory only with debug access enabled (rv_dm's en_ifetch,
+  // lc_hw_debug_en); the core's fetch adapter marks its requests as instructions.
+  tlul_adapter_reg #(
+    .RegAw         ( DRegAddrWidth ),
+    .AccessLatency ( 1             )
+  ) u_dbg_dev_adapter (
+    .clk_i,
+    .rst_ni,
+
+    .tl_i         (tl_dbg_dev_ds_h2d),
+    .tl_o         (tl_dbg_dev_ds_d2h),
+
+    .en_ifetch_i  (dbg_en ? prim_mubi_pkg::MuBi4True : prim_mubi_pkg::MuBi4False),
+    .intg_error_o (),
+
+    .re_o         (dm_dev_re),
+    .we_o         (dm_dev_we),
+    .addr_o       (dm_dev_addr[DRegAddrWidth-1:0]),
+    .wdata_o      (dm_dev_wdata),
+    .be_o         (dm_dev_be),
+    .busy_i       (1'b0),
+    .rdata_i      (dm_dev_rdata),
+    .error_i      (dm_dev_err)
+  );
+
+  assign dm_dev_addr[31:DRegAddrWidth] = DmBaseAddr[31:DRegAddrWidth];
+
+  // System bus access: the debug module's bus host. It is not capability-aware, so its writes
+  // carry capability bit 0, as in Sonata.
+  logic        dm_sba_req, dm_sba_we, dm_sba_gnt, dm_sba_rvalid, dm_sba_err, dm_sba_intg_err;
+  logic [3:0]  dm_sba_be;
+  logic [31:0] dm_sba_addr, dm_sba_wdata, dm_sba_rdata;
+  logic        dm_sba_rcap;
+
+  tlul_pkg::tl_h2d_t tl_dbg_sba_h2d;
+  tlul_pkg::tl_d2h_t tl_dbg_sba_d2h;
+
+  // One request at a time, as OpenTitan's rv_dm (tl_adapter_host_sba, MAX_REQS = 1).
+  tlul_adapter_host #(
+    .MAX_REQS (1)
+  ) u_dbg_host_adapter (
+    .clk_i,
+    .rst_ni,
+
+    .req_i        (dm_sba_req),
+    .gnt_o        (dm_sba_gnt),
+    .addr_i       (dm_sba_addr),
+    .we_i         (dm_sba_we),
+    .wdata_i      (dm_sba_wdata),
+    .wdata_cap_i  (1'b0),
+    .wdata_intg_i ('0),
+    .be_i         (dm_sba_be),
+    .instr_type_i (prim_mubi_pkg::MuBi4False),
+
+    .valid_o      (dm_sba_rvalid),
+    .rdata_o      (dm_sba_rdata),
+    .rdata_cap_o  (dm_sba_rcap),
+    .rdata_intg_o (),
+    .err_o        (dm_sba_err),
+    .intg_err_o   (dm_sba_intg_err),
+
+    .tl_o         (tl_dbg_sba_h2d),
+    .tl_i         (tl_dbg_sba_d2h)
+  );
+
+  logic unused_dm_sba_rcap;
+  assign unused_dm_sba_rcap = dm_sba_rcap;
+
+  // Debug access gate between the SBA adapter and the crossbar (rv_dm's u_tlul_lc_gate_sba).
+  cheriot_rtos_dbg_gate u_dbg_sba_gate (
+    .clk_i,
+    .rst_ni,
+    .en_i   (dbg_en_i),
+    .tl_h_i (tl_dbg_sba_h2d),
+    .tl_h_o (tl_dbg_sba_d2h),
+    .tl_d_o (tl_dbg_host_h2d),
+    .tl_d_i (tl_dbg_host_d2h)
+  );
+
+  // hartinfo as OpenTitan's rv_dm builds it: nscratch = 2 (the generalised ROM: the debug module
+  // is not at address 0), data registers memory mapped at dm::DataAddr.
+  localparam dm::hartinfo_t DmHartInfo = '{
+    zero1:      '0,
+    nscratch:   4'd2,
+    zero0:      '0,
+    dataaccess: 1'b1,
+    datasize:   dm::DataCount,
+    dataaddr:   dm::DataAddr
+  };
+
+  logic dm_ndmreset, dm_dmactive;
+  logic unused_dm;
+  assign unused_dm = dm_ndmreset ^ dm_dmactive;
+
+  dm_top #(
+    .NrHarts       ( 1          ),
+    .BusWidth      ( 32         ),
+    .DmBaseAddress ( DmBaseAddr )
+  ) u_dm_top (
+    .clk_i,
+    .rst_ni,
+    .next_dm_addr_i       (32'h0),
+    // CHERIoT mode of the debug ROM and abstract commands: the core's own CHERIoT enable, in
+    // prim_mubi encoding (as cheriot_mem_subsys translates it for the subsystem).
+    .cheriot_enable_i     (cheri_en_i ? prim_mubi_pkg::MuBi4True : prim_mubi_pkg::MuBi4False),
+    .testmode_i           (1'b0),
+    .ndmreset_o           (dm_ndmreset),
+    .ndmreset_ack_i       (1'b0),
+    .dmactive_o           (dm_dmactive),
+    .debug_req_o          (dm_debug_req),
+    .unavailable_i        (1'b0),
+    .hartinfo_i           (DmHartInfo),
+
+    .slave_req_i          (dm_dev_re | dm_dev_we),
+    .slave_we_i           (dm_dev_we),
+    .slave_addr_i         (dm_dev_addr),
+    .slave_be_i           (dm_dev_be),
+    .slave_wdata_i        (dm_dev_wdata),
+    .slave_rdata_o        (dm_dev_rdata),
+    .slave_err_o          (dm_dev_err),
+
+    .master_req_o         (dm_sba_req),
+    .master_add_o         (dm_sba_addr),
+    .master_we_o          (dm_sba_we),
+    .master_wdata_o       (dm_sba_wdata),
+    .master_be_o          (dm_sba_be),
+    .master_gnt_i         (dm_sba_gnt),
+    .master_r_valid_i     (dm_sba_rvalid),
+    .master_r_err_i       (dm_sba_err),
+    .master_r_other_err_i (dm_sba_intg_err),
+    .master_r_rdata_i     (dm_sba_rdata),
+
+    .dmi_rst_ni           (rst_ni),
+    .dmi_req_valid_i,
+    .dmi_req_ready_o,
+    .dmi_req_i,
+    .dmi_resp_valid_o,
+    .dmi_resp_ready_i,
+    .dmi_resp_o
   );
 endmodule

@@ -16,6 +16,8 @@
 #        (0,1,EBreakDbg,None,1,1,0) (0,1,UncompressedIllegal,None,0,0,0)
 #        (0,1,UncompressedIllegal,None,1,1,0) (0,1,CSRIllegal,None,1,1,0)
 #        (0,1,FetchError,None,0,1,1) (0,0,EBreakDbg,None,1,0,1) (0,0,MRet,None,1,1,1)
+#        (1,0,EBreakDbg,None,0,0,0) -- left at 0 by the merge of regression 26231 (2026-10-11),
+#        hit before only by pmp_fault_hazard's random debug requests
 #   interrupt_taken_instr_cross {nmi = 1, unstalled_last = 0, last category}
 #     D  EBreakDbg, WFI, FetchError, PrivIllegal
 #   pipe_cross {category, IF EmptyAndIdle, ID FullAndStalled, WB state}
@@ -54,7 +56,13 @@
 #      (EBreakDbg) unstalling on a good T_DBG access, whose debug request the ebreak's own
 #      debug entry then serves (FLUSH honours the ebreak over a pending debug_req); mret, with
 #      mepc = the resume point, MPP = M and MPIE = 0, unstalling with the timer pending and a
-#      T_DBG request, which FLUSH takes as DBG_TAKEN_IF at the mret target (dpc = mepc).
+#      T_DBG request, which FLUSH takes as DBG_TAKEN_IF at the mret target (dpc = mepc). Last, a
+#      load from fe_dbg_nox (locked, no permissions) with ebreak (EBreakDbg) behind it: PMP
+#      blocks the request, the load leaves ID on pmp_err_q (WAIT_GNT -> IDLE,
+#      ibex_load_store_unit.sv) and the fault is reported in the next cycle, ebreak's first in ID
+#      (None, unstalled 0), with no interrupt or debug request pending. pmp_fault_hazard has the
+#      case but raises debug_req at PMP faults at random (+dbg_on_pmp_err_pct=50); this test has
+#      no such trigger. (The variant with both pending is in cov_fcov3_rv_hazard section G.)
 #   D  T_ERR_NMI, M_SLOW: the NMI is pending while the instruction waits in ID. The load
 #      fault's FLUSH (exceptions from WB beat the instruction's own) leaves ID empty, and in the
 #      next cycle the NMI is taken (ID empty, PipeEmptyOnIrq) with the flushed instruction as the
@@ -201,6 +209,17 @@
     lw      t0, (\off)(a0)
 \nox:
     nop
+1:
+.endm
+
+# As CASE with a load from fe_dbg_nox (locked, no permissions), which PMP blocks: \insn is in its
+# first ID cycle when the fault is reported.
+.macro CASE_PMP cause, insn:vararg
+    EXPECT  \cause, 0, 0, 0
+    la      t1, fe_dbg_nox
+    sw      zero, 8(a1)
+    lw      t0, 0(t1)
+    \insn
 1:
 .endm
 
@@ -462,6 +481,9 @@ wfi_resume:
   # ebreak into debug mode unstalling with debug_req, no fault: (0,0,EBreakDbg,None,1,0,1). The
   # request is served by the ebreak's debug entry, so it adds no entry of its own.
   CASE    T_DBG, 0, 0, 0, 1, ebreak
+  # A PMP fault reported with ebreak (EBreakDbg) in ID, no irq / debug: (1,0,EBreakDbg,None,0,0,0)
+  CASE_PMP CAUSE_LOAD_ACCESS, ebreak
+  CASE_PMP CAUSE_LOAD_ACCESS, ebreak
 
   # ---- D: NMI pending while the instruction waits on a faulting access (ebreakm still set) ----
   CASE    T_ERR_NMI, CAUSE_LOAD_ACCESS, 1, 0, 0, ebreak

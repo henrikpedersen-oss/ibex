@@ -198,9 +198,15 @@
             overflow, integer overflow into an out-of-bounds access, double free, use after
             free. Each runs in its own compartment, called from the orchestrator.
 
-            **Check**: every case raises a CHERI exception and the switcher force-unwinds the
-            call, returning -1 to the orchestrator ("PASS: CWE-nnn raised CHERI exception").
-            A call that returns a valid capability is a failure. There are no non-faulting
+            **Check**: every case raises its expected CHERI exception -- mcause 0x1c and capcause
+            bounds violation (0x01) for CWE-121/122, tag violation (0x02) for CWE-415/416 and
+            CWE-190 -- and the switcher force-unwinds the call, returning -1 to the orchestrator
+            ("PASS: CWE-nnn raised the expected CHERI exception"). A call that returns, or ends
+            on any other fault, is a failure, with both causes logged
+            (firmware/common/expected_fault.hh). CWE-190's wrapped cursor lies outside the
+            representable window of its 32-byte capability, so the cursor move clears the tag
+            and the store faults on the tag: it checks representability, not the bounds check,
+            which CWE-121/122 cover. There are no non-faulting
             cases, so a core that traps on everything would pass; the RTOS suite covers
             normal execution. CWE-415/416 only check that a stale capability is revoked, so they
             cannot distinguish a working barrier from one that revokes everything;
@@ -247,10 +253,18 @@
               stack is at most 8176 bytes. Each size is one past a power of two, so its bounds
               need padding, as upstream's overlap check requires
               (cheriot_clang_purecap_stack_cap.c)
+            - badcall's first call, through an integer-derived (untagged) pointer, faults on the
+              tag (CJALR checks the tag before Permit_Execute), and the unwind ends the test
+              before upstream's second call, through a data pointer. That case is noexec_call
+              (no upstream file): `cjalr cra, ca0` to a tagged, unsealed data capability without
+              Execute must raise a permit-execute violation (0x11) on ca0 (mtval 0x151)
             A normal test that faults logs "CRASH:" with mcause, mtval and PCC before unwinding.
-            Fault tests must fault on the access under test and on nothing earlier;
-            va_list_global also fails if the fault is not a tag violation, or an assertion
-            before it failed.
+            A fault test passes only if it ends on its expected CHERI exception -- mcause 0x1c and
+            capcause: array bounds (0x01), badcall tag (0x02), noexec_call permit-execute (0x11)
+            on ca0, input permit-store (0x13), output permit-load (0x12), va_list_global tag
+            (0x02) -- and no assertion or check before the fault failed. Any other fault, or none,
+            is a failure, logged with both causes (firmware/common/expected_fault.hh); the
+            register is checked only where the test chooses it (noexec_call's assembly).
 
             cc_atomic (test_clang_purecap_atomic) is out of scope: it needs capability-width
             atomics the RTOS does not implement, and is excluded from the firmware.'''
@@ -259,7 +273,7 @@
       tests: ["cheri_c_array", "cheri_c_badcall", "cheri_c_byval_args", "cheri_c_capcmp",
               "cheri_c_capret", "cheri_c_capretaddr", "cheri_c_funptr", "cheri_c_init",
               "cheri_c_input", "cheri_c_intcap", "cheri_c_intcapmath",
-              "cheri_c_null",
+              "cheri_c_noexec_call", "cheri_c_null",
               "cheri_c_output", "cheri_c_smallint", "cheri_c_stack_cap", "cheri_c_uintcapmath",
               "cheri_c_union", "cheri_c_union_struct", "cheri_c_va_args", "cheri_c_va_copy",
               "cheri_c_va_list_global"]
@@ -283,12 +297,18 @@
             that the capability rules would not allow.
 
             A bus master that is not the core writes memory without the core's capability checks.
-            Each one must either have its writes clear the tag of every word they touch, or be
-            unreachable whenever it could be misused. With the CHERIoT memory subsystem:
-            - the debug host (dbg_host, the debug module's system-bus access) writes SRAM
-              through the xbar, bypassing the tag filter, so its writes do not clear tags
-              (cheriot_mem_subsys.sv, "as SBA does in OpenTitan"). It can therefore turn data into
-              a tagged capability, and must be unreachable while debug access is disabled
+            The CHERIoT ISA (v1.0, 7.7 "Tagged memory") lets only a CSC of a tagged capability set
+            a tag, and has every other write clear the tags of the capability granules it touches.
+            With the CHERIoT memory subsystem:
+            - the debug host (dbg_host, the debug module's system bus access, SBA) is a crossbar
+              host of its own and writes SRAM without passing the tag filter, so its writes do not
+              clear tags (cheriot_mem_subsys.sv; OpenTitan states the same in
+              hw/ip/cheriot/doc/theory_of_operation.md, "System Bus Access", and requires debug
+              accesses in CHERIoT mode to go through Ibex instead). It can therefore turn data
+              into a tagged capability. Sonata without the subsystem clears them: its SRAM keeps
+              the tag beside the data, and the debug host writes it as 0. The debug host must also
+              be unreachable while debug access is disabled (OpenTitan: rv_dm's SBA tlul_lc_gate,
+              enabled by lc_hw_debug_en)
             - the TBRE writes only invalidations (tag clears) through the tag path
             - any DMA controller in the SoC (OpenTitan's hw/ip/dma, for instance) must route its
               writes through the tag filter so they clear tags, and may
@@ -298,19 +318,39 @@
             **Stimulus**: per bus master, a write over a word holding a tagged capability, then a
             core load of it; for the debug host, the same with debug access disabled.
 
-            **Check**: the reloaded capability's tag is clear after any non-core write; the debug
-            host cannot write SRAM while debug access is disabled. Each test drives the bus
-            master directly from the testbench and checks the tag with a core load.
+            **Check**: the reloaded capability's tag is clear after any non-core write, as the ISA
+            requires; the debug host cannot write SRAM while debug access is disabled. Each test
+            drives the bus master directly from the testbench and checks the tag with a core load.
 
-            The RTOS test SoC has no debug module, so it has no debug host:
-            bus_master_dbg_host_tag_clear and bus_master_dbg_host_locked cannot be run on it and
-            need a SoC that has one (Sonata's sonata_system, or a debug module added to this SoC).
-            bus_master_tbre_invalidate_only applies to it. Its stimulus is the
+            On the RTOS test SoC the debug host is the RISC-V debug module
+            (ibex/vendor/pulp_riscv_dbg) with its SBA as the crossbar's dbg_host, behind the SoC's
+            model of rv_dm's lc_hw_debug_en gate, whose enable the testbench drives; the testbench
+            is the debug module's DMI host (tb/cheriot_rtos_dbg_host.sv). The firmware
+            firmware/dbg_host_test stores tagged capabilities in SRAM and asks the testbench for
+            the SBA writes (make sonata-dbg-host-xlm):
+            - bus_master_dbg_host_tag_clear: with debug access enabled, an SBA write of a new
+              address word over a stored tagged capability (inside its bounds, so the load barrier
+              looks up the same base). The core reload must have the new address, every other bit
+              unchanged, and the tag clear. Reported as "PASS/FAIL tag clear". The design does not
+              clear the tag (above), so the reload is a forged capability and the test fails.
+              Accepting that (debug access then has to be disabled wherever a forged capability
+              matters, which bus_master_dbg_host_locked checks) or fixing it (SBA writes through
+              the tag filter) is a design decision; the test checks the ISA rule either way. Run
+              with +sonata_mutate=sba_tag_clear_model, a testbench model of the fix that clears
+              the tag of every SBA write to the SRAM, it must pass (mutation_check.py CONTROLS).
+            - bus_master_dbg_host_locked: with debug access disabled, the same SBA write must be
+              refused with a bus error (sbcs.sberror = 2), and the capability reload unchanged,
+              tag included. Reported as "PASS/FAIL locked". +sonata_mutate=dbg_lock_open (the gate
+              stuck open) must make it fail; the testbench's dbg_access_monitor also fails the run
+              on any SBA request that reaches the crossbar while debug access is disabled.
+            bus_master_tbre_invalidate_only's stimulus is the
             revocation_test sweep (make sonata-revocation-xlm): after one TBRE sweep, compared
             bit for bit with CSEQX, the revoked capability differs from its stored value only in
             the cleared tag, the unrevoked one is unchanged, and untagged copies of both, stored
             beside them in the sweep range, are unchanged (the TBRE never sets a tag). Reported as
-            "PASS/FAIL TBRE invalidate-only".'''
+            "PASS/FAIL TBRE invalidate-only". It checks only that the TBRE writes nothing else, so
+            a TBRE that writes nothing passes it; that the revoked capability is cleared at all is
+            revocation_sweep's check.'''
       stage: V2
       tags: ["cheriot_mem"]
       tests: ["bus_master_dbg_host_tag_clear", "bus_master_dbg_host_locked",

@@ -1,0 +1,117 @@
+# Copyright lowRISC contributors.
+# Licensed under the Apache License, Version 2.0, see LICENSE for details.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Functional coverage closure, third round: directed tests for the 13 core_ibex_fcov_if.sv bins
+# the fcov merge of regression 30527 (2026-10-10, after the upstream ibex merge) left unhit. All
+# 13 were hit by the regressions of 2026-10-09, each by random stimulus only; none depends on
+# the RTL the merge changed. Each test header names its bins and why its stimulus reaches them.
+# The 4 uarch_cg bins the merge of regression 14911 (2026-10-10) left unhit were added to
+# cov_fcov3_rv_hazard (3) and cov_fcov3_cheri_irq (1): no test had targeted them.
+# cov_fcov3_cheri_isa also covers the three cheriot_uarch_cg bins regression 14911 (2026-10-10)
+# left unhit, and the three regression 26231 (2026-10-11) left unhit, which again only
+# cheriot_rand_operands' random operands had reached.
+# The 8 uarch_cg bins the merge of regression 26231 (2026-10-11) left unhit, all hit in
+# regression 14911 by random stimulus only, were added to cov_fcov3_rv_hazard (7: sections D-G,
+# D rewritten, as its first version missed its WFI bin) and cov_fcov2_rv_hazard (1: section C,
+# the PMP-fault bin without a debug request, which cov_fcov3_rv_hazard's +dbg_on_pmp_err_pct=100
+# rules out).
+# The two cheriot_csetbounds_cross1 bins the combined merge of 2026-10-13 left unhit, which no
+# regression had reached (a zero-length cs1, a sealed cs1), were added to cov_fcov3_cheri_isa.
+#
+# Configs are shared across all directed_testlist*.yaml files (directed_test_schema.py):
+# riscv-tests and cheriot-c-tests are defined in directed_testlist.yaml, cheriot-dv-tests in
+# directed_testlist_cheriot_traps.yaml.
+#
+# The two stall-events tests use core_ibex_stall_events_test's +gnt_trig_lo/hi window and
+# +mem_mode_on_write as cov_fcov2_rv_hazard does (directed_testlist_cov_fcov2.yaml); TRIG =
+# 0x80100000 is outside the image, hence +enable_bad_intg_on_uninit_access=0.
+# cov_fcov3_cheri_irq needs the window's offset bit 0x08 (irq_external_i held until taken),
+# added to core_ibex_stall_events_test for it, and uses 0x20 (irq_nm_i) as the RISC-V tests do.
+
+- test: cov_fcov3_rv_hazard
+  desc: >
+    RISC-V mode: an NMI taken in U-mode with mstatus.MIE set (mret to U-mode with MPIE = 1,
+    then an NMI timed from a U-mode access's grant; the handler checks MPP = U and MPIE = 1);
+    c.unimp, a CSR-illegal csrrw (mvendorid) and fence unstalling on a slow access's response
+    with debug_req and a masked timer interrupt pending; fence.i in its first ID cycle on a
+    bus-error response, and a store in its one ID cycle as debug_req rises, with the timer
+    pending; wfi, an uncompressed illegal word and a fetch error (locked no-permission NA4
+    word) entering ID behind a load while the words behind them are not yet fetched, with
+    fetching stopped (on one 64-bit alignment, every word up to the icache's fixed look-ahead
+    fetched with no delay and every later one 60..124 cycles apart, swept over 5 positions
+    around it); ebreak (no interrupt) and fence.i (timer pending) unstalling on a slow
+    access's bus error; an NMI pending while fence waits on a slow access, taken right after
+    it; and a PMP-faulting load reporting with ebreak (dcsr.ebreakm) in ID, the timer pending
+    and debug_req raised in the report cycle (+dbg_on_pmp_err_pct=100). Targets uarch_cg
+    priv_mode_irq_cross {U, nmi_external, MIE 1}, exception_stall_instr_cross
+    (0,0,CompressedIllegal,None,1,1,1), (0,0,CSRIllegal,None,1,1,1), (0,0,Fence,None,1,1,1),
+    (0,1,FenceI,None,0,1,1), (0,0,Store,None,0,1,1), (0,1,EBreakExc,None,1,0,0),
+    (0,1,FenceI,None,1,1,0) and (1,0,EBreakDbg,None,0,1,1), interrupt_taken_instr_cross {nmi 1,
+    unstalled 1, Fence}, and pipe_cross {WFI / UncompressedIllegal, IF EmptyAndIdle, ID
+    FullAndStalled, WB FullAndStalled} and {FetchError, IF EmptyAndIdle, ID FullAndStalled, WB
+    FullAndUnstalled}. Self-checking (trap, NMI and debug-entry counts, causes, NMI mstatus /
+    mepc; codes in the header), Spike cosim on.
+  iterations: 1
+  test_srcs: cov_fcov3_rv_hazard/cov_fcov3_rv_hazard.S
+  config: riscv-tests
+  # Section D's slow instruction fetches (15 attempts, several slow words each, more when the
+  # attempt traps) take about 30000-40000 cycles on top of the rest.
+  timeout_s: 900
+  rtl_test: core_ibex_stall_events_test
+  sim_opts: >-
+    +disable_spurious_dside_responses=1 +disable_fetch_enable_seq=1
+    +enable_bad_intg_on_uninit_access=0
+    +dside_bus_err_lo=80100080 +dside_bus_err_hi=801000ff
+    +gnt_trig_lo=80100000 +gnt_trig_hi=801000ff +gnt_fetch_off_cycles=40
+    +mem_mode_on_write=80100104 +irq_timer_on_wfi=1 +dbg_on_pmp_err_pct=100
+    +dbg_gap_min=2 +dbg_gap_max=4
+
+- test: cov_fcov3_cheri_irq
+  desc: >
+    CHERIoT mode (pin raised by +cheriot_enable_on_write): a maskable interrupt
+    (irq_external_i, +gnt_trig offset 0x08) rising from the second cycle after a data access's
+    grant, while a CHERI instruction is in ID: a CIncAddrImm sled behind an access with no
+    delays (unstalled), and CIncAddr reading the loaded register behind a slow access
+    (unstalling from LdHz after the interrupt rose); then an NMI (offset 0x20) rising the same
+    way into a CIncAddrImm sled, with interrupts masked. Targets uarch_cg
+    interrupt_taken_instr_cross {nmi 0, unstalled_last 0 / 1, InstrCategoryCheri} and {nmi 1,
+    unstalled_last 0, InstrCategoryCheri}, which random interrupts rarely reach because ID is
+    mostly empty when they arrive. Self-checking (interrupt count after every case, mcause per
+    case), cosim off (as cov_fcov2_cheri_hazard). Exit code in a0 (test header).
+  iterations: 2
+  test_srcs: cov_fcov3_cheri_irq/cov_fcov3_cheri_irq.S
+  config: cheriot-dv-tests
+  rtl_test: core_ibex_stall_events_test
+  sim_opts: >-
+    +cheriot_enable_on_write=80200000 +disable_cosim=1 +disable_spurious_dside_responses=1
+    +require_signature_addr=1 +disable_fetch_enable_seq=1 +enable_bad_intg_on_uninit_access=0
+    +gnt_trig_lo=80100000 +gnt_trig_hi=801000ff +mem_mode_on_write=80100104
+
+- test: cov_fcov3_cheri_isa
+  desc: >
+    CSeal of MTCC and MTDC through a tagged authority without SE whose cursor (3..7) is above
+    its top ([0, 2), E = 0); CUnseal of an unsealed cs1 through a sealed cs2 (tagged data
+    format with GL; tagged sealing format with US but without GL; untagged data format with
+    GL); CSetBounds with every request 0..8 on an E = 2 source with its cursor inside and
+    above its top, on E = 24 and E = 0 sources with their cursors above their tops, on a
+    zero-length E = 0 source with its cursor above its top, and on a sealed E = 0 source with
+    its cursor inside;
+    CSetHigh with all 512 (cotype, cperms) pairs; CIncAddrImm to below cs1's base for tagged and
+    untagged, sealed and unsealed E = 0 and E = 2 sources with an immediate from each imm12 bin
+    (base wrapped above the cursor, or the cursor wrapped past 2^32 or moved below the base);
+    CSeal over cs1 EX, cs2 tag, SE, address 0..16 and six bounds positions (792 instructions);
+    CUnseal over all 128 (cs1 tag, sealed, GL, cs2 tag, sealed, US, GL) combinations. Targets
+    cheriot_uarch_cg cheriot_cseal_cross1 {cs2 address 7, seal_bound b2} and {cs1 EX, cs2
+    untagged with SE, address >= 16, seal_bound b0}, cheriot_csethigh_cross0 {otype 4, cperms
+    0x3D}, cheriot_cincaddrimm_cross {untagged, sealed, E 0, imm12 1..0x7FF, case1},
+    cheriot_cunseal_cross0 and cheriot_csetbounds_cross1 bins only random operands reached, and
+    the two cheriot_csetbounds_cross1 E 0, cd tag 0 bins nothing had reached ({b2 alone, len 1}:
+    a zero-length cs1; {b4 alone, len 0}: a sealed cs1); the
+    CSeal and CUnseal sweeps cover their whole crosses, the CIncAddrImm block every case1 bin.
+    Expected values from CHERIoT-Sail (cheri_insts.sail); CHERIoT-Sail cosim on. Returns 0,
+    else a code from the test header, 250 (trap), 251 (liveness).
+  iterations: 1
+  test_srcs: cov_fcov3_cheri_isa/cov_fcov3_cheri_isa.S
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
+  config: cheriot-c-tests

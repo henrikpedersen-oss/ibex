@@ -42,3 +42,150 @@
   test_srcs: cov_fcov_pmp_mml_locked_wr/cov_fcov_pmp_mml_locked_wr.S
   config: riscv-tests
   sim_opts: "+disable_spurious_dside_responses=1"
+
+# pmp_region_cg is per instance (one instance per PMP region), so each region must close on its
+# own: the seven cov_fcov_pmp_region_* tests cover every legal bin of every region by
+# construction (bin inventory and derivations in the test headers and in
+# cov_fcov_pmp_region/pmp_region_sweep.h and pmp_region_wr_exec.h). They need the 16-region,
+# granularity-0 PMP of the "opentitan" config (16 probe chunks of 8 bytes, NA4 selectable).
+
+- test: cov_fcov_pmp_region_mml0
+  desc: >
+    mseccfg.MML = 0, RLB = 1: every PMP entry 0..15 as the highest-priority match on its own
+    8-byte chunk below _start, for each of the 12 non-MML permission values (A field rotating
+    TOR, NA4, NAPOT), with an M- and a U-mode fetch and an M- and a U-mode (mstatus.MPRV) load
+    and store per entry: 1152 accesses, each checked as allowed (mcause 11/8, load data) or
+    access-faulting (mcause 1/5/7, mtval, mepc) against Privileged Spec 3.7.1. Also NAPOT
+    pmpaddr = 2^k - 1, k = 0..31, and a legalised (W without R) pmpcfg write, on every
+    entry. Targets pmp_region_cg per instance: cp_napot_addr_modes, cp_warl_check_pmpcfg, cp_region_mode, the
+    non-MML cp_region_priv_bits values, the iside/iside2/dside mode and priv-bits crosses, and
+    cp_edit_locked_pmpcfg/pmpaddr. About 46000 instructions. Spike cosim on. TEST_FAIL code in
+    gp (test header).
+  iterations: 1
+  test_srcs: cov_fcov_pmp_region/cov_fcov_pmp_region_mml0.S
+  config: riscv-tests
+  rtl_params:
+    PMPEnable: 1
+    PMPNumRegions: 16
+    PMPGranularity: 0
+  timeout_s: 2400
+  sim_opts: "+disable_spurious_dside_responses=1"
+
+- test: cov_fcov_pmp_region_mml1
+  desc: >
+    mseccfg.MML = 1, RLB = 1, MMWP = 0: as cov_fcov_pmp_region_mml0 for the 16 MML permission
+    values (Smepmp 1.0 Table 2), 1536 accesses each checked. The program runs from a locked
+    M-mode read/execute rule, NAPOT in entry 15 while entries 0..14 are probed, then TOR in
+    entry 1 while entry 15 is probed. Targets pmp_region_cg per instance: the MML
+    cp_region_priv_bits values and the MML rows of the iside/iside2/dside priv-bits crosses,
+    plus the mode crosses again. About 58000 instructions. Spike cosim on. TEST_FAIL code in gp
+    (test header).
+  iterations: 1
+  test_srcs: cov_fcov_pmp_region/cov_fcov_pmp_region_mml1.S
+  config: riscv-tests
+  rtl_params:
+    PMPEnable: 1
+    PMPNumRegions: 16
+    PMPGranularity: 0
+  timeout_s: 2400
+  sim_opts: "+disable_spurious_dside_responses=1"
+
+- test: cov_fcov_pmp_region_wr_exec_c0
+  desc: >
+    mseccfg.MML = 1, code rule (locked M-mode read/execute) in PMP entry 0, every other entry
+    A = OFF. pmpcfg writes of each executable MML value (XU, XRU, XWRU, XM_XU, XM, XRM, XRM_XU)
+    over each non-executable MML value: with RLB = 1 from all 9 (every write takes effect), with
+    RLB = 0 from the 5 unlocked ones (the locked executable targets are ignored, Smepmp 2.3) and
+    from this variant's locked value per entry (all ignored); every pmpcfg read back. Targets
+    pmp_region_cg.pmp_wr_exec_region per instance; variants c0..c4 together give every entry
+    all four locked values with RLB = 0 (header of cov_fcov_pmp_region/pmp_region_wr_exec.h).
+    About 10000 instructions. Spike cosim on. TEST_FAIL code in gp.
+  iterations: 1
+  test_srcs: cov_fcov_pmp_region/cov_fcov_pmp_region_wr_exec_c0.S
+  config: riscv-tests
+  rtl_params:
+    PMPEnable: 1
+    PMPNumRegions: 16
+    PMPGranularity: 0
+  timeout_s: 900
+  sim_opts: "+disable_spurious_dside_responses=1"
+
+- test: cov_fcov_pmp_region_wr_exec_c1
+  desc: >
+    mseccfg.MML = 1, code rule (locked M-mode read/execute) in PMP entry 1, every other entry
+    A = OFF. pmpcfg writes of each executable MML value (XU, XRU, XWRU, XM_XU, XM, XRM, XRM_XU)
+    over each non-executable MML value: with RLB = 1 from all 9 (every write takes effect), with
+    RLB = 0 from the 5 unlocked ones (the locked executable targets are ignored, Smepmp 2.3) and
+    from this variant's locked value per entry (all ignored); every pmpcfg read back. Targets
+    pmp_region_cg.pmp_wr_exec_region per instance; variants c0..c4 together give every entry
+    all four locked values with RLB = 0 (header of cov_fcov_pmp_region/pmp_region_wr_exec.h).
+    About 10000 instructions. Spike cosim on. TEST_FAIL code in gp.
+  iterations: 1
+  test_srcs: cov_fcov_pmp_region/cov_fcov_pmp_region_wr_exec_c1.S
+  config: riscv-tests
+  rtl_params:
+    PMPEnable: 1
+    PMPNumRegions: 16
+    PMPGranularity: 0
+  timeout_s: 900
+  sim_opts: "+disable_spurious_dside_responses=1"
+
+- test: cov_fcov_pmp_region_wr_exec_c2
+  desc: >
+    mseccfg.MML = 1, code rule (locked M-mode read/execute) in PMP entry 2, every other entry
+    A = OFF. pmpcfg writes of each executable MML value (XU, XRU, XWRU, XM_XU, XM, XRM, XRM_XU)
+    over each non-executable MML value: with RLB = 1 from all 9 (every write takes effect), with
+    RLB = 0 from the 5 unlocked ones (the locked executable targets are ignored, Smepmp 2.3) and
+    from this variant's locked value per entry (all ignored); every pmpcfg read back. Targets
+    pmp_region_cg.pmp_wr_exec_region per instance; variants c0..c4 together give every entry
+    all four locked values with RLB = 0 (header of cov_fcov_pmp_region/pmp_region_wr_exec.h).
+    About 10000 instructions. Spike cosim on. TEST_FAIL code in gp.
+  iterations: 1
+  test_srcs: cov_fcov_pmp_region/cov_fcov_pmp_region_wr_exec_c2.S
+  config: riscv-tests
+  rtl_params:
+    PMPEnable: 1
+    PMPNumRegions: 16
+    PMPGranularity: 0
+  timeout_s: 900
+  sim_opts: "+disable_spurious_dside_responses=1"
+
+- test: cov_fcov_pmp_region_wr_exec_c3
+  desc: >
+    mseccfg.MML = 1, code rule (locked M-mode read/execute) in PMP entry 3, every other entry
+    A = OFF. pmpcfg writes of each executable MML value (XU, XRU, XWRU, XM_XU, XM, XRM, XRM_XU)
+    over each non-executable MML value: with RLB = 1 from all 9 (every write takes effect), with
+    RLB = 0 from the 5 unlocked ones (the locked executable targets are ignored, Smepmp 2.3) and
+    from this variant's locked value per entry (all ignored); every pmpcfg read back. Targets
+    pmp_region_cg.pmp_wr_exec_region per instance; variants c0..c4 together give every entry
+    all four locked values with RLB = 0 (header of cov_fcov_pmp_region/pmp_region_wr_exec.h).
+    About 10000 instructions. Spike cosim on. TEST_FAIL code in gp.
+  iterations: 1
+  test_srcs: cov_fcov_pmp_region/cov_fcov_pmp_region_wr_exec_c3.S
+  config: riscv-tests
+  rtl_params:
+    PMPEnable: 1
+    PMPNumRegions: 16
+    PMPGranularity: 0
+  timeout_s: 900
+  sim_opts: "+disable_spurious_dside_responses=1"
+
+- test: cov_fcov_pmp_region_wr_exec_c4
+  desc: >
+    mseccfg.MML = 1, code rule (locked M-mode read/execute) in PMP entry 4, every other entry
+    A = OFF. pmpcfg writes of each executable MML value (XU, XRU, XWRU, XM_XU, XM, XRM, XRM_XU)
+    over each non-executable MML value: with RLB = 1 from all 9 (every write takes effect), with
+    RLB = 0 from the 5 unlocked ones (the locked executable targets are ignored, Smepmp 2.3) and
+    from this variant's locked value per entry (all ignored); every pmpcfg read back. Targets
+    pmp_region_cg.pmp_wr_exec_region per instance; variants c0..c4 together give every entry
+    all four locked values with RLB = 0 (header of cov_fcov_pmp_region/pmp_region_wr_exec.h).
+    About 10000 instructions. Spike cosim on. TEST_FAIL code in gp.
+  iterations: 1
+  test_srcs: cov_fcov_pmp_region/cov_fcov_pmp_region_wr_exec_c4.S
+  config: riscv-tests
+  rtl_params:
+    PMPEnable: 1
+    PMPNumRegions: 16
+    PMPGranularity: 0
+  timeout_s: 900
+  sim_opts: "+disable_spurious_dside_responses=1"

@@ -314,13 +314,10 @@
             - riscv_bitmanip_balanced_test: Random instruction test with supported B extension
               instructions in balanced configuration
             - riscv_bitmanip_full_test: Random instruction test with supported B extension
-              instructions in full configuration
-            - riscv_bitmanip_otearlgrey_test: Random instruction test with supported B extension
-              instructions in OTEarlGrey configuration'''
+              instructions in full configuration'''
       stage: V2
       tags: ["riscv-dv"]
-      tests: ["riscv_bitmanip_balanced_test", "riscv_bitmanip_full_test",
-              "riscv_bitmanip_otearlgrey_test"]
+      tests: ["riscv_bitmanip_balanced_test", "riscv_bitmanip_full_test"]
     }
 
     {
@@ -1162,7 +1159,11 @@
             wraps to address 0 executes, and with address 0 denied faults with mepc 0xFFFFFFFE
             and mtval 0 (cov_expr_fetch_wrap). With mseccfg.MML = 1 and RLB = 0, writes of every
             executable MML configuration to locked entries are ignored
-            (cov_fcov_pmp_mml_locked_wr).
+            (cov_fcov_pmp_mml_locked_wr). Every one of the 16 regions, in turn the highest-
+            priority match, sees every mode, permission-bit encoding (MML 0 and 1), privilege and
+            access type on the fetch and data channels, each outcome checked, all 32 NAPOT sizes
+            and the locked-entry edits; and every locked-entry write that would make it
+            executable, per region (cov_fcov_pmp_region_*).
 
             - access_pmp_overlap: PMP access basic test
             - cov_expr_fetch_wrap: A 32-bit instruction at 0xFFFFFFFE whose second half wraps to
@@ -1188,6 +1189,75 @@
               riscv_epmp_* random tests reach only on some seeds. Spike cosim on. TEST_PASS /
               TEST_FAIL with the failing check's code in TESTNUM (gp): 1-4 setup, 10-16 a write
               took effect, 0x100|code unexpected trap.
+            - cov_fcov_pmp_region_mml0: mseccfg.MML = 0, RLB = 1: every PMP entry 0..15 as the
+              highest-priority match on its own 8-byte chunk below _start, for each of the 12
+              non-MML permission values (A field rotating TOR, NA4, NAPOT), with an M- and a
+              U-mode fetch and an M- and a U-mode (mstatus.MPRV) load and store per entry: 1152
+              accesses, each checked as allowed (mcause 11/8, load data) or access-faulting
+              (mcause 1/5/7, mtval, mepc) against Privileged Spec 3.7.1. Also NAPOT pmpaddr = 2^k
+              - 1, k = 0..31, and a legalised (W without R) pmpcfg write, on every entry. Targets
+              pmp_region_cg per instance: cp_napot_addr_modes, cp_warl_check_pmpcfg,
+              cp_region_mode, the non-MML cp_region_priv_bits values, the iside/iside2/dside mode
+              and priv-bits crosses, and cp_edit_locked_pmpcfg/pmpaddr. About 46000 instructions.
+              Spike cosim on. TEST_FAIL code in gp (test header).
+            - cov_fcov_pmp_region_mml1: mseccfg.MML = 1, RLB = 1, MMWP = 0: as
+              cov_fcov_pmp_region_mml0 for the 16 MML permission values (Smepmp 1.0 Table 2),
+              1536 accesses each checked. The program runs from a locked M-mode read/execute
+              rule, NAPOT in entry 15 while entries 0..14 are probed, then TOR in entry 1 while
+              entry 15 is probed. Targets pmp_region_cg per instance: the MML cp_region_priv_bits
+              values and the MML rows of the iside/iside2/dside priv-bits crosses, plus the mode
+              crosses again. About 58000 instructions. Spike cosim on. TEST_FAIL code in gp (test
+              header).
+            - cov_fcov_pmp_region_wr_exec_c0: mseccfg.MML = 1, code rule (locked M-mode
+              read/execute) in PMP entry 0, every other entry A = OFF. pmpcfg writes of each
+              executable MML value (XU, XRU, XWRU, XM_XU, XM, XRM, XRM_XU) over each non-
+              executable MML value: with RLB = 1 from all 9 (every write takes effect), with RLB
+              = 0 from the 5 unlocked ones (the locked executable targets are ignored, Smepmp
+              2.3) and from this variant's locked value per entry (all ignored); every pmpcfg
+              read back. Targets pmp_region_cg.pmp_wr_exec_region per instance; variants c0..c4
+              together give every entry all four locked values with RLB = 0 (header of
+              cov_fcov_pmp_region/pmp_region_wr_exec.h). About 10000 instructions. Spike cosim
+              on. TEST_FAIL code in gp.
+            - cov_fcov_pmp_region_wr_exec_c1: mseccfg.MML = 1, code rule (locked M-mode
+              read/execute) in PMP entry 1, every other entry A = OFF. pmpcfg writes of each
+              executable MML value (XU, XRU, XWRU, XM_XU, XM, XRM, XRM_XU) over each non-
+              executable MML value: with RLB = 1 from all 9 (every write takes effect), with RLB
+              = 0 from the 5 unlocked ones (the locked executable targets are ignored, Smepmp
+              2.3) and from this variant's locked value per entry (all ignored); every pmpcfg
+              read back. Targets pmp_region_cg.pmp_wr_exec_region per instance; variants c0..c4
+              together give every entry all four locked values with RLB = 0 (header of
+              cov_fcov_pmp_region/pmp_region_wr_exec.h). About 10000 instructions. Spike cosim
+              on. TEST_FAIL code in gp.
+            - cov_fcov_pmp_region_wr_exec_c2: mseccfg.MML = 1, code rule (locked M-mode
+              read/execute) in PMP entry 2, every other entry A = OFF. pmpcfg writes of each
+              executable MML value (XU, XRU, XWRU, XM_XU, XM, XRM, XRM_XU) over each non-
+              executable MML value: with RLB = 1 from all 9 (every write takes effect), with RLB
+              = 0 from the 5 unlocked ones (the locked executable targets are ignored, Smepmp
+              2.3) and from this variant's locked value per entry (all ignored); every pmpcfg
+              read back. Targets pmp_region_cg.pmp_wr_exec_region per instance; variants c0..c4
+              together give every entry all four locked values with RLB = 0 (header of
+              cov_fcov_pmp_region/pmp_region_wr_exec.h). About 10000 instructions. Spike cosim
+              on. TEST_FAIL code in gp.
+            - cov_fcov_pmp_region_wr_exec_c3: mseccfg.MML = 1, code rule (locked M-mode
+              read/execute) in PMP entry 3, every other entry A = OFF. pmpcfg writes of each
+              executable MML value (XU, XRU, XWRU, XM_XU, XM, XRM, XRM_XU) over each non-
+              executable MML value: with RLB = 1 from all 9 (every write takes effect), with RLB
+              = 0 from the 5 unlocked ones (the locked executable targets are ignored, Smepmp
+              2.3) and from this variant's locked value per entry (all ignored); every pmpcfg
+              read back. Targets pmp_region_cg.pmp_wr_exec_region per instance; variants c0..c4
+              together give every entry all four locked values with RLB = 0 (header of
+              cov_fcov_pmp_region/pmp_region_wr_exec.h). About 10000 instructions. Spike cosim
+              on. TEST_FAIL code in gp.
+            - cov_fcov_pmp_region_wr_exec_c4: mseccfg.MML = 1, code rule (locked M-mode
+              read/execute) in PMP entry 4, every other entry A = OFF. pmpcfg writes of each
+              executable MML value (XU, XRU, XWRU, XM_XU, XM, XRM, XRM_XU) over each non-
+              executable MML value: with RLB = 1 from all 9 (every write takes effect), with RLB
+              = 0 from the 5 unlocked ones (the locked executable targets are ignored, Smepmp
+              2.3) and from this variant's locked value per entry (all ignored); every pmpcfg
+              read back. Targets pmp_region_cg.pmp_wr_exec_region per instance; variants c0..c4
+              together give every entry all four locked values with RLB = 0 (header of
+              cov_fcov_pmp_region/pmp_region_wr_exec.h). About 10000 instructions. Spike cosim
+              on. TEST_FAIL code in gp.
             - pmp_fault_hazard: Load/store accesses each followed by one instruction category
               (ALU/Mul/Div with and without a load hazard, branch, jalr through the loaded
               address, jal, load, store, CSR, fence, fence.i, ecall, ebreak, mret, wfi,
@@ -1221,7 +1291,10 @@
       stage: V2
       tags: ["directed"]
       tests: ["access_pmp_overlap", "cov_expr_fetch_wrap", "cov_expr_pmp_tor",
-              "cov_fcov_pmp_mml_locked_wr", "pmp_fault_hazard", "pmp_mseccfg_test_rlb0_l0_0_u0",
+              "cov_fcov_pmp_mml_locked_wr", "cov_fcov_pmp_region_mml0", "cov_fcov_pmp_region_mml1",
+              "cov_fcov_pmp_region_wr_exec_c0", "cov_fcov_pmp_region_wr_exec_c1",
+              "cov_fcov_pmp_region_wr_exec_c2", "cov_fcov_pmp_region_wr_exec_c3",
+              "cov_fcov_pmp_region_wr_exec_c4", "pmp_fault_hazard", "pmp_mseccfg_test_rlb0_l0_0_u0",
               "pmp_mseccfg_test_rlb0_l0_0_u1", "pmp_mseccfg_test_rlb0_l0_1_next_l1_r1_u0",
               "pmp_mseccfg_test_rlb0_l0_1_next_l1_r1_u1",
               "pmp_mseccfg_test_rlb0_l0_1_next_l1_r1_w1_u0",
@@ -1252,8 +1325,21 @@
             (csr_access_sweep). minstret and mhpmcounter10 (compressed instructions retired)
             count exactly, stay frozen while their mcountinhibit bits are set and count again
             once cleared (cov_expr_counter_inhibit, self-checking: this Spike does not inhibit
-            minstret).
+            minstret). Upper-half writes with the low half 0 while inhibited, and with the low
+            half at 0xFFFFFFFF as it counts (mcycle, minstret, the 32-bit mhpmcounter10 wrapping
+            to 0) (cov_expr_counter_hwrite).
 
+            - cov_expr_counter_hwrite: Upper-half counter writes with the low half 0 or all-ones.
+              With every counter inhibited (mcountinhibit) and its low half 0, mcycleh /
+              minstreth read back the value written and the low halves stay 0,
+              mhpmcounter4h/10h/11h/12h read 0 (MHPMCounterWidth = 32). Then, icache on, two
+              passes of sweeps: mcycle := -s (s = 32..1) then mcycleh := HW, and minstret := -s
+              (s = 8..0), nop, minstreth := HW, put the upper-half write at a low half of
+              0xFFFFFFFF for one s; every iteration must read HW or HW + 1 with a small low half,
+              and both values must occur. mhpmcounter10 := -1, c.nop, mhpmcounter10h := 0 wraps
+              it to 0. Targets ibex_counter.sv line 46 (the counterh_we_i branch) rows inc = 0
+              with the low half 0 and inc = 1 with counter + 1 = 0. Cosim off (this Spike does
+              not model mcountinhibit); TEST_FAIL code in gp.
             - cov_expr_counter_inhibit: minstret and mhpmcounter10 (compressed instructions
               retired) count exactly (N + 1 / the compressed ones), stay frozen while
               mcountinhibit bits 2 and 10 are set and instructions (8 compressed, 8 not) retire,
@@ -1274,8 +1360,8 @@
             - u_mode_exec_test: PMP U mode exec test'''
       stage: V2
       tags: ["directed"]
-      tests: ["cov_expr_counter_inhibit", "csr_access_sweep", "mcounteren_lock_test",
-              "mcounteren_test", "u_mode_exec_test"]
+      tests: ["cov_expr_counter_hwrite", "cov_expr_counter_inhibit", "csr_access_sweep",
+              "mcounteren_lock_test", "mcounteren_test", "u_mode_exec_test"]
     }
 
     {
@@ -1310,7 +1396,14 @@
             is untagged or keeps exactly the PCC's bounds. AUICGP, CIncAddrImm and CIncAddr on an
             untagged sealed E = 0 capability whose base decodes above its address (0xFFFFFF00 for
             address 0x10), and CGetBase of the memory root at address 0xFFFFFFFF, against
-            CHERIoT-Sail (cov_fcov2_cheri_isa).
+            CHERIoT-Sail (cov_fcov2_cheri_isa). CSeal through a tagged authority without SE whose
+            cursor is above its top, CUnseal of an unsealed capability through a tagged sealed
+            one, and CSetBounds with every request 0..8 on E = 2 and E = 24 sources with the
+            cursor inside or above the top (cov_fcov3_cheri_isa). The Zcb instructions in CHERIoT
+            mode: c.lbu/c.lhu/c.lh/c.sb/c.sh with every immediate through bounded capabilities,
+            and their bounds, tag, LD and SD faults (mcause 28, mtval, MEPCC, nothing written);
+            c.zext.b/c.sext.b/c.zext.h/c.sext.h/c.not at the extension edges and c.mul
+            (cheriot_zcb).
 
             - cheriot_andperm: CAndPerm (funct7=0x0D) narrows a capability's permission field
               without clearing the tag (unsealed capabilities: narrowing permissions is always
@@ -1386,7 +1479,8 @@
               (MTDC, then MTCC) to memory and reloads it, verifying tag/perm/base/len/ addr/type
               are all preserved exactly, and that an integer store to the same slot clears the
               tag on reload (revocation); round trips of CSetBoundsExact caps at E = 1..14 (tag,
-              length, base) and of an otype-14 sealed data cap (codes 20-79).
+              length, base) and of otype-14 and otype-15 sealed data caps (otype fields 6 and 7;
+              codes 20-83).
             - cheriot_cap_type: CGetType (funct7=0x7F, rs2=1) on the three reset root
               capabilities. All three are unsealed at reset, so CGetType must return 0
               (OTYPE_UNSEALED) for each. Tests: (1) MTCC type=0; (2) MTDC type=0; (3) MScratchC
@@ -1452,7 +1546,9 @@
               tagged unsealed global cs1 with a tagged sealed authority without US and GL: cd
               untagged, unsealed, GL 0; (59-61) CSeal of MTCC with an untagged SE authority at
               address 13 inside its bounds, and with a tagged non-SE authority whose address 4 is
-              above its top: cd untagged.
+              above its top: cd untagged; (62-68) CUnseal of an untagged and a tagged unsealed
+              global cs1 with an untagged sealed authority with US and without GL: cd untagged,
+              unsealed, GL 0.
             - cheriot_csetaddr: CSetAddr (funct7=0x10) sets a capability's cursor to an absolute
               address from an integer register (vs CIncAddr's relative offset). Per CHERIoT-Sail
               setCapAddr the tag is cleared iff cs1 is sealed or the new address is
@@ -1467,12 +1563,13 @@
               plain integer), a sealed source and the cra sentry: the result is always untagged,
               takes its address from cs1 and every other field from rs2, never traps, and
               CGetHigh returns rs2 bit for bit. The same high word decodes to different bounds at
-              different cs1 cursors (inside, 64 KiB away, 2 below the base). Sixteen fixed rs2
-              patterns (the last seven add (cotype, cperms) pairs no other source produces,
-              cotype 2 and 7 with cperms 0x39 and cotype 6 with 0x22 for cheriot_csethigh_cross0)
-              cover all six permission formats, the reserved bit, sealed otypes, E = 24 and T <
-              B, with Sail-decoded perms/otype/base/top/len. CSEQX tells two results apart by the
-              reserved bit alone. Returns 0, else 1-247, 250 (trap), 251 (liveness).
+              different cs1 cursors (inside, 64 KiB away, 2 below the base). Seventeen fixed rs2
+              patterns (the last eight add (cotype, cperms) pairs no other deterministic source
+              produces, cotype 2 and 7 with cperms 0x39 and cotype 6 with 0x22 and 0x14 for
+              cheriot_csethigh_cross0) cover all six permission formats, the reserved bit, sealed
+              otypes, E = 24 and T < B, with Sail-decoded perms/otype/base/top/len. CSEQX tells
+              two results apart by the reserved bit alone. Returns 0, else 1-247, 260-267, 250
+              (trap), 251 (liveness).
             - cheriot_cspecialrw_c0: CSpecialRW forms on MTCC, MTDC, MScratchC and MEPCC
               (CHERIoT-Sail CSpecialRW: cs1 = c0 only reads). For each SCR: write-only (cd = c0)
               writes and leaves c0 null; read-only (cs1 = c0) returns the value bit for bit
@@ -1514,12 +1611,12 @@
               under a top of 2^32, at a base of 0, 1..7 bytes under an odd top over a base of 0
               and at 0 / 2^32 - 2..6 under the root PCC (CJAL also at the base of [0x81000000,
               2^32), below it, at, above and 2..6 under the top of [0, 0x81000000), under section
-              11's PCCs of length 2..7 and 7 bytes under the top of a length-9 one,
-              cp_cheri_cjal_bound 0x070), checking the CJAL link; and AUIPCC from PCCs at both
-              ends whose result wraps past 2^32 or 0, checking the address and the cleared tag.
-              Section 13 is section 10's MRET with an untagged MEPCC: the fetch at Top violates
-              the tag and the bounds, and must report the tag (mtval 0x402). Returns 0 on
-              success, else a section-coded failure.
+              11's PCCs of length 2..7 and 7 bytes under the top of a length-9 one and 2 bytes
+              under the top of a length-8 one, cp_cheri_cjal_bound 0x070 and 0x020), checking the
+              CJAL link; and AUIPCC from PCCs at both ends whose result wraps past 2^32 or 0,
+              checking the address and the cleared tag. Section 13 is section 10's MRET with an
+              untagged MEPCC: the fetch at Top violates the tag and the bounds, and must report
+              the tag (mtval 0x402). Returns 0 on success, else a section-coded failure.
             - cheriot_intcap_arith: Any integer ALU op writing a register clears its capability
               tag -- the core CHERI guarantee that a capability cannot be forged by integer
               arithmetic. Exercises addi/add/sub/andi/ori/xori/slli/mul, checking cgettag=0 after
@@ -1631,7 +1728,8 @@
               clearTagIfSealed), base = cursor, length 0; (32-34) the E = 24 cursor above top
               with a request of 1; (35-42) a length-2 E = 0 source with its cursor above top and
               requests 3 and 7 (longer than cs1): untagged, base = cursor, length = request
-              (cheriot_csetbounds_cross1).
+              (cheriot_csetbounds_cross1); (43-45) the same source with a request of 5; (46-49)
+              the E = 2 cursor at top with a request of 2: untagged, base = cursor, length 2.
             - cheriot_setboundsexact: CSetBoundsExact (funct7=0x09) clears the tag instead of
               rounding up when the requested bounds aren't exactly representable. Tests: (1)-(2)
               len=256 (exact) succeeds with tag=1, CGetLen=256; (3) len=300 (not exactly
@@ -1645,6 +1743,17 @@
               tag=1; (4) round-down length strictly less than plain CSetBounds's round-up length
               for the same non-power-of-two request, proving the two take genuinely different
               datapaths.
+            - cheriot_zcb: The Zcb instructions in CHERIoT mode against the ratified Zc
+              specification and CHERIoT-Sail (riscv_insts_zcb.sail: each decodes to the
+              instruction it is defined as). c.lbu/c.lhu/c.lh/c.sb/c.sh with every immediate
+              through bounded capabilities in several rs1' registers, read back with lw; an
+              integer load result clears a tagged rd. Faults with mcause 28, mtval (rs1' << 5 |
+              capcause) and MEPCC at the instruction, nothing written: out of bounds (0x1C1),
+              untagged authority (0x1A2), authority without LD (0x1F2) or SD (0x1F3), each with
+              the permitted access as control. c.zext.b/c.sext.b/c.zext.h/c.sext.h/c.not at the
+              sign and zero-extension edges over every rd', c.not on a tagged register, and c.mul
+              (signs, low half, rd' = rs2'). Returns 0, else 1-165 (codes in the test header),
+              250 (trap), 251 (liveness).
             - cheriot_zero_len_perm: Zero-length capabilities (CSetBounds(c, 0), including at the
               end of an object, where inCapBounds(c, top, 0) holds) and zero-permission
               capabilities (CAndPerm(c, 0)), per CHERIoT-Sail. Field reads;
@@ -1664,8 +1773,32 @@
               +increment, high word unchanged, no trap; base 0, tagged. Targets cheriot_uarch_cg
               cheriot_cauicgp_cross, cheriot_cincaddrimm_cross, cheriot_cincaddr_cross (untagged,
               case1, sealed, E = 0) and cheriot_cget_field_cross (tagged, address 0xFFFFFFFF,
-              CFIELD_BASE). CHERIoT-Sail cosim on. Returns 0, else a code from the test header,
-              250 (trap), 251 (liveness).'''
+              CFIELD_BASE). Then a CSC of the memory root (GL) through that untagged sealed
+              source (no SD) must trap: mcause 28, mtval 0x182 (TagViolation against c12), MEPCC
+              at the CSC (cheriot_csc_cross0 {untagged, sealed, sd0, cs2 GL 1}). CHERIoT-Sail
+              cosim on. Returns 0, else a code from the test header, 250 (trap), 251 (liveness).
+            - cov_fcov3_cheri_isa: CSeal of MTCC and MTDC through a tagged authority without SE
+              whose cursor (3..7) is above its top ([0, 2), E = 0); CUnseal of an unsealed cs1
+              through a sealed cs2 (tagged data format with GL; tagged sealing format with US but
+              without GL; untagged data format with GL); CSetBounds with every request 0..8 on an
+              E = 2 source with its cursor inside and above its top, on E = 24 and E = 0 sources
+              with their cursors above their tops, on a zero-length E = 0 source with its cursor
+              above its top, and on a sealed E = 0 source with its cursor inside; CSetHigh with
+              all 512 (cotype, cperms) pairs; CIncAddrImm to below cs1's base for tagged and
+              untagged, sealed and unsealed E = 0 and E = 2 sources with an immediate from each
+              imm12 bin (base wrapped above the cursor, or the cursor wrapped past 2^32 or moved
+              below the base); CSeal over cs1 EX, cs2 tag, SE, address 0..16 and six bounds
+              positions (792 instructions); CUnseal over all 128 (cs1 tag, sealed, GL, cs2 tag,
+              sealed, US, GL) combinations. Targets cheriot_uarch_cg cheriot_cseal_cross1 {cs2
+              address 7, seal_bound b2} and {cs1 EX, cs2 untagged with SE, address >= 16,
+              seal_bound b0}, cheriot_csethigh_cross0 {otype 4, cperms 0x3D},
+              cheriot_cincaddrimm_cross {untagged, sealed, E 0, imm12 1..0x7FF, case1},
+              cheriot_cunseal_cross0 and cheriot_csetbounds_cross1 bins only random operands
+              reached, and the two cheriot_csetbounds_cross1 E 0, cd tag 0 bins nothing had
+              reached ({b2 alone, len 1}: a zero-length cs1; {b4 alone, len 0}: a sealed cs1);
+              the CSeal and CUnseal sweeps cover their whole crosses, the CIncAddrImm block every
+              case1 bin. Expected values from CHERIoT-Sail (cheri_insts.sail); CHERIoT-Sail cosim
+              on. Returns 0, else a code from the test header, 250 (trap), 251 (liveness).'''
       stage: V2
       tags: ["directed", "cheriot"]
       tests: ["cheriot_andperm", "cheriot_asr_counter_csr", "cheriot_auipcc_auicgp_repr",
@@ -1681,7 +1814,7 @@
               "cheriot_reg_index", "cheriot_repr_window_sweep", "cheriot_scr_faults",
               "cheriot_scr_legalize", "cheriot_seal_fail", "cheriot_setbounds",
               "cheriot_setboundsexact", "cheriot_setboundsimm", "cheriot_setboundsrndn",
-              "cheriot_zero_len_perm", "cov_fcov2_cheri_isa"]
+              "cheriot_zcb", "cheriot_zero_len_perm", "cov_fcov2_cheri_isa", "cov_fcov3_cheri_isa"]
     }
 
     {
@@ -1804,15 +1937,15 @@
 
             Illegal instructions with the expected cause, mtval and MEPCC: in CHERIoT mode a
             sweep of every reserved encoding class on which CHERIoT-Sail and the RTL agree
-            (mcause 2, mtval 0), a second sweep of the encodings Sail rejects and the RTL
-            executes (Zcb, draft bit-manipulation, CSRs absent from the Sail platform; GAP-CS-3,
-            expected to fail until each disagreement is resolved), one unwaived test per encoding
-            the specification makes illegal and the RTL accepted (CGetOffset:
-            cheriot_cgetoffset_illegal; every CSR instruction form on cdbg_ctrl:
-            cheriot_cdbg_ctrl_illegal), and with the pin Off every CHERIoT-only encoding (opcodes
-            0x5B and 0x7B, CLC/CSC, the CHERIoT CSRs, compressed capability loads/stores) with
-            mtval = the instruction bits, against Spike. Random illegal instructions with the pin
-            Off are rdv_exceptions.
+            (mcause 2, mtval 0), a second sweep of the encodings Sail rejected and the RTL
+            executes (GAP-CS-3: the draft bit-manipulation encodings, now illegal in both, and
+            the CSRs the Sail platform now implements too, expected to fail until they leave the
+            table), one unwaived test per encoding the specification makes illegal and the RTL
+            accepted (CGetOffset: cheriot_cgetoffset_illegal; every CSR instruction form on
+            cdbg_ctrl: cheriot_cdbg_ctrl_illegal), and with the pin Off every CHERIoT-only
+            encoding (opcodes 0x5B and 0x7B, CLC/CSC, the CHERIoT CSRs, compressed capability
+            loads/stores) with mtval = the instruction bits, against Spike. Random illegal
+            instructions with the pin Off are rdv_exceptions.
 
             - cheriot_cdbg_ctrl_illegal: Every CSR instruction form on cdbg_ctrl (0xBC4) must
               raise an illegal instruction in CHERIoT mode (REQ_ISA_11 names the CSR; CHERIoT-
@@ -1851,14 +1984,13 @@
               must trap with mcause 2, mtval 0 and MEPCC at the encoding; the sweep records every
               misbehaving slot and carries on. Returns 0, else 1000 + 4 * slot + kind (first
               failure; count in mscratch), 999 (liveness).
-            - cheriot_illegal_sweep_sail_only: The encodings CHERIoT-Sail rejects but the RTL
-              executes in CHERIoT mode, written to the model (the GAP-CS-3 items): the eleven Zcb
-              instructions, the draft bit-manipulation instructions of RV32BOTEarlGrey outside
-              Zba/Zbb/Zbc/Zbs/Zbkb/Zbkx, and CSRs the RTL implements and the Sail platform does
-              not (mconfigptr, mcounteren, menvcfg[h], HPM, tdata1-3, m/s/mscontext, cpuctrlsts,
-              secureseed). Same mechanism as cheriot_illegal_sweep. Fails on the current RTL by
-              design: each failure code (2000 + 4 * slot + kind) identifies a disagreement for
-              triage; 1999 = liveness.'''
+            - cheriot_illegal_sweep_sail_only: The encodings CHERIoT-Sail rejected and the RTL
+              executes in CHERIoT mode, written to the model (the GAP-CS-3 items), same mechanism
+              as cheriot_illegal_sweep. The draft bit-manipulation encodings (codes 2000-2103)
+              are illegal in the RTL too since lowRISC/ibex#2459 and pass; every slot is expected
+              to pass, and the test is not waived. Zcb (see cheriot_zcb) and the CSRs the RTL
+              implements left the table when CHERIoT-Sail gained them. Each failure code (2000 +
+              4 * slot + kind) identifies a disagreement for triage; 1999 = liveness.'''
       stage: V2
       tags: ["directed", "cheriot"]
       tests: ["cheriot_cdbg_ctrl_illegal", "cheriot_cgetoffset_illegal",
@@ -2005,7 +2137,9 @@
             CSC/CLC round trip in CHERIoT mode the testbench slows the d-side grants and lowers
             the pin while a CSC waits for its first grant (LSU CTX_WAIT_GNT1 -> IDLE, otherwise
             never taken), and requires the alert within 100 cycles (+cheriot_disable_on_write).
-            Cosim off: neither model has the pin.
+            The same with the pin lowered in the cycle the LSU reports a CHERIoT access fault
+            (+cheriot_disable_on_fault, cov_expr_cheriot_off_fault): the alert, one trap at the
+            faulting load, no hang. Cosim off: neither model has the pin.
 
             - cheriot_enable_on_off: cheriot_enable_i 0->1, then 1->0 while a CSC waits for the
               grant of its first word (REQ_BCK_06). As cheriot_enable_transition up to CHERIoT
@@ -2016,10 +2150,20 @@
               (+cheriot_disable_on_write, core_ibex_base_test::watch_cheriot_disable_trigger).
               The 1->0 change breaks the pin contract of REQ_BCK_05 on purpose; the testbench
               turns CheriotEnableOneWaySwitch off for it. The program then continues in RISC-V
-              mode without a trap. Cosim off: neither model has the pin.'''
+              mode without a trap. Cosim off: neither model has the pin.
+            - cov_expr_cheriot_off_fault: cheriot_enable_i 0->1, then 1->0 in the cycle the LSU
+              reports a CHERIoT access fault (a load through an untagged capability;
+              +cheriot_disable_on_fault, core_ibex_base_test:: watch_cheriot_disable_trigger), as
+              cheriot_enable_on_off does under a CSC: the testbench requires
+              alert_major_internal_o within 100 cycles (REQ_BCK_06); the load traps once at its
+              own address without writing rd (mcause 0x1C or, as the RTL reports it once the pin
+              is Off, 5 with mtval the address: REQ_BCK_06 does not say which), and the program
+              continues in RISC-V mode. Targets ibex_load_store_unit.sv:432 `cheriot_err_q &
+              (cheriot_enable_i == IbexMuBiOn)` with the pin Off. Breaks the REQ_BCK_05 pin
+              contract on purpose. Cosim off: neither model has the pin.'''
       stage: V2
       tags: ["directed", "cheriot"]
-      tests: ["cheriot_enable_on_off"]
+      tests: ["cheriot_enable_on_off", "cov_expr_cheriot_off_fault"]
     }
 
     {
@@ -2031,8 +2175,20 @@
             sreg pairs, the reserved rlist 0-3 and mv forms (illegal instruction), and back-to-
             back sequences. Checks sp, every saved/loaded slot and register, and that nothing
             else changed. Self-checking, cosim off: Spike cannot pair Zcmp's multi-register
-            accesses (GAP-RV-6).
+            accesses (GAP-RV-6). Upstream's zcmp_reserved_test adds the reserved Zcmp encodings
+            with PMP on, in both Zcmp configurations: each traps as an illegal instruction and is
+            not expanded. Zcmp sequences with dummy instruction insertion on give the same
+            results (cov_block_zcmp_dummy).
 
+            - cov_block_zcmp_dummy: 64 rounds of cm.push {ra,s0-s11},-64, cm.pop {ra,s0-s11},64,
+              cm.mvsa01 and cm.mva01s with cpuctrlsts.dummy_instr_en set and dummy_instr_mask 0
+              (a dummy every 1-4 instructions): every pushed slot, every restored register, sp,
+              the frame words outside the slots and the moves must match the Zc specification,
+              since dummy instructions have no functional effect (doc/03_reference/security.rst).
+              Probe for a suspected RTL defect found in the block review (test header): the
+              compressed decoder's Zcmp FSM advances on id_in_ready_i while a dummy instruction
+              takes ID, dropping or repeating a micro-op. Covers no block of its own. Cosim off
+              (GAP-RV-6), self-checking, TEST_FAIL code in gp (a7 round, a6 register).
             - zcmp_push_pop_mv: Every Zcmp instruction with cheriot_enable_i Off, self-checked
               against the Zc specification (cosim off, GAP-RV-6). cm.push for every rlist 4..15
               and every spimm 0..3 (rlist 4 and 15 with all four): sp, every saved word at its
@@ -2048,10 +2204,13 @@
               register or memory. Back-to-back push;push, pop;pop, push;popretz, mvsa01;mva01s
               and push;mva01s;pop. Targets the Zcmp FSM and helper functions of
               ibex_compressed_decoder.sv. Returns 0, else case*100+check, 2 (unexpected trap), 1
-              (liveness).'''
+              (liveness).
+            - zcmp_reserved_test: Reserved Zcmp encodings trap as illegal instructions and are
+              not expanded. Cosim mismatches are not fatal because the cosim does not enable
+              Zcmp.'''
       stage: V2
       tags: ["directed"]
-      tests: ["zcmp_push_pop_mv"]
+      tests: ["cov_block_zcmp_dummy", "zcmp_push_pop_mv", "zcmp_reserved_test"]
     }
 
     {
@@ -2061,22 +2220,32 @@
             Writes to the high halves of mcycle, minstret and mhpmcounter3-12 (mcycleh,
             minstreth, mhpmcounterNh): mcycleh/minstreth read back, the low half is unchanged,
             both counters carry into the high half; the 32-bit event counters read 0 in their
-            high half. Checked against Spike.
+            high half. Checked against Spike. With mcountinhibit.CY set, an mcycleh write reads
+            back, the low half stays frozen, and mcycle counts again once CY is cleared
+            (cov_block_mcycleh_inhibit, self-checking).
 
             - counter_high_half_write: Writes the upper half of every 64-bit counter: mcycleh and
               minstreth read back the written value with the lower half undisturbed, and both
               counters carry from 0xFFFFFFxx into the upper half; mhpmcounter3h-12h
               (MHPMCounterWidth = 32 in the verified configuration) read 0 after a write of all-
-              ones and their lower halves are unchanged. Targets the `if (counterh_we_i)` block
-              of ibex_counter.sv in mcycle_counter_i, minstret_counter_i and the ten
-              mcounters_variable_i instances (REQ_ISA_10; cp_counter_upper_half_write,
-              cp_counter_lower_wrap). RISC-V mode, Spike oracle; mcountinhibit is not touched
-              (this Spike does not inhibit minstret). TEST_FAIL with the failing check's code in
-              TESTNUM (gp): 1-10, 20+N / 40+N for mhpmcounterN, 99 liveness, 0x100|code
-              unexpected trap.'''
+              ones and their lower halves are unchanged. The unimplemented mhpmcounter13h-31h are
+              written too and must read 0: ibex_cs_registers.sv scores its upper-half write case
+              item once per CSR label. Targets the `if (counterh_we_i)` block of ibex_counter.sv
+              in mcycle_counter_i, minstret_counter_i and the ten mcounters_variable_i instances
+              (REQ_ISA_10; cp_counter_upper_half_write, cp_counter_lower_wrap). RISC-V mode,
+              Spike oracle; mcountinhibit is not touched (this Spike does not inhibit minstret).
+              TEST_FAIL with the failing check's code in TESTNUM (gp): 1-10, 20+N / 40+N for
+              mhpmcounterN, 60+N for the unimplemented ones, 99 liveness, 0x100|code unexpected
+              trap.
+            - cov_block_mcycleh_inhibit: With mcountinhibit.CY set, mcycle stays frozen, a write
+              to mcycleh reads back and leaves the low half unchanged (twice, the second after a
+              write of the low half), and mcycle counts again once CY is cleared. Targets the
+              false part of `counter_inc_i ? counter[31:0] + 1 : counter[31:0]` in the
+              counterh_we_i branch of ibex_counter.sv (mcycle_counter_i). Cosim off (this Spike
+              does not model mcountinhibit); self-checking, TEST_FAIL code in gp.'''
       stage: V2
       tags: ["directed"]
-      tests: ["counter_high_half_write"]
+      tests: ["counter_high_half_write", "cov_block_mcycleh_inhibit"]
     }
 
     {
@@ -2437,29 +2606,43 @@
 
     {
       name: rv32_decode_corners
-      desc: '''packu/packh, reserved OP-IMM encodings and HPM counter writes
+      desc: '''packh, reserved OP-IMM encodings and HPM counter writes
 
-            Decode corners the random tests do not reach: packu and packh results (draft 0.93
-            Zbp); reserved OP-IMM encodings (unary group rs2 = 15, srli/srai with shamt[5] = 1)
-            raise an illegal-instruction exception with mtval = the instruction and leave rd
-            unwritten; every mhpmcounter low half is writable and the unavailable ones read 0.
-            rori and bexti with shamt[5] = 1 likewise, without stalling ID as a multi-cycle ALU
-            operation (cov_expr_rv_misc).
+            Decode corners the random tests do not reach: the packh result (Zbkb); packu (draft
+            Zbp only, gone since lowRISC/ibex#2459) and the reserved OP-IMM encodings (unary
+            group rs2 = 15, srli/srai with shamt[5] = 1) raise an illegal-instruction exception
+            with mtval = the instruction and leave rd unwritten; every mhpmcounter low half is
+            writable and the unavailable ones read 0. rori and bexti with shamt[5] = 1 likewise
+            (cov_expr_rv_misc). The Zbkb/Zbkx instructions riscv-dv never generates: zip, unzip,
+            brev8, pack with rs2 != x0, xperm4 and xperm8 give the ratified results (all-valid,
+            mixed and all-invalid xperm selectors), and the reserved shfli/unshfli/grevi/gorci
+            immediates are illegal (cov_block_zbk).
 
-            - cov_expr_rv_misc: rori and bexti with shamt 33 (instr[25] = 1, reserved on RV32)
-              raise an illegal instruction exception with mtval = the instruction and leave rd
-              unwritten. Targets the rori/bexti legality term of ibex_decoder.sv (OP-IMM funct3
-              101). Spike cosim on. TEST_FAIL code in gp.
-            - ibex_decode_holes: packu and packh (draft 0.93 XZbp; riscv-dv emits neither, see
-              vendor patch 0007) give {rs2[31:16], rs1[31:16]} and {16'b0, rs2[7:0], rs1[7:0]};
-              the OP-IMM unary group with rs2 = 15 and srli/srai with shamt[5] = 1 raise an
-              illegal-instruction exception with mtval = the instruction and leave rd unwritten;
-              every mhpmcounter3..31 low half is written, and mhpmcounter13..31 (unavailable with
+            - cov_block_zbk: zip, unzip, brev8, pack (rs2 != x0), xperm4 and xperm8 (Zbkb/Zbkx,
+              RV32BFull) give the ratified-spec results for two operands each, xperm with all-
+              valid, mixed and all-invalid selectors, and zip;unzip round-trips; unzip of 0 and
+              of every single-bit operand (every row of both shuffle_flip OR networks, for
+              expression coverage); shfli/unshfli with immediate 8, grevi 1 and gorci 1 (reserved
+              immediates of the Zbkb/Zbb forms) raise an illegal instruction exception with mtval
+              = the instruction and leave rd unwritten. riscv-dv generates none of them. Targets
+              ibex_decoder.sv OP-IMM 001/101 and OP Zbkb/Zbkx decode, ibex_alu.sv result mux and
+              gen_alu_rvb_full (shuffle, xperm crossbar). Spike cosim on. TEST_FAIL code in gp
+              (test header).
+            - cov_expr_rv_misc: rori, bexti, bclri, bseti and binvi with shamt 33 (instr[25] = 1,
+              reserved on RV32) raise an illegal instruction exception with mtval = the
+              instruction and leave rd unwritten. Targets the rori/bexti (OP-IMM funct3 101) and
+              bclri/bseti/binvi (funct3 001) legality terms of ibex_decoder.sv. Spike cosim on.
+              TEST_FAIL code in gp.
+            - ibex_decode_holes: packh (Zbkb; riscv-dv never emits it) gives {16'b0, rs2[7:0],
+              rs1[7:0]}; packu (draft 0.93 Zbp only, which Ibex no longer implements), the OP-IMM
+              unary group with rs2 = 15 and srli/srai with shamt[5] = 1 raise an illegal-
+              instruction exception with mtval = the instruction and leave rd unwritten; every
+              mhpmcounter3..31 low half is written, and mhpmcounter13..31 (unavailable with
               MHPMCounterNum = 10) read 0 after a write of all-ones. Returns 0 on success; codes
               in the test header.'''
       stage: V2
       tags: ["directed"]
-      tests: ["cov_expr_rv_misc", "ibex_decode_holes"]
+      tests: ["cov_block_zbk", "cov_expr_rv_misc", "ibex_decode_holes"]
     }
 
     {
@@ -2482,6 +2665,12 @@
             request. Self-checking (trap, NMI and debug-entry counts, causes, NMI mepc); the
             bench fails the test if a configured trigger never fires. Spike cosim on in RISC-V
             mode; cosim off in CHERIoT mode (CHERIoT-Sail has no debug mode and no bus errors).
+            Also (cov_fcov3_rv_hazard): an NMI taken in U-mode with mstatus.MIE set; c.unimp
+            unstalling and fence.i on a bus-error response, each with a debug request and the
+            timer pending; wfi waiting in ID behind a load with IF empty and idle. And
+            (cov_fcov3_cheri_irq) a maskable interrupt timed from a grant (+gnt_trig offset 0x08)
+            taken right behind a CHERI instruction, unstalled or just unstalled from a load
+            hazard.
 
             - cov_fcov2_cheri_hazard: CHERIoT mode (pin raised by +cheriot_enable_on_write): a
               CHERI instruction (CIncAddrImm independent of the access, CIncAddr reading the
@@ -2499,18 +2688,59 @@
               +gnt_trig), with the data-side response delay chosen per section
               (+mem_mode_on_write) and a masked pending timer interrupt. Mul and Load sleds and
               accesses with debug_req rising in the next instruction's only ID cycle; ebreak,
-              ecall and a fetch error unstalling with debug_req pending; ebreak into debug mode,
-              an uncompressed illegal and a CSR-illegal instruction behind a faulting access at
-              every response timing, irq and debug combination; an NMI pending while ebreak
-              (ebreakm), wfi, a fetch error or a dcsr read waits behind a faulting access (taken
-              right after its FLUSH); IF empty and idle behind c.ebreak, c.unimp and a CSR-
-              illegal instruction for each WB state. Targets uarch_cg
-              exception_stall_instr_cross, interrupt_taken_instr_cross and pipe_cross. Self-
-              checking (trap, NMI and debug-entry counts, causes, NMI mepc; codes in the header),
-              Spike cosim on.'''
+              ecall and a fetch error unstalling with debug_req pending; ebreak and ecall
+              unstalling on a faulting access with the timer pending; ebreak into debug mode, an
+              uncompressed illegal and a CSR-illegal instruction behind a faulting access at
+              every response timing, irq and debug combination; a fetch error on a faulting
+              access's response with debug_req and the timer pending; mret and ebreak into debug
+              mode unstalling with debug_req; a PMP-faulting load (locked no-permission word)
+              reporting with ebreak into debug mode in its first ID cycle and nothing pending
+              (the case pmp_fault_hazard reaches only when its random debug request at PMP faults
+              misses); an NMI pending while ebreak (ebreakm), wfi, a fetch error or a dcsr read
+              waits behind a faulting access (taken right after its FLUSH); IF empty and idle
+              behind c.ebreak (into debug mode and not) and c.unimp for each WB state, with
+              instruction-side responses 40..84 cycles apart (+mem_mode_on_write V[23:16]) so
+              nothing is fetched behind them. Targets uarch_cg exception_stall_instr_cross,
+              interrupt_taken_instr_cross and pipe_cross. Self-checking (trap, NMI and debug-
+              entry counts, causes, NMI mepc; codes in the header), Spike cosim on.
+            - cov_fcov3_cheri_irq: CHERIoT mode (pin raised by +cheriot_enable_on_write): a
+              maskable interrupt (irq_external_i, +gnt_trig offset 0x08) rising from the second
+              cycle after a data access's grant, while a CHERI instruction is in ID: a
+              CIncAddrImm sled behind an access with no delays (unstalled), and CIncAddr reading
+              the loaded register behind a slow access (unstalling from LdHz after the interrupt
+              rose); then an NMI (offset 0x20) rising the same way into a CIncAddrImm sled, with
+              interrupts masked. Targets uarch_cg interrupt_taken_instr_cross {nmi 0,
+              unstalled_last 0 / 1, InstrCategoryCheri} and {nmi 1, unstalled_last 0,
+              InstrCategoryCheri}, which random interrupts rarely reach because ID is mostly
+              empty when they arrive. Self-checking (interrupt count after every case, mcause per
+              case), cosim off (as cov_fcov2_cheri_hazard). Exit code in a0 (test header).
+            - cov_fcov3_rv_hazard: RISC-V mode: an NMI taken in U-mode with mstatus.MIE set (mret
+              to U-mode with MPIE = 1, then an NMI timed from a U-mode access's grant; the
+              handler checks MPP = U and MPIE = 1); c.unimp, a CSR-illegal csrrw (mvendorid) and
+              fence unstalling on a slow access's response with debug_req and a masked timer
+              interrupt pending; fence.i in its first ID cycle on a bus-error response, and a
+              store in its one ID cycle as debug_req rises, with the timer pending; wfi, an
+              uncompressed illegal word and a fetch error (locked no-permission NA4 word)
+              entering ID behind a load while the words behind them are not yet fetched, with
+              fetching stopped (on one 64-bit alignment, every word up to the icache's fixed
+              look-ahead fetched with no delay and every later one 60..124 cycles apart, swept
+              over 5 positions around it); ebreak (no interrupt) and fence.i (timer pending)
+              unstalling on a slow access's bus error; an NMI pending while fence waits on a slow
+              access, taken right after it; and a PMP-faulting load reporting with ebreak
+              (dcsr.ebreakm) in ID, the timer pending and debug_req raised in the report cycle
+              (+dbg_on_pmp_err_pct=100). Targets uarch_cg priv_mode_irq_cross {U, nmi_external,
+              MIE 1}, exception_stall_instr_cross (0,0,CompressedIllegal,None,1,1,1),
+              (0,0,CSRIllegal,None,1,1,1), (0,0,Fence,None,1,1,1), (0,1,FenceI,None,0,1,1),
+              (0,0,Store,None,0,1,1), (0,1,EBreakExc,None,1,0,0), (0,1,FenceI,None,1,1,0) and
+              (1,0,EBreakDbg,None,0,1,1), interrupt_taken_instr_cross {nmi 1, unstalled 1,
+              Fence}, and pipe_cross {WFI / UncompressedIllegal, IF EmptyAndIdle, ID
+              FullAndStalled, WB FullAndStalled} and {FetchError, IF EmptyAndIdle, ID
+              FullAndStalled, WB FullAndUnstalled}. Self-checking (trap, NMI and debug-entry
+              counts, causes, NMI mstatus / mepc; codes in the header), Spike cosim on.'''
       stage: V2
       tags: ["directed", "cheriot"]
-      tests: ["cov_fcov2_cheri_hazard", "cov_fcov2_rv_hazard"]
+      tests: ["cov_fcov2_cheri_hazard", "cov_fcov2_rv_hazard", "cov_fcov3_cheri_irq",
+              "cov_fcov3_rv_hazard"]
     }
 
     {
@@ -2524,23 +2754,41 @@
             mret; the instructions after the first load each execute once. Zcmp encodings fetched
             with bad integrity raise an instruction access fault and change nothing. A bus alert
             per integrity error and no other alert (core_ibex_cheriot_mem_err_test). Self-
-            checking (cov_expr_intg_err).
+            checking (cov_expr_intg_err). The external NMI taken over a pending internal one,
+            which follows after the handler's mret; NMIs, an interrupt and a withdrawn halt
+            request around an empty ID stage, including an NMI taken before an interrupt
+            handler's first instruction (recoverable NMI: that handler then sees its own mepc and
+            mcause) (cov_expr_nmi_capture, core_ibex_stall_events_test).
 
             - cov_expr_intg_err: A load with bad integrity raises the internal NMI (mcause
               0xFFFFFFE0, mtval its address, rd unwritten); the NMI handler loads it again, so a
               second internal NMI is pending while nmi_mode blocks it, and it is taken right
               after the handler's mret (same mepc); the instructions after the first load each
-              execute once. Then four Zcmp encodings (cm.push rlist 4, cm.pop rlist 4 and 5,
-              cm.mvsa01) fetched with bad integrity each raise an instruction access fault at
+              execute once. Then five Zcmp encodings (cm.push rlist 4 and 5, cm.pop rlist 4 and
+              5, cm.mvsa01) fetched with bad integrity each raise an instruction access fault at
               their address and change nothing. Integrity errors are injected by address
               (+dside/iside_intg_err_lo/hi). Targets ibex_core.sv RVFI rvfi_ext_stage_nmi_int
               (irq_nm_int pending without a capture) and ibex_compressed_decoder.sv CmIdle
               `valid_i && id_in_ready_i` with valid_i = 0. core_ibex_cheriot_mem_err_test (mode-
               agnostic) requires a bus alert per integrity error and no other alert. Cosim off;
-              TEST_FAIL code in gp.'''
+              TEST_FAIL code in gp.
+            - cov_expr_nmi_capture: NMIs, an external interrupt and a withdrawn halt request
+              around an empty ID stage, timed from data-access grants (+gnt_trig) with
+              instruction responses 60..124 cycles apart (+mem_mode_on_write): a load with bad
+              integrity and, right behind it in the same word, a load that raises irq_nm_i: the
+              external NMI is taken first (mcause 0x8000001F), the internal one after its mret
+              (0xFFFFFFE0, mtval the address, same mepc), with and without irq_external_i
+              pending; a one-cycle debug_req (+gnt_trig 0x100) with the NMI and the interrupt
+              arriving next cycle: NMI taken, no debug entry; the same with the interrupt taken
+              and an NMI raised after it (+gnt_trig 0x200) before the interrupt handler's first
+              instruction: the NMI's mepc is the MEI vector, and after its mret the MEI handler
+              sees its own mcause and mepc (recoverable NMI). Targets ibex_controller.sv:741 /
+              :410 (external NMI over a pending internal one) and the ibex_core.sv RVFI capture
+              rows (2017: new NMI over a valid capture; 2050: IRQ_TAKEN with captured_taken).
+              Cosim off, self-checking trap log; TEST_FAIL code in gp (test header).'''
       stage: V2S
       tags: ["directed"]
-      tests: ["cov_expr_intg_err"]
+      tests: ["cov_expr_intg_err", "cov_expr_nmi_capture"]
     }
 
     {

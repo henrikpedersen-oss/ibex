@@ -1,0 +1,18 @@
+dvsim: run make recipes with the bash on PATH
+
+NixOS has no /bin/bash, so every dvsim build/run failed to start. Fall back to /bin/bash where
+bash is not on PATH.
+
+diff --git a/dvsim/sim.mk b/dvsim/sim.mk
+index bd03c81d..f12212bc 100644
+--- a/dvsim/sim.mk
++++ b/dvsim/sim.mk
+@@ -2,7 +2,7 @@
+ # Licensed under the Apache License, Version 2.0, see LICENSE for details.
+ # SPDX-License-Identifier: Apache-2.0
+ 
+-export SHELL  := /bin/bash
++export SHELL  := $(shell which bash 2>/dev/null || echo /bin/bash)
+ .DEFAULT_GOAL := all
+ 
+ LOCK_ROOT_DIR ?= flock --timeout 3600 ${proj_root} --command

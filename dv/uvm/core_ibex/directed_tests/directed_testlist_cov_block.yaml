@@ -1,0 +1,67 @@
+# Copyright lowRISC contributors.
+# Licensed under the Apache License, Version 2.0, see LICENSE for details.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Block-coverage closure after the upstream ibex merge (f8f0d3b3, ratified bitmanip): directed
+# tests for the ibex_top.u_ibex_core blocks the merged regression (seed base 30527, 2026-10-10)
+# never executed and that are reachable (formal_cov/unr/uncovered_after_exclude.txt, after the
+# Jasper UNR exclusions and the waivers of waivers/coverage_waivers_xlm.tcl). Blocks that cannot
+# execute in the verified configuration are waived there, with their reasons, not here. Each test
+# header names the blocks it targets and where its expected values come from.
+#
+# Configs are shared across all directed_testlist*.yaml files (directed_test_schema.py):
+# riscv-tests is defined in directed_testlist.yaml. A test's rtl_params replace the config's, so
+# PMPEnable: 1 is repeated. +disable_spurious_dside_responses=1 for the reason given at the top
+# of directed_testlist.yaml: every test here owns a trap handler that fails on a trap it did not
+# plan for.
+
+- test: cov_block_zbk
+  desc: >
+    zip, unzip, brev8, pack (rs2 != x0), xperm4 and xperm8 (Zbkb/Zbkx, RV32BFull) give the
+    ratified-spec results for two operands each, xperm with all-valid, mixed and all-invalid
+    selectors, and zip;unzip round-trips; unzip of 0 and of every single-bit operand (every row of
+    both shuffle_flip OR networks, for expression coverage); shfli/unshfli with immediate 8,
+    grevi 1 and gorci 1
+    (reserved immediates of the Zbkb/Zbb forms) raise an illegal instruction exception with
+    mtval = the instruction and leave rd unwritten. riscv-dv generates none of them. Targets
+    ibex_decoder.sv OP-IMM 001/101 and OP Zbkb/Zbkx decode, ibex_alu.sv result mux and
+    gen_alu_rvb_full (shuffle, xperm crossbar). Spike cosim on. TEST_FAIL code in gp (test
+    header).
+  iterations: 1
+  test_srcs: cov_block_zbk/cov_block_zbk.S
+  config: riscv-tests
+  rtl_params:
+    PMPEnable: 1
+    RV32B: "ibex_pkg::RV32BFull"
+  sim_opts: "+disable_spurious_dside_responses=1"
+
+- test: cov_block_mcycleh_inhibit
+  desc: >
+    With mcountinhibit.CY set, mcycle stays frozen, a write to mcycleh reads back and leaves
+    the low half unchanged (twice, the second after a write of the low half), and mcycle counts
+    again once CY is cleared. Targets the false part of `counter_inc_i ? counter[31:0] + 1 :
+    counter[31:0]` in the counterh_we_i branch of ibex_counter.sv (mcycle_counter_i). Cosim off
+    (this Spike does not model mcountinhibit); self-checking, TEST_FAIL code in gp.
+  iterations: 1
+  test_srcs: cov_block_mcycleh_inhibit/cov_block_mcycleh_inhibit.S
+  config: riscv-tests
+  sim_opts: "+disable_cosim=1 +disable_spurious_dside_responses=1"
+
+- test: cov_block_zcmp_dummy
+  desc: >
+    64 rounds of cm.push {ra,s0-s11},-64, cm.pop {ra,s0-s11},64, cm.mvsa01 and cm.mva01s with
+    cpuctrlsts.dummy_instr_en set and dummy_instr_mask 0 (a dummy every 1-4 instructions):
+    every pushed slot, every restored register, sp, the frame words outside the slots and the
+    moves must match the Zc specification, since dummy instructions have no functional effect
+    (doc/03_reference/security.rst). Probe for a suspected RTL defect found in the block review
+    (test header): the compressed decoder's Zcmp FSM advances on id_in_ready_i while a dummy
+    instruction takes ID, dropping or repeating a micro-op. Covers no block of its own.
+    Cosim off (GAP-RV-6), self-checking, TEST_FAIL code in gp (a7 round, a6 register).
+  iterations: 1
+  test_srcs: cov_block_zcmp_dummy/cov_block_zcmp_dummy.S
+  config: riscv-tests
+  rtl_params:
+    PMPEnable: 1
+    SecureIbex: 1
+    RV32ZC: ["ibex_pkg::RV32ZcaZcmp", "ibex_pkg::RV32ZcaZcbZcmp"]
+  sim_opts: "+disable_cosim=1 +disable_spurious_dside_responses=1"

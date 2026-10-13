@@ -510,6 +510,9 @@ class core_ibex_base_test extends uvm_test;
   // capability checks off with nothing to tell the system. CheriotEnableOneWaySwitch and the
   // testbench's NoAlertsTriggered are turned off at that moment, not before: the first states the
   // contract this run breaks, the second would fail on the alert it expects.
+  // With cfg.cheriot_disable_on_fault (directed_tests/cov_expr_cheriot_off_fault) the pin is lowered
+  // instead in the cycle the LSU reports the program's next CHERIoT access fault; the grants are
+  // left alone, and the alert requirement is the same.
   virtual task watch_cheriot_disable_trigger();
     ibex_mem_intf_seq_item           txn;
     ibex_mem_intf_response_agent_cfg dcfg = env.data_if_response_agent.cfg;
@@ -525,30 +528,50 @@ class core_ibex_base_test extends uvm_test;
     saved_zero_delays = dcfg.zero_delays;
     saved_gnt_min     = dcfg.gnt_delay_min;
     saved_gnt_max     = dcfg.gnt_delay_max;
-    dcfg.zero_delays   = 1'b0;
-    dcfg.gnt_delay_min = cfg.cheriot_disable_gnt_delay;
-    dcfg.gnt_delay_max = cfg.cheriot_disable_gnt_delay + 2;
 
-    while (!dut_vif.dut_cb.lsu_ctx_wait_gnt1) begin
-      clk_vif.wait_clks(1);
-      if (++waited > 5000) begin
-        `uvm_fatal(`gfn, $sformatf("No CSC reached LSU state CTX_WAIT_GNT1 within %0d cycles of the write to 0x%08h",
-                                   waited, cfg.cheriot_disable_on_write))
+    if (cfg.cheriot_disable_on_fault) begin
+      // +cheriot_disable_on_fault: the program's next CHERIoT access fails its capability check.
+      // lsu_cheriot_err_next is that issue cycle; driven in the time step of the clocking event
+      // that sampled it, the pin is Off from the next cycle, the one in which the LSU reports the
+      // error (cheriot_err_q, ibex_load_store_unit.sv).
+      do begin
+        @(dut_vif.dut_cb);
+        if (++waited > 5000) begin
+          `uvm_fatal(`gfn, $sformatf("No CHERIoT access fault in the LSU within %0d cycles of the write to 0x%08h",
+                                     waited, cfg.cheriot_disable_on_write))
+        end
+      end while (!dut_vif.dut_cb.lsu_cheriot_err_next);
+      `DV_ASSERT_CTRL_REQ("tb_cheriot_enable_one_way", 1'b0)
+      `DV_ASSERT_CTRL_REQ("tb_no_alerts_triggered", 1'b0)
+      dut_vif.dut_cb.cheriot_enable <= ibex_pkg::IbexMuBiOff;
+      `uvm_info(`gfn, "cheriot_enable_i lowered (On -> Off) in the cycle the LSU reports a CHERIoT access fault",
+                UVM_LOW)
+    end else begin
+      dcfg.zero_delays   = 1'b0;
+      dcfg.gnt_delay_min = cfg.cheriot_disable_gnt_delay;
+      dcfg.gnt_delay_max = cfg.cheriot_disable_gnt_delay + 2;
+
+      while (!dut_vif.dut_cb.lsu_ctx_wait_gnt1) begin
+        clk_vif.wait_clks(1);
+        if (++waited > 5000) begin
+          `uvm_fatal(`gfn, $sformatf("No CSC reached LSU state CTX_WAIT_GNT1 within %0d cycles of the write to 0x%08h",
+                                     waited, cfg.cheriot_disable_on_write))
+        end
       end
-    end
-    clk_vif.wait_clks(2);
-    if (!dut_vif.dut_cb.lsu_ctx_wait_gnt1) begin
-      `uvm_fatal(`gfn, "The CSC left CTX_WAIT_GNT1 before the pin was lowered: the 1->0 path was not reached")
-    end
+      clk_vif.wait_clks(2);
+      if (!dut_vif.dut_cb.lsu_ctx_wait_gnt1) begin
+        `uvm_fatal(`gfn, "The CSC left CTX_WAIT_GNT1 before the pin was lowered: the 1->0 path was not reached")
+      end
 
-    `DV_ASSERT_CTRL_REQ("tb_cheriot_enable_one_way", 1'b0)
-    `DV_ASSERT_CTRL_REQ("tb_no_alerts_triggered", 1'b0)
-    dut_vif.dut_cb.cheriot_enable <= ibex_pkg::IbexMuBiOff;
-    `uvm_info(`gfn, "cheriot_enable_i lowered (On -> Off) while a CSC waits in CTX_WAIT_GNT1", UVM_LOW)
+      `DV_ASSERT_CTRL_REQ("tb_cheriot_enable_one_way", 1'b0)
+      `DV_ASSERT_CTRL_REQ("tb_no_alerts_triggered", 1'b0)
+      dut_vif.dut_cb.cheriot_enable <= ibex_pkg::IbexMuBiOff;
+      `uvm_info(`gfn, "cheriot_enable_i lowered (On -> Off) while a CSC waits in CTX_WAIT_GNT1", UVM_LOW)
+    end
 
     for (int unsigned i = 0; i < cfg.cheriot_disable_alert_window; i++) begin
       clk_vif.wait_clks(1);
-      if (!dut_vif.dut_cb.lsu_ctx_wait_gnt1 && i < 4) begin
+      if (!cfg.cheriot_disable_on_fault && !dut_vif.dut_cb.lsu_ctx_wait_gnt1 && i < 4) begin
         `uvm_info(`gfn, $sformatf("LSU left CTX_WAIT_GNT1 %0d cycle(s) after the pin was lowered", i + 1),
                   UVM_LOW)
       end

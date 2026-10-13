@@ -142,14 +142,13 @@
 
 - test: cheriot_illegal_sweep_sail_only
   desc: >
-    The encodings CHERIoT-Sail rejects but the RTL executes in CHERIoT mode, written to the
-    model (the GAP-CS-3 items): the eleven Zcb instructions (to be added to CHERIoT-Sail),
-    and CSRs the RTL implements and the Sail platform does not (mconfigptr, mcounteren,
-    menvcfg[h], HPM, tdata1-3, m/s/mscontext, cpuctrlsts, secureseed). The draft
-    bit-manipulation encodings in the table are illegal in the RTL too since lowRISC/ibex#2459
-    and pass. Same mechanism as
-    cheriot_illegal_sweep. Fails on the current RTL by design: each failure code
-    (2000 + 4 * slot + kind) identifies a disagreement for triage; 1999 = liveness.
+    The encodings CHERIoT-Sail rejected and the RTL executes in CHERIoT mode, written to the
+    model (the GAP-CS-3 items), same mechanism as cheriot_illegal_sweep. The draft
+    bit-manipulation encodings (codes 2000-2103) are illegal in the RTL too since
+    lowRISC/ibex#2459 and pass; every slot is expected to pass, and the test is not waived.
+    Zcb (see cheriot_zcb) and the CSRs the RTL implements left the table when CHERIoT-Sail
+    gained them. Each failure code (2000 + 4 * slot + kind) identifies a disagreement for
+    triage; 1999 = liveness.
   iterations: 1
   test_srcs: cheriot_illegal_sweep_sail_only/cheriot_illegal_sweep_sail_only.S
   sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
@@ -240,5 +239,22 @@
     restored immediately after each probe. Returns 0, else 10-90, 250 (trap), 251 (liveness).
   iterations: 1
   test_srcs: cheriot_scr_legalize/cheriot_scr_legalize.S
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
+  config: cheriot-c-tests
+
+- test: cheriot_zcb
+  desc: >
+    The Zcb instructions in CHERIoT mode against the ratified Zc specification and
+    CHERIoT-Sail (riscv_insts_zcb.sail: each decodes to the instruction it is defined as).
+    c.lbu/c.lhu/c.lh/c.sb/c.sh with every immediate through bounded capabilities in several
+    rs1' registers, read back with lw; an integer load result clears a tagged rd. Faults with
+    mcause 28, mtval (rs1' << 5 | capcause) and MEPCC at the instruction, nothing written: out
+    of bounds (0x1C1), untagged authority (0x1A2), authority without LD (0x1F2) or SD (0x1F3),
+    each with the permitted access as control. c.zext.b/c.sext.b/c.zext.h/c.sext.h/c.not at
+    the sign and zero-extension edges over every rd', c.not on a tagged register, and c.mul
+    (signs, low half, rd' = rs2'). Returns 0, else 1-165 (codes in the test header), 250
+    (trap), 251 (liveness).
+  iterations: 1
+  test_srcs: cheriot_zcb/cheriot_zcb.S
   sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
   config: cheriot-c-tests

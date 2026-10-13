@@ -5,7 +5,10 @@
 //
 // Normal tests return int: 0 = PASS, >0 = number of assertion failures.
 // Fault tests return void*: expected to ForceUnwind (return is an untagged
-// capability with address() == -1), confirming a CHERI exception fired.
+// capability with address() == -1), confirming a CHERI exception fired. Each
+// also has a run_fault_NAME_failures() export, called after it: 0 only if the
+// fault was the expected one (capcause, and for noexec_call the register) and
+// no check before it failed (../common/expected_fault.hh).
 
 #pragma once
 
@@ -67,23 +70,32 @@ __cheri_compartment("cc_stack_cap")    int run_test_stack_cap(void);
 
 // ── Fault tests (DECLARE_TEST_FAULT) ────────────────────────────────────────
 // These compartments deliberately trigger CHERI hardware exceptions.
-// A correct run ForceUnwinds; the orchestrator verifies the return is invalid.
+// A correct run ForceUnwinds; the orchestrator verifies the return is invalid,
+// then calls the matching *_failures() export.
 
-/// On-stack array accessed out-of-bounds → CHERI length fault.
+/// On-stack array accessed out-of-bounds → CHERI bounds violation.
 __cheri_compartment("cc_array")        void *run_fault_array(void);
+__cheri_compartment("cc_array")        int run_fault_array_failures(void);
 
-/// Calling a non-function-pointer → CHERI tag/execute-permission fault.
+/// Call through an integer-derived (untagged) function pointer → CHERI tag violation.
 __cheri_compartment("cc_badcall")      void *run_fault_badcall(void);
+__cheri_compartment("cc_badcall")      int run_fault_badcall_failures(void);
 
-/// Write through a read-only (load-only) capability → CHERI store fault.
+/// Jump through a tagged, unsealed data capability (no Execute) in ca0 →
+/// CHERI execute-permission violation on ca0.
+__cheri_compartment("cc_noexec_call")  void *run_fault_noexec_call(void);
+__cheri_compartment("cc_noexec_call")  int run_fault_noexec_call_failures(void);
+
+/// Write through a read-only (load-only) capability → CHERI store-permission violation.
 __cheri_compartment("cc_input")        void *run_fault_input(void);
+__cheri_compartment("cc_input")        int run_fault_input_failures(void);
 
-/// Read through a write-only (store-only) capability → CHERI load fault.
+/// Read through a write-only (store-only) capability → CHERI load-permission violation.
 __cheri_compartment("cc_output")       void *run_fault_output(void);
+__cheri_compartment("cc_output")       int run_fault_output_failures(void);
 
 /// va_list stored in a global loses its tag (local capability) → tag violation on va_arg.
 __cheri_compartment("cc_va_list_global") void *run_fault_va_list_global(void);
-/// Checks that failed before or in that fault: assertions, or a fault that is not a tag violation.
 __cheri_compartment("cc_va_list_global") int run_fault_va_list_global_failures(void);
 
 // ── Orchestrator ─────────────────────────────────────────────────────────────

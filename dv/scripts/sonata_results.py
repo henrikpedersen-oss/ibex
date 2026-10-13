@@ -90,6 +90,12 @@ REVOCATION_LINE = re.compile(r"^Revocation barrier: (?P<verdict>PASS|FAIL) (?P<w
 # TRBE: the engine's name in firmware built before the upstream rename
 TBRE_INVAL_LINE = re.compile(
     r"^Revocation barrier: (?P<verdict>PASS|FAIL) T(?:BR|RB)E invalidate-only:")
+# firmware/dbg_host_test (make sonata-dbg-host-xlm): "Debug host: PASS|FAIL tag clear|locked: ..."
+DBG_HOST_LINE = re.compile(r"^Debug host: (?P<verdict>PASS|FAIL) (?P<what>tag clear|locked)\b")
+DBG_HOST_TESTS = {
+    "tag clear": "bus_master_dbg_host_tag_clear",
+    "locked": "bus_master_dbg_host_locked",
+}
 JULIET_LINE = re.compile(r"^.*?: (?P<verdict>PASS|FAIL): CWE-(?P<cwe>\d+)\b")
 CHERI_C_LINE = re.compile(r"^.*?: (?P<verdict>PASS|FAIL): clang_purecap_(?P<test>\w+)\b")
 
@@ -111,6 +117,10 @@ def parse_log(path):
         m = TBRE_INVAL_LINE.match(line)
         if m:
             yield "bus_master_tbre_invalidate_only", m["verdict"] == "PASS"
+            continue
+        m = DBG_HOST_LINE.match(line)
+        if m:
+            yield DBG_HOST_TESTS[m["what"]], m["verdict"] == "PASS"
             continue
         m = JULIET_LINE.match(line)
         if m and m["cwe"] in JULIET_TESTS:

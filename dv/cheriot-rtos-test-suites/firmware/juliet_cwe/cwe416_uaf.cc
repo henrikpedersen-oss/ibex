@@ -13,7 +13,8 @@
 //   2. The hardware load barrier fires on the next volatile load of `p`,
 //      clears its tag (because the bitmap shows the chunk is freed), and
 //      returns an untagged capability.
-//   3. Storing through an untagged capability raises a CHERI tag exception.
+//   3. Storing through an untagged capability raises a CHERI tag exception
+//      (capcause 0x02), which the handler requires (../common/expected_fault.hh).
 //
 // Reference: allocator-test.cc test_preflight() demonstrates this same pattern
 // and confirms the load barrier operates immediately after heap_free.
@@ -26,16 +27,23 @@
 
 using Debug = ConditionalDebug<true, "CWE-416 Use-After-Free">;
 
+#include "../common/expected_fault.hh"
+
 extern "C" ErrorRecoveryBehaviour
 compartment_error_handler(ErrorState *frame, size_t mcause, size_t mtval)
 {
-	Debug::log(
-	  "CHERI exception caught: mcause={} mtval={} pcc={}", mcause, mtval, frame->pcc);
-	return ErrorRecoveryBehaviour::ForceUnwind;
+	return expected_fault_handler(frame, mcause, mtval, CHERI::CauseCode::TagViolation);
+}
+
+// 0 only if test_cwe416_uaf ended on a tag violation.
+int test_cwe416_uaf_failures()
+{
+	return expected_fault_failures(0);
 }
 
 void *test_cwe416_uaf(int)
 {
+	expected_fault_begin();
 	Timeout t{5};
 	// volatile forces every read of `p` to go through the load barrier.
 	void *volatile p = heap_allocate(&t, MALLOC_CAPABILITY, 16);

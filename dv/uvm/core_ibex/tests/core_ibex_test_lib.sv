@@ -2371,6 +2371,32 @@ class nmi_level_seq extends uvm_sequence #(irq_seq_item);
 
 endclass
 
+// Raises (raise = 1) or drops (raise = 0) irq_external_i and leaves irq_nm_i alone. The maskable
+// lines are driven together, so irq_timer_i is driven to `timer` (the level irq_timer_hold_seq
+// left it at) and irq_software_i / irq_fast_i to 0. core_ibex_stall_events_test holds it with
+// this until the core takes an interrupt.
+class irq_external_level_seq extends uvm_sequence #(irq_seq_item);
+
+  `uvm_object_utils(irq_external_level_seq)
+  `uvm_object_new
+
+  bit raise;
+  bit timer;
+
+  virtual task body();
+    irq_seq_item irq;
+    irq = irq_seq_item::type_id::create("irq");
+    irq.drive_nm = 1'b0;
+    start_item(irq);
+    `DV_CHECK_RANDOMIZE_WITH_FATAL(irq, irq_external == raise; irq_timer == timer;
+                                        irq_software == 1'b0; irq_fast == '0; irq_nm == 1'b0;
+                                        num_of_interrupt == int'(raise) + int'(timer);)
+    finish_item(irq);
+    get_response(irq);
+  endtask
+
+endclass
+
 // Debug requests, NMIs, a held timer interrupt and fetch-enable drops raised at chosen pipeline
 // events (core_ibex_dut_probe_if), for the timing-dependent bins of uarch_cg that free-running
 // generators reach only by chance. A debug request or interrupt that is pending before an
@@ -2402,8 +2428,24 @@ endclass
 //                               the next instruction in ID); 0x20 an NMI from the second cycle after
 //                               it, held until the core takes it (IRQ_TAKEN), then dropped; 0x40
 //                               fetch_enable_i off from the second cycle after it for
-//                               +gnt_fetch_off_cycles (default 40). Combine with +dside_bus_err_lo/hi
-//                               over part of the window for faulting triggers.
+//                               +gnt_fetch_off_cycles (default 40); 0x08 irq_external_i from the
+//                               second cycle after it, held until the core takes an interrupt
+//                               (IRQ_TAKEN), then dropped (the program enables it with mie.MEIE and
+//                               mstatus.MIE; not while +irq_timer_on_wfi's wfi is pending, whose
+//                               timer item drives every maskable line). Combine with
+//                               +dside_bus_err_lo/hi over part of the window for faulting triggers.
+//                               Two more for windows reaching past 0xff (offsets 0x80 and up are
+//                               bus-error sub-windows in the 0xff-wide windows of the programs
+//                               that use the bits above): 0x100 debug_req for exactly one cycle,
+//                               the cycle after the grant, then withdrawn (a halt request the DM
+//                               cancels before the hart halts; the core may never halt for it,
+//                               and the debug-entry check does not apply); 0x200 an NMI from the
+//                               second cycle after the next IRQ_TAKEN that follows the grant, held
+//                               until the core takes it (IRQ_TAKEN), then dropped.
+//   +stall_events_bus_alerts=<n> the program injects integrity errors (+dside/iside_intg_err_lo/hi):
+//                               NoAlertsTriggered is off, and instead there must be at least n
+//                               episodes of alert_major_bus_o and no minor or internal major alert
+//                               (as core_ibex_cheriot_mem_err_test).
 //   +mem_mode_on_write=<hex>    a store of V to <hex> sets the memory agents' timing for later
 //                               accesses: V[7:0] = 0 the run's own data-side delays, 1 no data-side
 //                               delays, n in 2..29 data-side responses n to 2n+4 cycles after the
@@ -2447,6 +2489,7 @@ class core_ibex_stall_events_test extends core_ibex_base_test;
   bit          gnt_trig_en;
   int unsigned gnt_fetch_off_cycles = 40;
   bit [31:0]   mem_mode_on_write;
+  int unsigned bus_alerts_min;
 
   // Debug requests raised, per trigger; NMI pulses; fetch-enable drops.
   int unsigned n_dbg[string];
@@ -2455,8 +2498,14 @@ class core_ibex_stall_events_test extends core_ibex_base_test;
   // Grants in the +gnt_trig window; NMIs held and fetch-enable drops they raised; mode changes.
   int unsigned n_gnt_trig;
   int unsigned n_gnt_nmi;
+  int unsigned n_gnt_irq;
   int unsigned n_gnt_fetch_off;
+  int unsigned n_gnt_dbg_pulse;
+  int unsigned n_gnt_nmi_after_irq;
   int unsigned n_mem_mode;
+  // +stall_events_bus_alerts: alert_major_bus_o episodes, cycles with any other alert.
+  int unsigned n_bus_alerts;
+  int unsigned n_other_alerts;
   // The run's own memory-agent timing, restored by +mem_mode_on_write V[7:0] = 0 / V[8] = 0.
   bit          dmem_zero_delays_orig, imem_zero_delays_orig;
   int unsigned dmem_valid_min_orig, dmem_valid_max_orig;
@@ -2464,6 +2513,7 @@ class core_ibex_stall_events_test extends core_ibex_base_test;
   bit          timer_raised;
   bit          dbg_busy;
   bit          nmi_busy;
+  bit          irq_busy;
   bit          fetch_off_busy;
   // Stall and fetch-off triggers enabled: from reset, or from the program's first WFI in ID or
   // first doorbell write when +irq_timer_on_wfi / +dbg_req_on_write says it has a start-up.
@@ -2492,6 +2542,7 @@ class core_ibex_stall_events_test extends core_ibex_base_test;
                   $value$plusargs("gnt_trig_hi=%h", gnt_trig_hi);
     void'($value$plusargs("gnt_fetch_off_cycles=%0d", gnt_fetch_off_cycles));
     void'($value$plusargs("mem_mode_on_write=%h", mem_mode_on_write));
+    void'($value$plusargs("stall_events_bus_alerts=%0d", bus_alerts_min));
     if (dbg_gap_max < dbg_gap_min) dbg_gap_max = dbg_gap_min;
     program_ready = !irq_timer_on_wfi && (dbg_req_on_write == 0);
     doorbell_port = new("doorbell_port", this);
@@ -2646,6 +2697,33 @@ class core_ibex_stall_events_test extends core_ibex_base_test;
     nmi_busy = 1'b0;
   endtask
 
+  // +gnt_trig offset bit 0x08: as 0x20 with irq_external_i, a maskable interrupt, so that it is
+  // taken with the instruction then in ID as the last category (an interrupt that is already
+  // pending, or unmasked by a CSR write, is taken behind a pipeline flush instead).
+  task automatic irq_until_taken();
+    irq_external_level_seq irq_h;
+    int unsigned           waited = 0;
+    irq_busy = 1'b1;
+    n_gnt_irq++;
+    irq_h = irq_external_level_seq::type_id::create("irq_gnt_raise_h");
+    irq_h.raise = 1'b1;
+    irq_h.timer = timer_raised;
+    irq_h.start(env.vseqr.irq_seqr);
+    do begin
+      @(dut_vif.dut_cb);
+      if (++waited > dbg_entry_timeout) begin
+        `uvm_error(`gfn, $sformatf("irq_external_i (+gnt_trig) held for %0d cycles without an interrupt being taken",
+                                   dbg_entry_timeout))
+        break;
+      end
+    end while (dut_vif.dut_cb.ctrl_fsm_cs != ibex_pkg::IRQ_TAKEN && !test_done);
+    irq_h = irq_external_level_seq::type_id::create("irq_gnt_drop_h");
+    irq_h.raise = 1'b0;
+    irq_h.timer = timer_raised;
+    irq_h.start(env.vseqr.irq_seqr);
+    irq_busy = 1'b0;
+  endtask
+
   // +gnt_trig offset bit 0x40: fetch_enable_i off from the second cycle after the grant. One cycle
   // later than debug_req, so that an instruction after the access that redirects the PC (a jump in
   // the next cycle) still has its target looked up before fetching stops.
@@ -2658,6 +2736,63 @@ class core_ibex_stall_events_test extends core_ibex_base_test;
     // After test_done the base test turns fetch off for good; leave it off.
     if (!test_done) dut_vif.dut_cb.fetch_enable <= ibex_pkg::IbexMuBiOn;
     fetch_off_busy = 1'b0;
+  endtask
+
+  // +gnt_trig offset bit 0x100: debug_req high in exactly the cycle after the grant (called in the
+  // grant's clocking-event time step, as request_debug), low from the next one. Not served: the
+  // request is withdrawn, so no debug entry is required for it.
+  task automatic gnt_debug_pulse();
+    dbg_busy = 1'b1;
+    n_gnt_dbg_pulse++;
+    dut_vif.dut_cb.debug_req <= 1'b1;
+    @(dut_vif.dut_cb);
+    dut_vif.dut_cb.debug_req <= 1'b0;
+    dbg_busy = 1'b0;
+  endtask
+
+  // +gnt_trig offset bit 0x200: wait for the next IRQ_TAKEN, then irq_nm_i from the second cycle
+  // after it (as nmi_until_taken: the irq agent drives on the falling edge after its next clock
+  // event), held until the core takes it, then dropped.
+  task automatic nmi_after_next_irq();
+    nmi_level_seq nmi_h;
+    int unsigned  waited = 0;
+    nmi_busy = 1'b1;
+    n_gnt_nmi_after_irq++;
+    do begin
+      @(dut_vif.dut_cb);
+      if (++waited > dbg_entry_timeout) begin
+        `uvm_error(`gfn, $sformatf("+gnt_trig NMI-after-interrupt: no IRQ_TAKEN within %0d cycles",
+                                   dbg_entry_timeout))
+        break;
+      end
+    end while (dut_vif.dut_cb.ctrl_fsm_cs != ibex_pkg::IRQ_TAKEN && !test_done);
+    nmi_h = nmi_level_seq::type_id::create("nmi_after_irq_raise_h");
+    nmi_h.raise = 1'b1;
+    nmi_h.start(env.vseqr.irq_seqr);
+    waited = 0;
+    do begin
+      @(dut_vif.dut_cb);
+      if (++waited > dbg_entry_timeout) begin
+        `uvm_error(`gfn, $sformatf("NMI (+gnt_trig, after an interrupt) held for %0d cycles without being taken",
+                                   dbg_entry_timeout))
+        break;
+      end
+    end while (dut_vif.dut_cb.ctrl_fsm_cs != ibex_pkg::IRQ_TAKEN && !test_done);
+    nmi_h = nmi_level_seq::type_id::create("nmi_after_irq_drop_h");
+    nmi_h.raise = 1'b0;
+    nmi_h.start(env.vseqr.irq_seqr);
+    nmi_busy = 1'b0;
+  endtask
+
+  // +stall_events_bus_alerts: count alert_major_bus_o episodes and cycles with any other alert.
+  task automatic watch_alerts();
+    bit prev_bus;
+    forever begin
+      @(dut_vif.dut_cb);
+      if (dut_vif.dut_cb.alert_minor || dut_vif.dut_cb.alert_major_internal) n_other_alerts++;
+      if (dut_vif.dut_cb.alert_major_bus && !prev_bus) n_bus_alerts++;
+      prev_bus = dut_vif.dut_cb.alert_major_bus;
+    end
   endtask
 
   // Wakes in the time step of the data monitor's clocking event for the grant, as dut_cb's, so a
@@ -2687,12 +2822,36 @@ class core_ibex_stall_events_test extends core_ibex_base_test;
           fork nmi_until_taken(); join_none
         end
       end
+      if (off[3]) begin
+        if (irq_busy) begin
+          `uvm_error(`gfn, $sformatf("+gnt_trig: grant of 0x%08h asks for an interrupt, but one is still held",
+                                     txn.addr))
+        end else begin
+          fork irq_until_taken(); join_none
+        end
+      end
       if (off[6]) begin
         if (fetch_off_busy) begin
           `uvm_error(`gfn, $sformatf("+gnt_trig: grant of 0x%08h asks for a fetch-enable drop, but one is in progress",
                                      txn.addr))
         end else begin
           fork gnt_fetch_off(); join_none
+        end
+      end
+      if (off[8]) begin
+        if (dbg_busy || dut_vif.dut_cb.debug_mode) begin
+          `uvm_error(`gfn, $sformatf("+gnt_trig: grant of 0x%08h asks for a debug_req pulse, but a request is in progress or the core is in debug mode",
+                                     txn.addr))
+        end else begin
+          fork gnt_debug_pulse(); join_none
+        end
+      end
+      if (off[9]) begin
+        if (nmi_busy) begin
+          `uvm_error(`gfn, $sformatf("+gnt_trig: grant of 0x%08h asks for an NMI after the next interrupt, but one is still held",
+                                     txn.addr))
+        end else begin
+          fork nmi_after_next_irq(); join_none
         end
       end
     end
@@ -2793,6 +2952,11 @@ class core_ibex_stall_events_test extends core_ibex_base_test;
     imem_zero_delays_orig = imem_cfg.zero_delays;
     imem_valid_min_orig   = imem_cfg.valid_delay_min;
     imem_valid_max_orig   = imem_cfg.valid_delay_max;
+    if (bus_alerts_min != 0) begin
+      // Integrity errors raise alert_major_bus_o on purpose; watch_alerts checks the rest.
+      `DV_ASSERT_CTRL_REQ("tb_no_alerts_triggered", 1'b0)
+      fork watch_alerts(); join_none
+    end
     fork
       vseq.start(env.vseqr);
       watch_pipeline();
@@ -2814,8 +2978,20 @@ class core_ibex_stall_events_test extends core_ibex_base_test;
     super.report_phase(phase);
     `uvm_info(`gfn, $sformatf("debug requests raised %p, NMI pulses %0d, fetch-enable drops %0d, timer raised %0d",
                               n_dbg, n_nmi, n_fetch_off, timer_raised), UVM_LOW)
-    `uvm_info(`gfn, $sformatf("+gnt_trig grants %0d (NMIs held %0d, fetch-enable drops %0d), memory mode changes %0d",
-                              n_gnt_trig, n_gnt_nmi, n_gnt_fetch_off, n_mem_mode), UVM_LOW)
+    `uvm_info(`gfn, $sformatf("+gnt_trig grants %0d (NMIs held %0d, interrupts held %0d, fetch-enable drops %0d, debug_req pulses %0d, NMIs after an interrupt %0d), memory mode changes %0d",
+                              n_gnt_trig, n_gnt_nmi, n_gnt_irq, n_gnt_fetch_off, n_gnt_dbg_pulse,
+                              n_gnt_nmi_after_irq, n_mem_mode), UVM_LOW)
+    if (bus_alerts_min != 0) begin
+      `uvm_info(`gfn, $sformatf("bus-alert episodes: %0d, other alert cycles: %0d",
+                                n_bus_alerts, n_other_alerts), UVM_LOW)
+      if (n_other_alerts != 0) begin
+        `uvm_error(`gfn, $sformatf("%0d cycles with a minor or internal major alert", n_other_alerts))
+      end
+      if (n_bus_alerts < bus_alerts_min) begin
+        `uvm_error(`gfn, $sformatf("Only %0d bus-alert episodes; +stall_events_bus_alerts expects >= %0d (an injected integrity error that raised no alert, or a program that never made its access)",
+                                   n_bus_alerts, bus_alerts_min))
+      end
+    end
     check_fired("gnt_trig_lo/hi", gnt_trig_en, n_gnt_trig);
     check_fired("mem_mode_on_write", mem_mode_on_write != 0, n_mem_mode);
     check_fired("dbg_on_stall_pct", dbg_on_stall_pct, n_dbg_of("stall"));

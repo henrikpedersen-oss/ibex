@@ -26,12 +26,14 @@
     Writes the upper half of every 64-bit counter: mcycleh and minstreth read back the written
     value with the lower half undisturbed, and both counters carry from 0xFFFFFFxx into the
     upper half; mhpmcounter3h-12h (MHPMCounterWidth = 32 in the verified configuration) read 0
-    after a write of all-ones and their lower halves are unchanged. Targets the
+    after a write of all-ones and their lower halves are unchanged. The unimplemented
+    mhpmcounter13h-31h are written too and must read 0: ibex_cs_registers.sv scores its upper-half
+    write case item once per CSR label. Targets the
     `if (counterh_we_i)` block of ibex_counter.sv in mcycle_counter_i, minstret_counter_i and the
     ten mcounters_variable_i instances (REQ_ISA_10; cp_counter_upper_half_write,
     cp_counter_lower_wrap). RISC-V mode, Spike oracle; mcountinhibit is not touched (this Spike
     does not inhibit minstret). TEST_FAIL with the failing check's code in TESTNUM (gp): 1-10,
-    20+N / 40+N for mhpmcounterN, 99 liveness, 0x100|code unexpected trap.
+    20+N / 40+N for mhpmcounterN, 60+N for the unimplemented ones, 99 liveness, 0x100|code unexpected trap.
   iterations: 1
   test_srcs: counter_high_half_write/counter_high_half_write.S
   config: riscv-tests

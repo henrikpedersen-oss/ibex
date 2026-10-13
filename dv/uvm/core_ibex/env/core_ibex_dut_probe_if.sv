@@ -47,6 +47,9 @@ interface core_ibex_dut_probe_if(input logic clk);
   logic                              wb_exception;
   // LSU in CTX_WAIT_GNT1: a CSC waiting for the grant of its first word (cheriot_enable_on_off test).
   logic                              lsu_ctx_wait_gnt1;
+  // A CHERIoT access check fails in the LSU's issue cycle (no request is sent); the error reports
+  // next cycle (cov_expr_cheriot_off_fault, +cheriot_disable_on_fault).
+  logic                              lsu_cheriot_err_next;
   // Pipeline events for core_ibex_stall_events_test, which raises debug requests, NMIs and
   // fetch-enable drops on them:
   // - the instruction in ID stays there next cycle (valid and not cleared: stalled or retained)
@@ -103,6 +106,7 @@ interface core_ibex_dut_probe_if(input logic clk);
     input irq_exc_seen;
     input wb_exception;
     input lsu_ctx_wait_gnt1;
+    input lsu_cheriot_err_next;
     input id_instr_held;
     input id_stall_mem;
     input lsu_pmp_err_next;

@@ -12,10 +12,3 @@
   test: riscv_debug_ebreakmu_test
   message: 'EBreak seen whilst doing initial debug initialization'
   reason: Known upstream failure, lowRISC/ibex#1313 (the bench flags it itself).
-
-- id: GAP-CS-3
-  test: cheriot_illegal_sweep_sail_only
-  message: 'CHERIoT-Sail mismatch|RISCV-DV handshake \(payload=TEST_FAIL\)'
-  reason: >-
-    The test enumerates encodings the RTL executes and CHERIoT-Sail rejects (Zcb,
-    draft bit-manipulation, RTL-only CSRs); it is expected to fail until each item is resolved.

@@ -29,6 +29,11 @@ class core_ibex_env_cfg extends uvm_object;
   bit[31:0]                     cheriot_disable_on_write;
   int unsigned                  cheriot_disable_gnt_delay = 40;
   int unsigned                  cheriot_disable_alert_window = 100;
+  // +cheriot_disable_on_fault=1 with +cheriot_disable_on_write: instead of the CSC case, lower the
+  // pin in the cycle the LSU reports the program's next CHERIoT access fault (an access whose
+  // capability check failed at issue: no request, the error a cycle later), so that report sees
+  // the pin Off. The grants are left alone; the alert requirement is the same.
+  bit                           cheriot_disable_on_fault;
   bit                           disable_fetch_enable_seq;
   bit                           disable_cosim;
   // +cosim_off=1: no co-simulation at all, neither Spike nor a Sail model is stepped. For
@@ -74,6 +79,7 @@ class core_ibex_env_cfg extends uvm_object;
     `uvm_field_int(cheriot_disable_on_write, UVM_DEFAULT)
     `uvm_field_int(cheriot_disable_gnt_delay, UVM_DEFAULT)
     `uvm_field_int(cheriot_disable_alert_window, UVM_DEFAULT)
+    `uvm_field_int(cheriot_disable_on_fault, UVM_DEFAULT)
     `uvm_field_int(disable_fetch_enable_seq, UVM_DEFAULT)
     `uvm_field_int(disable_cosim, UVM_DEFAULT)
     `uvm_field_int(cosim_off, UVM_DEFAULT)
@@ -100,6 +106,7 @@ class core_ibex_env_cfg extends uvm_object;
     void'($value$plusargs("cheriot_disable_on_write=%h", cheriot_disable_on_write));
     void'($value$plusargs("cheriot_disable_gnt_delay=%0d", cheriot_disable_gnt_delay));
     void'($value$plusargs("cheriot_disable_alert_window=%0d", cheriot_disable_alert_window));
+    void'($value$plusargs("cheriot_disable_on_fault=%0d", cheriot_disable_on_fault));
     void'($value$plusargs("disable_fetch_enable_seq=%0d", disable_fetch_enable_seq));
     void'($value$plusargs("disable_cosim=%0d", disable_cosim));
     void'($value$plusargs("cosim_off=%0d", cosim_off));
