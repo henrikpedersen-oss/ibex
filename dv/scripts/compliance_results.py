@@ -22,7 +22,7 @@ import json
 import sys
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[3]  # ibex/dv/testplans -> repository root
+REPO = Path(__file__).resolve().parents[3]  # ibex/dv/scripts -> repository root
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from gen_html_report import normalize_sig  # noqa: E402

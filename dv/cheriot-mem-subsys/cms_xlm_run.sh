@@ -12,7 +12,7 @@
 #   -r <resdir>  results directory under <outdir> (default results; cms_mutation.sh keeps each
 #                mutation's runs in their own)
 # Keeps <outdir>/<resdir>/<name>.<seed>.log and <name>.<seed>.result (key=value), which
-# ibex/dv/testplans/cheriot_mem_subsys_results.py reads. Exit status: 0 iff the log's CMS_RESULT
+# ibex/dv/scripts/cheriot_mem_subsys_results.py reads. Exit status: 0 iff the log's CMS_RESULT
 # line says PASS.
 set -euo pipefail
 

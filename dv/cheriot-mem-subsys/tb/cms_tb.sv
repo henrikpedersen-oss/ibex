@@ -190,7 +190,7 @@ module cms_tb;
   // shown to catch real bugs of the subsystem and not only a corrupted prediction
   // (+cms_sb_corrupt): a test that stays green with the bug in is not testing that obligation.
   // Each mutation forces one internal signal to what a plausible design error would drive.
-  // Runtime-selected, so one build serves every mutation. ibex/dv/testplans/cms_mutation_check.py
+  // Runtime-selected, so one build serves every mutation. ibex/dv/scripts/cms_mutation_check.py
   // lists the mutations and the tests that must fail with each; `make
   // cheriot-mem-subsys-mutation-xlm` runs them.
   //

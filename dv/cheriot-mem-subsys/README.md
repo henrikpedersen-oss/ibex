@@ -112,7 +112,7 @@ pass as caught.
 
 `make cheriot-mem-subsys-mutation-xlm [KEEP=1] [MUTATION=<name>]` (`cms_mutation.sh`) builds into
 `xlm_mutation_out/` without coverage, runs every (mutation, test) pair that
-`ibex/dv/testplans/cms_mutation_check.py` lists at seed 1, keeps
+`ibex/dv/scripts/cms_mutation_check.py` lists at seed 1, keeps
 `xlm_mutation_out/results/<mutation>/<name>.1.{log,result}`, and grades them; the regression's
 `xlm_out/` is never touched. Per pair: CAUGHT (the bench's verdict is FAIL; the first `CMS_ERROR`
 is shown), MISSED (it passed; an RTL assertion that fired is shown but does not count), NO LOG,

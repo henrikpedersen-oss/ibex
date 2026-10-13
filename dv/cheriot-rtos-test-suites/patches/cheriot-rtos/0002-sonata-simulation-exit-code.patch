@@ -3,7 +3,7 @@ sdk/include/platform/sunburst/platform-simulation_exit.hh: print the exit code b
 Local change (ibex_cheriot_verification). On Sonata (the sunburst platform) platform_simulation_exit()
 ignores its code and always sends the same magic string, so a scheduler panic or
 fail-simulator-on-error.h's exit(1) ends the run exactly like a clean exit(0) when the last thread
-exits. This prints "Simulation exit code: <n>" first; ibex/dv/testplans/sonata_results.py requires
+exits. This prints "Simulation exit code: <n>" first; ibex/dv/scripts/sonata_results.py requires
 code 0 for the runs that have no verdict lines of their own (regress-drs, regress-tei, hwrev-irq).
 Applied to the cheriot-rtos submodule's working tree by the root Makefile (cheriot-rtos-patch),
 idempotently; the submodule is ignore = dirty in .gitmodules.

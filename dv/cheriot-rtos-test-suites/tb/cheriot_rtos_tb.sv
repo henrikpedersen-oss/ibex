@@ -279,7 +279,7 @@ module cheriot_rtos_tb;
   // ── Mutation testing ────────────────────────────────────────────────────────────────────────
   // +sonata_mutate=<name> breaks one hardware check, so a test suite can be shown to notice: a
   // suite that stays green with the check broken is not testing it. Driven by
-  // `make sonata-mutation-check-xlm` (ibex/dv/testplans/mutation_check.py lists each mutation, the runs
+  // `make sonata-mutation-check-xlm` (ibex/dv/scripts/mutation_check.py lists each mutation, the runs
   // that must go red, and the tests that must report FAIL). Runtime-selected, so one build serves
   // every mutation. The plusarg keeps its Sonata-flow name, as do the root Makefile targets.
   //

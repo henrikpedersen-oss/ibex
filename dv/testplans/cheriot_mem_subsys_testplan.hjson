@@ -606,7 +606,7 @@
             between W1 and its tag write not flagged, ALERT_TEST.regwen ignored) and mode gating
             (the core's bitmap window on a loose MuBi4 test). The
             mutations, the RTL each replaces and the tests that must fail with each are in
-            ibex/dv/testplans/cms_mutation_check.py.
+            ibex/dv/scripts/cms_mutation_check.py.
 
             **Check**: each listed run prints "MUTATION <name> active" (the forced value differed
             from the RTL's) and its CMS_RESULT is FAIL; a PASS is a miss, whatever an RTL

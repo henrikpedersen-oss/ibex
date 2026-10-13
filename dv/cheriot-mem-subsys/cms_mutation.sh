@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # CHERIoT memory subsystem bench: the mutation check. One build, then every run of
-# ibex/dv/testplans/cms_mutation_check.py --list-runs with +cms_mutate=<mutation>, then the grade.
+# ibex/dv/scripts/cms_mutation_check.py --list-runs with +cms_mutate=<mutation>, then the grade.
 #
 # Usage: ./cms_mutation.sh [-k] [-m <mutation>]
 #   -k  keep the existing build in xlm_mutation_out
@@ -28,8 +28,8 @@ while getopts "km:" opt; do
 done
 
 OUT=xlm_mutation_out
-PY="${SUPER_DIR}/ibex/dv/testplans/py.sh"
-CHECK="${SUPER_DIR}/ibex/dv/testplans/cms_mutation_check.py"
+PY="${SUPER_DIR}/ibex/dv/scripts/py.sh"
+CHECK="${SUPER_DIR}/ibex/dv/scripts/cms_mutation_check.py"
 only_arg=()
 [[ -n "${ONLY}" ]] && only_arg=(--only "${ONLY}")
 

@@ -156,7 +156,7 @@ Everything goes to `xlm_rtos_out/`, which git ignores:
 
 `+sonata_mutate=<name>` forces one hardware check off at run time, so one build serves every
 mutation. `make sonata-mutation-check-xlm` runs each mutation against the suites that should
-notice. `ibex/dv/testplans/mutation_check.py` holds the table of mutations, runs and tests that must report
+notice. `ibex/dv/scripts/mutation_check.py` holds the table of mutations, runs and tests that must report
 FAIL, and grades each result:
 
 | Mutation | Forces | Must fail |
