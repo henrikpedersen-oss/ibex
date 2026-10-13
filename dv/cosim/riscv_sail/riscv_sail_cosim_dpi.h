@@ -27,6 +27,9 @@ RISCV_SAIL_DPI void riscv_sail_cosim_configure(const svBitVecVal *ram_base,
                                                int pmp_grain);
 
 // (Re)initialise to the core's reset state with empty memory.
+// misa.B (bit-manipulation configured), applied by the next init. Default 0.
+RISCV_SAIL_DPI void riscv_sail_cosim_set_misa_b(svBit b);
+
 RISCV_SAIL_DPI void riscv_sail_cosim_init(const svBitVecVal *boot_addr);
 RISCV_SAIL_DPI void riscv_sail_cosim_cleanup(void);
 
@@ -52,6 +55,18 @@ RISCV_SAIL_DPI uint32_t riscv_sail_cosim_get_mtval(void);
 RISCV_SAIL_DPI int riscv_sail_cosim_step(const svBitVecVal *insn, const svBitVecVal *pc);
 
 RISCV_SAIL_DPI void riscv_sail_cosim_set_mcycle(uint64_t mcycle);
+
+// The model's PC. set_pc is for extensions the bench emulates on the model (Zcmp micro-ops, Zcb
+// stepped as its 32-bit equivalent): the new PC must come from the model's own PC, never the DUT's.
+RISCV_SAIL_DPI uint32_t riscv_sail_cosim_get_pc(void);
+RISCV_SAIL_DPI void     riscv_sail_cosim_set_pc(const svBitVecVal *pc);
+
+// Bench inputs of Ibex's CSRs in the model's platform (riscv-sail-model/c_emulator/
+// ibex_platform_csrs.c). Call before each step, as set_mcycle:
+//   set_mhpmcounter:      mhpmcounter<idx> (idx 3..31) := value, the RVFI record's
+//   set_ic_scr_key_valid: cpuctrlsts.ic_scr_key_valid (bit 8), the RVFI record's value
+RISCV_SAIL_DPI void riscv_sail_cosim_set_mhpmcounter(uint32_t idx, uint64_t value);
+RISCV_SAIL_DPI void riscv_sail_cosim_set_ic_scr_key_valid(svBit valid);
 
 // Fields of the RVFI execution packet from the last step(). rd and mem getters return 0 when
 // the model reported no integer write / memory access.

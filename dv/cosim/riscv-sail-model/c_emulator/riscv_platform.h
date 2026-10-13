@@ -40,3 +40,7 @@ unit plat_term_write(mach_bits);
 mach_bits plat_htif_tohost(unit);
 
 unit memea(mach_bits, sail_int);
+
+// Local (ibex_cheriot_verification, VENDORED_FROM 2026-10-12): Ibex's implementation-defined
+// CSRs. The generated C reaches the ibex_csr_* hooks through this header.
+#include "ibex_platform_csrs.h"

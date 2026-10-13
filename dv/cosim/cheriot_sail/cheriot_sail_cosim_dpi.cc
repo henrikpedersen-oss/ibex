@@ -67,6 +67,7 @@ extern uint64_t rv_clint_size;
 extern bool     rv_enable_fdext;
 extern bool     rv_enable_zfinx;
 extern bool     rv_enable_misaligned;
+extern bool     rv_enable_vext;
 }  // extern "C"
 
 // ---------------------------------------------------------------------------
@@ -154,6 +155,10 @@ void cheriot_sail_cosim_init(const svBitVecVal *boot_addr_p) {
   // Must be set before zinit_model(): zinit_sys() reads them to build misa/mstatus.
   rv_enable_fdext = false;
   rv_enable_zfinx = true;
+  // ibex has no vector unit. The platform default (true) set misa.V, so a misa read differed in
+  // bit 21 (TestRIG cheriot_unstructured 2026-10-11, csrrw misa: rtl 0x40801016, model 0x40a01016)
+  // and vector encodings would execute in the model. The RISC-V bridge already clears it.
+  rv_enable_vext = false;
   // ibex performs misaligned loads/stores in hardware (split into two bus accesses); the
   // model must not trap on them. The sail-riscv platform default is false.
   rv_enable_misaligned = true;

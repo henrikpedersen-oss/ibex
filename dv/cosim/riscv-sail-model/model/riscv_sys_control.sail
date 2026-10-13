@@ -41,7 +41,8 @@ function is_CSR_defined (csr : csreg, p : Privilege) -> bool =
     0x344 => p == Machine, // mip
 
     // pmpcfgN
-    0x3A @ idx : bits(4) => p == Machine & sys_pmp_count() > unsigned(idx) & (idx[0] == bitzero | sizeof(xlen) == 32),
+    /* local: pmpcfgN holds entries 4N..4N+3, so it exists only if entry 4N does (VENDORED_FROM) */
+    0x3A @ idx : bits(4) => p == Machine & sys_pmp_count() > 4 * unsigned(idx) & (idx[0] == bitzero | sizeof(xlen) == 32),
 
     // pmpaddrN. Unfortunately the PMP index does not nicely align with the CSR index bits.
     0x3B @ idx : bits(4) => p == Machine & sys_pmp_count() > unsigned(0b00 @ idx),

@@ -24,6 +24,7 @@ extern "C" {
 #include "sail.h"
 #include "sail_failure.h"
 #include "riscv_rvfi_model_RV32.h"
+#include "ibex_platform_csrs.h"
 
 void model_init(void);
 void model_fini(void);
@@ -75,6 +76,14 @@ void riscv_sail_cosim_configure(const svBitVecVal *ram_base_p, const svBitVecVal
   s_pmp_grain = (uint64_t)pmp_grain;
 }
 
+// misa.B, applied by the next init: set when the core is configured with bit-manipulation
+// (RV32B != RV32BNone; ibex/doc/01_overview/compliance.rst lists B as configurable). Default off.
+static bool s_misa_b = false;
+
+void riscv_sail_cosim_set_misa_b(svBit b) {
+  s_misa_b = b != 0;
+}
+
 static uint64_t lbits_low64(lbits *v) {
   return (uint64_t)mpz_get_ui(*v->bits);
 }
@@ -84,10 +93,14 @@ void riscv_sail_cosim_init(const svBitVecVal *boot_addr_p) {
   if (s_initialized) {
     model_fini();
   }
-  // The core has no F/D and FS is read-only zero; legalize_mstatus() only clears FS when Zfinx
-  // is on, so both are needed. Must precede zinit_model(), which builds misa/mstatus from them.
+  // The core has no F/D, no Zfinx, and FS is read-only zero. Must precede zinit_model(), which
+  // builds misa/mstatus from them. Zfinx was on until 2026-10-10 because upstream
+  // legalize_mstatus() cleared FS only with Zfinx; that also made the Zfinx encodings
+  // (fmsub/fnmsub/... on integer registers) legal in the model, while the core traps on them
+  // (TestRIG riscv-unstructured: "trap: rtl=1 model=0" on opcodes 0x47/0x4B). legalize_mstatus()
+  // is now patched to clear FS whenever F/D are absent (riscv-sail-model/VENDORED_FROM).
   rv_enable_fdext = false;
-  rv_enable_zfinx = true;
+  rv_enable_zfinx = false;
   // ibex performs misaligned loads/stores in hardware (split into two bus accesses); the
   // model must not trap on them. The sail-riscv platform default is false.
   rv_enable_misaligned = true;
@@ -106,6 +119,13 @@ void riscv_sail_cosim_init(const svBitVecVal *boot_addr_p) {
   // Match ibex_cs_registers.sv MSTATUS_RST_VAL (mpie=1, mpp=U): MPIE=bit 7, MPP=[12:11]. mpp=U is
   // legal here: standard RISC-V mode has U-mode (misa.U=1), unlike CHERIoT mode.
   zmstatus.zbits = (zmstatus.zbits & ~UINT64_C(0x1800)) | UINT64_C(0x80);
+  // ibex has no S-mode and no A extension (MISA_VALUE S = 0, A = 0); init_sys hard-codes misa.S
+  // and misa.A to 1 with no platform switch, so the S-mode CSRs (stval, sstatus, ...),
+  // medeleg/mideleg and the AMO/LR/SC encodings were legal in the model and trapped on the core
+  // (TestRIG riscv_unstructured 2026-10-12, csrrci on stval 0x143). haveSupMode() and
+  // haveAtomics() read misa, and misa is read-only here, so clearing the bits is enough.
+  zmisa.zbits &= ~((UINT64_C(1) << 18) | (UINT64_C(1) << 0));
+  zmisa.zbits = s_misa_b ? (zmisa.zbits | (UINT64_C(1) << 1)) : (zmisa.zbits & ~(UINT64_C(1) << 1));
   zext_rvfi_init(UNIT);
 
   // RAM as configured (TestRIG default: 8 MiB at 0x80000000, as the CHERIoT model and
@@ -186,6 +206,22 @@ int riscv_sail_cosim_step(const svBitVecVal *insn_p, const svBitVecVal *pc_p) {
 
 void riscv_sail_cosim_set_mcycle(uint64_t mcycle) {
   zmcycle = mcycle;
+}
+
+uint32_t riscv_sail_cosim_get_pc(void) {
+  return (uint32_t)zPC;
+}
+
+void riscv_sail_cosim_set_pc(const svBitVecVal *pc_p) {
+  zPC = (uint64_t)pc_p[0];
+}
+
+void riscv_sail_cosim_set_mhpmcounter(uint32_t idx, uint64_t value) {
+  ibex_platform_set_mhpmcounter(idx, value);
+}
+
+void riscv_sail_cosim_set_ic_scr_key_valid(svBit valid) {
+  ibex_platform_set_ic_scr_key_valid(valid != 0);
 }
 
 void riscv_sail_cosim_write_mem_byte(const svBitVecVal *addr_p, const svBitVecVal *data_p) {

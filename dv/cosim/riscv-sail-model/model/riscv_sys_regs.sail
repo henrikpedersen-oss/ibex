@@ -138,7 +138,7 @@ function haveZbc()  -> bool = true
 function haveZbs()  -> bool = true
 
 /* Zfa (additional FP) extension */
-function haveZfa()  -> bool = true
+function haveZfa()  -> bool = false /* local: ibex has no F/Zfa (VENDORED_FROM) */
 
 /* Scalar Cryptography extensions support. */
 function haveZbkb() -> bool = true
@@ -148,17 +148,18 @@ function haveZbkx() -> bool = true
 /* Cryptography extension support. Note these will need updating once */
 /* Sail can be dynamically configured with different extension support */
 /* and have dynamic changes of XLEN via S/UXL */
-function haveZkr()    -> bool = true
-function haveZksh()   -> bool = true
-function haveZksed()  -> bool = true
-function haveZknh()   -> bool = true
-function haveZkne()   -> bool = true
-function haveZknd()   -> bool = true
+/* local: ibex implements no scalar crypto (VENDORED_FROM) */
+function haveZkr()    -> bool = false
+function haveZksh()   -> bool = false
+function haveZksed()  -> bool = false
+function haveZknh()   -> bool = false
+function haveZkne()   -> bool = false
+function haveZknd()   -> bool = false
 
 function haveZmmul()  -> bool = true
 
 /* Zicond extension support */
-function haveZicond() -> bool = true
+function haveZicond() -> bool = false /* local: ibex has no Zicond (VENDORED_FROM) */
 
 bitfield Mstatush : bits(32) = {
   MBE  : 5,
@@ -255,7 +256,10 @@ function legalize_mstatus(o : Mstatus, v : xlenbits) -> Mstatus = {
    * but only if Zfinx isn't enabled.
    * FIXME: This should be made a platform parameter.
    */
-  let m = if sys_enable_zfinx() then [m with FS = extStatus_to_bits(Off)] else m;
+  /* Local change (Ibex, VENDORED_FROM 2026-10-10): FS is read-only zero whenever F/D are absent,
+   * not only with Zfinx. Ibex has neither and no FPU emulation, and enabling Zfinx just to clear
+   * FS also made the Zfinx encodings (fmadd/fmsub/... on integer registers) legal in the model. */
+  let m = if sys_enable_zfinx() | not(sys_enable_fdext()) then [m with FS = extStatus_to_bits(Off)] else m;
   let dirty = extStatus_of_bits(m[FS]) == Dirty | extStatus_of_bits(m[XS]) == Dirty |
               extStatus_of_bits(m[VS]) == Dirty;
   let m = [m with SD = bool_to_bits(dirty)];

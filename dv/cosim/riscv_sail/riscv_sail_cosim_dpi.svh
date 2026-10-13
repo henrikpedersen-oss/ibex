@@ -9,6 +9,7 @@
 
 import "DPI-C" function void riscv_sail_cosim_configure(bit [31:0] ram_base, bit [31:0] ram_size,
                                                         int pmp_count, int pmp_grain);
+import "DPI-C" function void riscv_sail_cosim_set_misa_b(bit b);
 import "DPI-C" function void riscv_sail_cosim_init(bit [31:0] boot_addr);
 import "DPI-C" function void riscv_sail_cosim_cleanup();
 import "DPI-C" function void riscv_sail_cosim_write_mem_byte(bit [31:0] addr, bit [7:0] data);
@@ -18,6 +19,11 @@ import "DPI-C" function int unsigned riscv_sail_cosim_get_mcause();
 import "DPI-C" function int unsigned riscv_sail_cosim_get_mtval();
 import "DPI-C" function int  riscv_sail_cosim_step(bit [31:0] insn, bit [31:0] pc);
 import "DPI-C" function void riscv_sail_cosim_set_mcycle(longint unsigned mcycle);
+import "DPI-C" function int unsigned riscv_sail_cosim_get_pc();
+import "DPI-C" function void riscv_sail_cosim_set_pc(bit [31:0] pc);
+import "DPI-C" function void riscv_sail_cosim_set_mhpmcounter(int unsigned idx,
+                                                              longint unsigned value);
+import "DPI-C" function void riscv_sail_cosim_set_ic_scr_key_valid(bit valid);
 
 import "DPI-C" function int unsigned     riscv_sail_cosim_get_pc_wdata();
 import "DPI-C" function bit              riscv_sail_cosim_get_trap();

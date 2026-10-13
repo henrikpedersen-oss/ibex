@@ -116,10 +116,19 @@ module ibex_fetch_fifo #(
   // dii_insn with dii_valid, the core consumes it once (dii_ack), and the testbench offers the
   // next only after that one has retired. Nothing acked can then be flushed by a branch, trap or
   // fence.i, so nothing ever needs replaying.
+  //
+  // Zcmp (cm.push/pop/mv*): the IF stage holds the instruction here (out_ready_i low) while the
+  // compressed decoder issues its micro-ops, and takes it only with the last one, so the packet
+  // was acked after its first micro-ops had retired, and never if one of them trapped (the core
+  // then ran the same cm.push again at the handler, forever). The testbench therefore also drives
+  // dii_uop_first and dii_expanding from this core's compressed decoder; see the same block in
+  // ibex_icache.sv.
   logic [31:0] dii_insn;
   logic        dii_valid;
   logic [31:0] dii_pc;
   logic        dii_ack;
+  logic        dii_uop_first;
+  logic        dii_expanding;
 
   // Set on consumption, cleared when the testbench withdraws the packet, so the core cannot
   // take the same packet twice in the cycles before the testbench reacts to dii_ack.
@@ -129,10 +138,11 @@ module ibex_fetch_fifo #(
   // The injected word is served at every PC, as the reference model executes it at every PC
   // (RVFI-DII): an instruction stream does not depend on where the core fetches from.
   assign dii_pc       = out_addr_o;
-  assign dii_avail    = dii_valid && !dii_taken_q;
+  assign dii_avail    = (dii_valid && !dii_taken_q) || dii_expanding;
   // Not in a cycle where the fetch stage is being cleared: the packet stays offered and is
   // consumed from the new PC instead.
-  assign dii_ack      = out_ready_i && out_valid_o && !clear_i;
+  assign dii_ack      = out_valid_o &&
+                        (dii_uop_first || (out_ready_i && !clear_i && !dii_expanding));
 
   always_ff @(posedge clk_i or negedge rst_ni) begin : dii_ff
     if (!rst_ni) begin

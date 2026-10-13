@@ -22497,7 +22497,9 @@ struct zMstatus zlegalizze_mstatus(struct zMstatus zo, uint64_t zv)
   struct zMstatus zghz3860;
   {
     bool z2zE337;
-    z2zE337 = sys_enable_zfinx(UNIT);
+    /* Local change, mirrors model/riscv_sys_regs.sail legalize_mstatus: FS is cleared whenever
+     * F/D are absent, not only with Zfinx (see VENDORED_FROM, 2026-10-10). */
+    z2zE337 = sys_enable_zfinx(UNIT) || !sys_enable_fdext(UNIT);
     if (z2zE337) {  zghz3860 = z_update_Mstatus_FS(zghz3859, UINT64_C(0b00));  } else {  zghz3860 = zghz3859;  }
   }
   bool zdirty;
@@ -29034,6 +29036,14 @@ void startup_zpmpWriteCfg(void)
 struct zPmpcfg_ent zpmpWriteCfg(int64_t zn, struct zPmpcfg_ent zcfg, uint64_t zv)
 {
   __label__ end_function_1847, end_block_exception_1848;
+  // Local patch (VENDORED_FROM 2026-10-12, Smepmp): pmpWriteCfg with RLB (lock
+  // bypass) and MML (RW=01 kept, new executable M-mode-only/locked-shared rules refused).
+  {
+    (void)zn;
+    struct zPmpcfg_ent zres;
+    zres.zbits = ibex_smepmp_write_cfg(zcfg.zbits, zv, sys_pmp_grain(UNIT));
+    return zres;
+  }
   struct zPmpcfg_ent zghz31459;
   bool z2zE720;
   z2zE720 = zpmpLocked(zcfg);
@@ -29276,6 +29286,8 @@ void finish_zpmpWriteCfgReg(void)
 uint64_t zpmpWriteAddr(bool zlocked, bool ztor_locked, uint64_t zreg, uint64_t zv)
 {
   __label__ end_function_1855, end_block_exception_1856;
+  // Local patch (VENDORED_FROM 2026-10-12, Smepmp): mseccfg.RLB bypasses the lock.
+  if (ibex_mseccfg_rlb()) { zlocked = false; ztor_locked = false; }
   uint64_t z6zE426;
   bool z2zE740;
   {
@@ -29739,6 +29751,13 @@ void finish_zpmpCheckRWX(void)
 bool zpmpCheckPerms(struct zPmpcfg_ent zent, struct zAccessTypezIuzK zacc, enum zPrivilege zpriv)
 {
   __label__ case_1879, case_1878, finish_match_1877, end_function_1880, end_block_exception_1881;
+  // Local patch (VENDORED_FROM 2026-10-12, Smepmp): with mseccfg.MML the truth table
+  // of Smepmp 1.0 section 2.1 replaces the L-bit rule (c_emulator/ibex_platform_csrs.c).
+  if (ibex_mseccfg_mml()) {
+    int acc = zacc.kind == Kind_zReadzIuzK ? 0 : zacc.kind == Kind_zWritezIuzK ? 1
+            : zacc.kind == Kind_zReadWritezIuzK ? 2 : 3;
+    return ibex_smepmp_mml_perms(zent.zbits, acc, zpriv == zMachine);
+  }
   bool z6zE430;
   bool z3zE948;
   {
@@ -30091,7 +30110,7 @@ void zpmpCheck(struct zoptionzIUExceptionTypezK *z6zE434, uint64_t zaddr, sail_i
   unit z3zE973;
   z3zE973 = UNIT;
   bool z2zE789;
-  z2zE789 = eq_zPrivilege(zpriv, zMachine);
+  z2zE789 = eq_zPrivilege(zpriv, zMachine) && ibex_smepmp_m_unmatched_allowed(zacc.kind == Kind_zExecutezIuzK); /* Local patch (VENDORED_FROM 2026-10-12, Smepmp): MMWP, MML 4c */
   if (z2zE789) {  zNonezIUExceptionTypezK((*(&z6zE434)), UNIT);  } else {
     struct zExceptionType z2zE790;
     CREATE(zExceptionType)(&z2zE790);
@@ -40231,7 +40250,8 @@ uint64_t zset_mtvec(uint64_t zvalue)
 {
   __label__ end_function_2276, end_block_exception_2277;
   uint64_t z6zE496;
-  zmtvec = zlegalizze_tvec(zmtvec, zvalue);
+  /* local: Ibex's mtvec (doc cs_registers.rst:204-219): BASE 256-byte aligned, MODE read-only 01 */
+  zmtvec.zbits = (zvalue & ~UINT64_C(0xFF)) | UINT64_C(0x1);
   unit z3zE1253;
   z3zE1253 = UNIT;
   z6zE496 = zmtvec.zbits;
@@ -47785,7 +47805,7 @@ bool zext_is_CSR_defined(uint64_t z3zE1899, enum zPrivilege z3zE1900)
     bool z3zE1931;
     z3zE1931 = (zp0z3 == UINT64_C(0x008));
     if (!(z3zE1931)) {  goto case_3024;  }
-    z3zE1901 = true;
+    z3zE1901 = zhaveVExt(UNIT); /* local: vector CSRs only with V (ibex has none) */
     goto finish_match_3005;
   }
 case_3024: ;
@@ -47795,7 +47815,7 @@ case_3024: ;
     bool z3zE1930;
     z3zE1930 = (zuz3716 == UINT64_C(0xC20));
     if (!(z3zE1930)) {  goto case_3023;  }
-    z3zE1901 = true;
+    z3zE1901 = zhaveVExt(UNIT); /* local: vector CSRs only with V (ibex has none) */
     goto finish_match_3005;
   }
 case_3023: ;
@@ -47805,7 +47825,7 @@ case_3023: ;
     bool z3zE1929;
     z3zE1929 = (zuz3717 == UINT64_C(0xC21));
     if (!(z3zE1929)) {  goto case_3022;  }
-    z3zE1901 = true;
+    z3zE1901 = zhaveVExt(UNIT); /* local: vector CSRs only with V (ibex has none) */
     goto finish_match_3005;
   }
 case_3022: ;
@@ -47815,7 +47835,7 @@ case_3022: ;
     bool z3zE1928;
     z3zE1928 = (zuz3718 == UINT64_C(0xC22));
     if (!(z3zE1928)) {  goto case_3021;  }
-    z3zE1901 = true;
+    z3zE1901 = zhaveVExt(UNIT); /* local: vector CSRs only with V (ibex has none) */
     goto finish_match_3005;
   }
 case_3021: ;
@@ -47825,7 +47845,7 @@ case_3021: ;
     bool z3zE1927;
     z3zE1927 = (zuz3719 == UINT64_C(0x009));
     if (!(z3zE1927)) {  goto case_3020;  }
-    z3zE1901 = true;
+    z3zE1901 = zhaveVExt(UNIT); /* local: vector CSRs only with V (ibex has none) */
     goto finish_match_3005;
   }
 case_3020: ;
@@ -47835,7 +47855,7 @@ case_3020: ;
     bool z3zE1926;
     z3zE1926 = (zuz3720 == UINT64_C(0x00A));
     if (!(z3zE1926)) {  goto case_3019;  }
-    z3zE1901 = true;
+    z3zE1901 = zhaveVExt(UNIT); /* local: vector CSRs only with V (ibex has none) */
     goto finish_match_3005;
   }
 case_3019: ;
@@ -47845,7 +47865,7 @@ case_3019: ;
     bool z3zE1925;
     z3zE1925 = (zuz3721 == UINT64_C(0x00F));
     if (!(z3zE1925)) {  goto case_3018;  }
-    z3zE1901 = true;
+    z3zE1901 = zhaveVExt(UNIT); /* local: vector CSRs only with V (ibex has none) */
     goto finish_match_3005;
   }
 case_3018: ;
@@ -49170,6 +49190,9 @@ void startup_zis_CSR_defined(void)
 bool zis_CSR_defined(uint64_t zcsr, enum zPrivilege zp)
 {
   __label__ case_3126, case_3125, case_3124, case_3123, case_3122, case_3121, case_3120, case_3119, case_3118, case_3117, case_3116, case_3115, case_3114, case_3113, case_3112, case_3111, case_3110, case_3109, case_3108, case_3107, case_3106, case_3105, case_3104, case_3103, case_3102, case_3101, case_3100, case_3099, case_3098, case_3097, case_3096, case_3095, case_3094, case_3093, case_3092, case_3091, case_3090, case_3089, case_3088, case_3087, case_3086, case_3085, case_3084, case_3083, case_3082, case_3081, case_3080, case_3079, case_3078, case_3077, case_3076, finish_match_3075, end_function_3127, end_block_exception_3128;
+  // Local patch (VENDORED_FROM 2026-10-12), mirrors riscv_sys_control.sail is_CSR_defined:
+  // Ibex's CSRs (c_emulator/ibex_platform_csrs.c); only hpmcounterX(h) exist below M-mode.
+  if (ibex_csr_defined(zcsr)) return zp == zMachine || (zcsr & UINT64_C(0xF00)) == UINT64_C(0xC00);
   bool z6zE601;
   bool z3zE1981;
   {
@@ -49438,7 +49461,7 @@ case_3107: ;
           sail_unsigned(&zghz32318, zghz32317);
           z2zE1295 = CONVERT_OF(mach_int, sail_int)(zghz32318);
         }
-        z2zE1298 = (z2zE1294 > z2zE1295);
+        z2zE1298 = (z2zE1294 > 4 * z2zE1295); /* local: pmpcfgN holds entries 4N..4N+3 */
       }
       bool z3zE2050;
       if (z2zE1298) {
@@ -50032,7 +50055,7 @@ case_3078: ;
     bool z3zE1983;
     z3zE1983 = (zuz3827 == UINT64_C(0x015));
     if (!(z3zE1983)) {  goto case_3077;  }
-    z3zE1981 = true;
+    z3zE1981 = false; /* local: haveZkr() = false (seed CSR), ibex has no Zkr */
     goto finish_match_3075;
   }
 case_3077: ;
@@ -50231,6 +50254,9 @@ void startup_zcheck_Counteren(void)
 bool zcheck_Counteren(uint64_t zcsr, enum zPrivilege zp)
 {
   __label__ case_3143, case_3142, case_3141, case_3140, case_3139, case_3138, case_3137, finish_match_3136, end_function_3144, end_block_exception_3145;
+  // Local patch (VENDORED_FROM 2026-10-12), mirrors riscv_sys_control.sail check_Counteren:
+  // Ibex's hpmcounterX(h): M-mode always, U-mode if mcounteren bit X is set.
+  if (ibex_csr_defined(zcsr)) return zp == zMachine || ibex_csr_user_counter_enabled(zcsr);
   bool z6zE604;
   struct ztuple_z8z5bv12zCz0z5enumz0zzPrivilegez9 z3zE2086;
   z3zE2086.ztup0 = zcsr;
@@ -51576,6 +51602,9 @@ void startup_ztrap_handler(void)
 uint64_t ztrap_handler(enum zPrivilege zdel_priv, bool zintr, uint64_t zc, uint64_t zpc, struct zoptionzIbzK zinfo, struct zoptionzIuzK zext)
 {
   __label__ case_3205, case_3200, case_3199, finish_match_3198, end_function_3206, end_block_exception_3207;
+  // Local patch (VENDORED_FROM 2026-10-12), mirrors riscv_sys_control.sail trap_handler:
+  // a synchronous exception sets cpuctrlsts.sync_exc_seen / double_fault_seen.
+  if (!zintr) ibex_csr_sync_exception(UNIT);
   uint64_t z6zE614;
   unit z3zE2157;
   z3zE2157 = zrvfi_trap(UNIT);
@@ -52398,6 +52427,9 @@ void startup_zexception_handler(void)
 uint64_t zexception_handler(enum zPrivilege zcur_priv, struct zctl_result zctl, uint64_t zpc)
 {
   __label__ case_3213, case_3212, case_3211, case_3210, finish_match_3209, end_function_3214, end_block_exception_3215;
+  // Local patch (VENDORED_FROM 2026-10-12), mirrors riscv_sys_control.sail exception_handler:
+  // MRET clears cpuctrlsts.sync_exc_seen.
+  if (zctl.kind == Kind_zCTL_MRET) ibex_csr_mret(UNIT);
   uint64_t z6zE615;
   struct ztuple_z8z5enumz0zzPrivilegezCz0z5unionz0zzctl_resultz9 z3zE2211;
   CREATE(ztuple_z8z5enumz0zzPrivilegezCz0z5unionz0zzctl_resultz9)(&z3zE2211);
@@ -53324,6 +53356,8 @@ void startup_zinit_sys(void)
 unit zinit_sys(unit z3zE2251)
 {
   __label__ end_function_3223, end_block_exception_3224;
+  // Local patch (VENDORED_FROM 2026-10-12), mirrors riscv_sys_control.sail init_sys.
+  ibex_csr_reset(UNIT);
   unit z6zE618;
   zcur_privilege = zMachine;
   unit z3zE2321;
@@ -68688,6 +68722,8 @@ void startup_zreadCSR(void)
 uint64_t zreadCSR(uint64_t zcsr)
 {
   __label__ end_function_4218, end_block_exception_4219;
+  // Local patch (VENDORED_FROM 2026-10-12), mirrors riscv_insts_zicsr.sail readCSR.
+  if (ibex_csr_defined(zcsr)) return ibex_csr_read(zcsr);
   uint64_t z6zE776;
   uint64_t zres;
   {
@@ -69904,6 +69940,19 @@ void startup_zwriteCSR(void)
 unit zwriteCSR(uint64_t zcsr, uint64_t zvalue)
 {
   __label__ case_4272, case_4271, finish_match_4270, end_function_4273, end_block_exception_4274;
+  // Local patch (VENDORED_FROM 2026-10-12), mirrors riscv_insts_zicsr.sail writeCSR. The model's
+  // own mcountinhibit (gating minstret) and mcounteren (gating cycle/instret below M-mode) follow
+  // the same write; Ibex has no time counter, so mcounteren.TM stays 0.
+  if (ibex_csr_defined(zcsr)) {
+    if (zcsr == UINT64_C(0x747)) {  /* Local patch (VENDORED_FROM 2026-10-12, Smepmp): RLB rule 2b */
+      bool any_locked = false;
+      for (size_t i = 0; i < zpmpcfg_n.len; i++) any_locked |= (zpmpcfg_n.data[i].zbits >> 7) & 1;
+      ibex_mseccfg_set_any_locked(any_locked);
+    }
+    if (zcsr == UINT64_C(0x320)) zmcountinhibit = zlegalizze_mcountinhibit(zmcountinhibit, zvalue);
+    if (zcsr == UINT64_C(0x306)) zmcounteren = zlegalizze_mcounteren(zmcounteren, zvalue & ~UINT64_C(0x2));
+    return ibex_csr_write(zcsr, zvalue);
+  }
   unit z6zE777;
   struct zoptionzIbzK zres;
   CREATE(zoptionzIbzK)(&zres);
@@ -146906,6 +146955,7 @@ endif_16763: ;
   KILL(zast)(&zz42885);
   goto finish_match_9253;
 case_9268: ;
+  goto case_9267; /* local: Zfa off, ibex has no F */
   uint64_t zz42887;
   zz42887 = (safe_rshift(UINT64_MAX, 64 - 7) & (zz40 >> INT64_C(25)));
   uint64_t zz42888;
@@ -146996,6 +147046,7 @@ endif_16775: ;
   KILL(zast)(&zz42904);
   goto finish_match_9253;
 case_9267: ;
+  goto case_9266; /* local: Zfa off, ibex has no F */
   uint64_t zz42906;
   zz42906 = (safe_rshift(UINT64_MAX, 64 - 7) & (zz40 >> INT64_C(25)));
   uint64_t zz42907;
@@ -147075,6 +147126,7 @@ endif_16785: ;
   KILL(zast)(&zz42920);
   goto finish_match_9253;
 case_9266: ;
+  goto case_9265; /* local: Zfa off, ibex has no F */
   uint64_t zz42922;
   zz42922 = (safe_rshift(UINT64_MAX, 64 - 7) & (zz40 >> INT64_C(25)));
   uint64_t zz42923;
@@ -147165,6 +147217,7 @@ endif_16797: ;
   KILL(zast)(&zz42939);
   goto finish_match_9253;
 case_9265: ;
+  goto case_9264; /* local: Zfa off, ibex has no F */
   uint64_t zz42941;
   zz42941 = (safe_rshift(UINT64_MAX, 64 - 7) & (zz40 >> INT64_C(25)));
   uint64_t zz42942;
@@ -147243,6 +147296,7 @@ endif_16807: ;
   KILL(zast)(&zz42956);
   goto finish_match_9253;
 case_9264: ;
+  goto case_9263; /* local: Zfa off, ibex has no F */
   uint64_t zz42958;
   zz42958 = (safe_rshift(UINT64_MAX, 64 - 7) & (zz40 >> INT64_C(25)));
   uint64_t zz42959;
@@ -147321,6 +147375,7 @@ endif_16817: ;
   KILL(zast)(&zz42973);
   goto finish_match_9253;
 case_9263: ;
+  goto case_9262; /* local: Zfa off, ibex has no F */
   uint64_t zz42975;
   zz42975 = (safe_rshift(UINT64_MAX, 64 - 7) & (zz40 >> INT64_C(25)));
   uint64_t zz42976;
@@ -147388,6 +147443,7 @@ endif_16825: ;
   KILL(zast)(&zz42987);
   goto finish_match_9253;
 case_9262: ;
+  goto case_9261; /* local: Zfa off, ibex has no F */
   uint64_t zz42989;
   zz42989 = (safe_rshift(UINT64_MAX, 64 - 7) & (zz40 >> INT64_C(25)));
   uint64_t zz42990;
@@ -147455,6 +147511,7 @@ endif_16833: ;
   KILL(zast)(&zz43001);
   goto finish_match_9253;
 case_9261: ;
+  goto case_9260; /* local: Zfa off, ibex has no F */
   uint64_t zz43003;
   zz43003 = (safe_rshift(UINT64_MAX, 64 - 7) & (zz40 >> INT64_C(25)));
   uint64_t zz43004;
@@ -147533,6 +147590,7 @@ endif_16843: ;
   KILL(zast)(&zz43018);
   goto finish_match_9253;
 case_9260: ;
+  goto case_9259; /* local: Zfa off, ibex has no F */
   uint64_t zz43020;
   zz43020 = (safe_rshift(UINT64_MAX, 64 - 7) & (zz40 >> INT64_C(25)));
   uint64_t zz43021;
@@ -147821,6 +147879,7 @@ finish_match_9273: ;
 case_10002: ;
   struct zoptionzIUastzK zz43078;
   CREATE(zoptionzIUastzK)(&zz43078);
+  goto case_9283; /* local: Zfa off (RISCV_FROUND_S), ibex has no F */
   uint64_t zz43079;
   zz43079 = (safe_rshift(UINT64_MAX, 64 - 7) & (zz40 >> INT64_C(25)));
   uint64_t zz43080;
@@ -147910,6 +147969,7 @@ finish_match_9281: ;
 case_10001: ;
   struct zoptionzIUastzK zz43096;
   CREATE(zoptionzIUastzK)(&zz43096);
+  goto case_9291; /* local: Zfa off (RISCV_FROUNDNX_S), ibex has no F */
   uint64_t zz43097;
   zz43097 = (safe_rshift(UINT64_MAX, 64 - 7) & (zz40 >> INT64_C(25)));
   uint64_t zz43098;
@@ -148207,6 +148267,7 @@ finish_match_9305: ;
   COPY(zast)(&zz410, zz43135.variants.zSomezIUastzK);
   goto finish_match_9311;
 case_9998: ;
+  goto case_9366; /* local: Zfa off, ibex has no F */
   struct zoptionzIUastzK zz43156;
   CREATE(zoptionzIUastzK)(&zz43156);
   uint64_t zz43157;
@@ -148306,6 +148367,7 @@ endif_16931: ;
   KILL(zast)(&zz43175);
   goto finish_match_9313;
 case_9366: ;
+  goto case_9365; /* local: Zfa off, ibex has no F */
   uint64_t zz43177;
   zz43177 = (safe_rshift(UINT64_MAX, 64 - 7) & (zz40 >> INT64_C(25)));
   uint64_t zz43178;
@@ -148391,6 +148453,7 @@ endif_16943: ;
   KILL(zast)(&zz43193);
   goto finish_match_9313;
 case_9365: ;
+  goto case_9364; /* local: Zfa off, ibex has no F */
   uint64_t zz43195;
   zz43195 = (safe_rshift(UINT64_MAX, 64 - 7) & (zz40 >> INT64_C(25)));
   uint64_t zz43196;
@@ -148469,6 +148532,7 @@ endif_16953: ;
   KILL(zast)(&zz43210);
   goto finish_match_9313;
 case_9364: ;
+  goto case_9363; /* local: Zfa off, ibex has no F */
   uint64_t zz43212;
   zz43212 = (safe_rshift(UINT64_MAX, 64 - 7) & (zz40 >> INT64_C(25)));
   uint64_t zz43213;
@@ -148547,6 +148611,7 @@ endif_16963: ;
   KILL(zast)(&zz43227);
   goto finish_match_9313;
 case_9363: ;
+  goto case_9362; /* local: Zfa off, ibex has no F */
   uint64_t zz43229;
   zz43229 = (safe_rshift(UINT64_MAX, 64 - 7) & (zz40 >> INT64_C(25)));
   uint64_t zz43230;
@@ -148614,6 +148679,7 @@ endif_16971: ;
   KILL(zast)(&zz43241);
   goto finish_match_9313;
 case_9362: ;
+  goto case_9361; /* local: Zfa off, ibex has no F */
   uint64_t zz43243;
   zz43243 = (safe_rshift(UINT64_MAX, 64 - 7) & (zz40 >> INT64_C(25)));
   uint64_t zz43244;
@@ -148681,6 +148747,7 @@ endif_16979: ;
   KILL(zast)(&zz43255);
   goto finish_match_9313;
 case_9361: ;
+  goto case_9360; /* local: Zfa off, ibex has no F */
   uint64_t zz43257;
   zz43257 = (safe_rshift(UINT64_MAX, 64 - 7) & (zz40 >> INT64_C(25)));
   uint64_t zz43258;
@@ -148759,6 +148826,7 @@ endif_16989: ;
   KILL(zast)(&zz43272);
   goto finish_match_9313;
 case_9360: ;
+  goto case_9359; /* local: Zfa off, ibex has no F */
   uint64_t zz43274;
   zz43274 = (safe_rshift(UINT64_MAX, 64 - 7) & (zz40 >> INT64_C(25)));
   uint64_t zz43275;
@@ -148837,6 +148905,7 @@ endif_16999: ;
   KILL(zast)(&zz43289);
   goto finish_match_9313;
 case_9359: ;
+  goto case_9358; /* local: Zfa off, ibex has no F */
   uint64_t zz43291;
   zz43291 = (safe_rshift(UINT64_MAX, 64 - 7) & (zz40 >> INT64_C(25)));
   uint64_t zz43292;
@@ -148927,6 +148996,7 @@ endif_17011: ;
   KILL(zast)(&zz43308);
   goto finish_match_9313;
 case_9358: ;
+  goto case_9357; /* local: scalar crypto (Zkn/Zks) off, ibex has none */
   uint64_t zz43310;
   zz43310 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43311;
@@ -149014,6 +149084,7 @@ endif_17021: ;
   KILL(zast)(&zz43326);
   goto finish_match_9313;
 case_9357: ;
+  goto case_9356; /* local: scalar crypto (Zkn/Zks) off, ibex has none */
   uint64_t zz43328;
   zz43328 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43329;
@@ -149101,6 +149172,7 @@ endif_17031: ;
   KILL(zast)(&zz43344);
   goto finish_match_9313;
 case_9356: ;
+  goto case_9355; /* local: scalar crypto (Zkn/Zks) off, ibex has none */
   uint64_t zz43346;
   zz43346 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43347;
@@ -149188,6 +149260,7 @@ endif_17041: ;
   KILL(zast)(&zz43362);
   goto finish_match_9313;
 case_9355: ;
+  goto case_9354; /* local: scalar crypto (Zkn/Zks) off, ibex has none */
   uint64_t zz43364;
   zz43364 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43365;
@@ -149275,6 +149348,7 @@ endif_17051: ;
   KILL(zast)(&zz43380);
   goto finish_match_9313;
 case_9354: ;
+  goto case_9353; /* local: scalar crypto (Zkn/Zks) off, ibex has none */
   uint64_t zz43382;
   zz43382 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43383;
@@ -149338,6 +149412,7 @@ endif_17057: ;
   KILL(zast)(&zz43394);
   goto finish_match_9313;
 case_9353: ;
+  goto case_9352; /* local: scalar crypto (Zkn/Zks) off, ibex has none */
   uint64_t zz43396;
   zz43396 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43397;
@@ -149401,6 +149476,7 @@ endif_17063: ;
   KILL(zast)(&zz43408);
   goto finish_match_9313;
 case_9352: ;
+  goto case_9351; /* local: scalar crypto (Zkn/Zks) off, ibex has none */
   uint64_t zz43410;
   zz43410 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43411;
@@ -149464,6 +149540,7 @@ endif_17069: ;
   KILL(zast)(&zz43422);
   goto finish_match_9313;
 case_9351: ;
+  goto case_9350; /* local: scalar crypto (Zkn/Zks) off, ibex has none */
   uint64_t zz43424;
   zz43424 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43425;
@@ -149527,6 +149604,7 @@ endif_17075: ;
   KILL(zast)(&zz43436);
   goto finish_match_9313;
 case_9350: ;
+  goto case_9349; /* local: scalar crypto (Zkn/Zks) off, ibex has none */
   uint64_t zz43438;
   zz43438 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43439;
@@ -149602,6 +149680,7 @@ endif_17083: ;
   KILL(zast)(&zz43452);
   goto finish_match_9313;
 case_9349: ;
+  goto case_9348; /* local: scalar crypto (Zkn/Zks) off, ibex has none */
   uint64_t zz43454;
   zz43454 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43455;
@@ -149677,6 +149756,7 @@ endif_17091: ;
   KILL(zast)(&zz43468);
   goto finish_match_9313;
 case_9348: ;
+  goto case_9347; /* local: scalar crypto (Zkn/Zks) off, ibex has none */
   uint64_t zz43470;
   zz43470 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43471;
@@ -149752,6 +149832,7 @@ endif_17099: ;
   KILL(zast)(&zz43484);
   goto finish_match_9313;
 case_9347: ;
+  goto case_9346; /* local: scalar crypto (Zkn/Zks) off, ibex has none */
   uint64_t zz43486;
   zz43486 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43487;
@@ -149827,6 +149908,7 @@ endif_17107: ;
   KILL(zast)(&zz43500);
   goto finish_match_9313;
 case_9346: ;
+  goto case_9345; /* local: scalar crypto (Zkn/Zks) off, ibex has none */
   uint64_t zz43502;
   zz43502 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43503;
@@ -149902,6 +149984,7 @@ endif_17115: ;
   KILL(zast)(&zz43516);
   goto finish_match_9313;
 case_9345: ;
+  goto case_9344; /* local: scalar crypto (Zkn/Zks) off, ibex has none */
   uint64_t zz43518;
   zz43518 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43519;
@@ -149977,6 +150060,7 @@ endif_17123: ;
   KILL(zast)(&zz43532);
   goto finish_match_9313;
 case_9344: ;
+  goto case_9343; /* local: RV64-only scalar crypto, guard lost in the RV32 C */
   uint64_t zz43534;
   zz43534 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43535;
@@ -150067,6 +150151,7 @@ endif_17133: ;
   KILL(zast)(&zz43551);
   goto finish_match_9313;
 case_9343: ;
+  goto case_9342; /* local: RV64-only scalar crypto, guard lost in the RV32 C */
   uint64_t zz43553;
   zz43553 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43554;
@@ -150154,6 +150239,7 @@ endif_17143: ;
   KILL(zast)(&zz43569);
   goto finish_match_9313;
 case_9342: ;
+  goto case_9341; /* local: RV64-only scalar crypto, guard lost in the RV32 C */
   uint64_t zz43571;
   zz43571 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43572;
@@ -150229,6 +150315,7 @@ endif_17151: ;
   KILL(zast)(&zz43585);
   goto finish_match_9313;
 case_9341: ;
+  goto case_9340; /* local: RV64-only scalar crypto, guard lost in the RV32 C */
   uint64_t zz43587;
   zz43587 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43588;
@@ -150304,6 +150391,7 @@ endif_17159: ;
   KILL(zast)(&zz43601);
   goto finish_match_9313;
 case_9340: ;
+  goto case_9339; /* local: RV64-only scalar crypto, guard lost in the RV32 C */
   uint64_t zz43603;
   zz43603 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43604;
@@ -150379,6 +150467,7 @@ endif_17167: ;
   KILL(zast)(&zz43617);
   goto finish_match_9313;
 case_9339: ;
+  goto case_9338; /* local: RV64-only scalar crypto, guard lost in the RV32 C */
   uint64_t zz43619;
   zz43619 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43620;
@@ -150454,6 +150543,7 @@ endif_17175: ;
   KILL(zast)(&zz43633);
   goto finish_match_9313;
 case_9338: ;
+  goto case_9337; /* local: RV64-only scalar crypto, guard lost in the RV32 C */
   uint64_t zz43635;
   zz43635 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43636;
@@ -150529,6 +150619,7 @@ endif_17183: ;
   KILL(zast)(&zz43649);
   goto finish_match_9313;
 case_9337: ;
+  goto case_9336; /* local: RV64-only scalar crypto, guard lost in the RV32 C */
   uint64_t zz43651;
   zz43651 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43652;
@@ -150616,6 +150707,7 @@ endif_17193: ;
   KILL(zast)(&zz43667);
   goto finish_match_9313;
 case_9336: ;
+  goto case_9335; /* local: RV64-only scalar crypto, guard lost in the RV32 C */
   uint64_t zz43669;
   zz43669 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43670;
@@ -150703,6 +150795,7 @@ endif_17203: ;
   KILL(zast)(&zz43685);
   goto finish_match_9313;
 case_9335: ;
+  goto case_9334; /* local: RV64-only scalar crypto, guard lost in the RV32 C */
   uint64_t zz43687;
   zz43687 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43688;
@@ -150790,6 +150883,7 @@ endif_17213: ;
   KILL(zast)(&zz43703);
   goto finish_match_9313;
 case_9334: ;
+  goto case_9333; /* local: RV64-only scalar crypto, guard lost in the RV32 C */
   uint64_t zz43705;
   zz43705 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43706;
@@ -150877,6 +150971,7 @@ endif_17223: ;
   KILL(zast)(&zz43721);
   goto finish_match_9313;
 case_9333: ;
+  goto case_9332; /* local: scalar crypto (Zkn/Zks) off, ibex has none */
   uint64_t zz43723;
   zz43723 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43724;
@@ -150964,6 +151059,7 @@ endif_17233: ;
   KILL(zast)(&zz43739);
   goto finish_match_9313;
 case_9332: ;
+  goto case_9331; /* local: scalar crypto (Zkn/Zks) off, ibex has none */
   uint64_t zz43741;
   zz43741 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43742;
@@ -151051,6 +151147,7 @@ endif_17243: ;
   KILL(zast)(&zz43757);
   goto finish_match_9313;
 case_9331: ;
+  goto case_9330; /* local: scalar crypto (Zkn/Zks) off, ibex has none */
   uint64_t zz43759;
   zz43759 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43760;
@@ -151114,6 +151211,7 @@ endif_17249: ;
   KILL(zast)(&zz43771);
   goto finish_match_9313;
 case_9330: ;
+  goto case_9329; /* local: scalar crypto (Zkn/Zks) off, ibex has none */
   uint64_t zz43773;
   zz43773 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43774;
@@ -151655,7 +151753,7 @@ case_9321: ;
   bool zz43888;
   bool zz43889;
   bool zz43890;
-  if (true) goto then_17312;
+  if (false) goto then_17312; /* local: haveZicond() = false (ibex has no Zicond) */
   zz43890 = false;
   goto endif_17313;
 then_17312: ;
@@ -151723,7 +151821,7 @@ case_9320: ;
   bool zz43902;
   bool zz43903;
   bool zz43904;
-  if (true) goto then_17320;
+  if (false) goto then_17320; /* local: haveZicond() = false (ibex has no Zicond) */
   zz43904 = false;
   goto endif_17321;
 then_17320: ;
@@ -181161,6 +181259,7 @@ endif_19681: ;
   KILL(zast)(&zz42885);
   goto finish_match_10763;
 case_10778: ;
+  goto case_10777; /* local: Zfa off, ibex has no F */
   uint64_t zz42887;
   zz42887 = (safe_rshift(UINT64_MAX, 64 - 7) & (zz40 >> INT64_C(25)));
   uint64_t zz42888;
@@ -181251,6 +181350,7 @@ endif_19693: ;
   KILL(zast)(&zz42904);
   goto finish_match_10763;
 case_10777: ;
+  goto case_10776; /* local: Zfa off, ibex has no F */
   uint64_t zz42906;
   zz42906 = (safe_rshift(UINT64_MAX, 64 - 7) & (zz40 >> INT64_C(25)));
   uint64_t zz42907;
@@ -181330,6 +181430,7 @@ endif_19703: ;
   KILL(zast)(&zz42920);
   goto finish_match_10763;
 case_10776: ;
+  goto case_10775; /* local: Zfa off, ibex has no F */
   uint64_t zz42922;
   zz42922 = (safe_rshift(UINT64_MAX, 64 - 7) & (zz40 >> INT64_C(25)));
   uint64_t zz42923;
@@ -181420,6 +181521,7 @@ endif_19715: ;
   KILL(zast)(&zz42939);
   goto finish_match_10763;
 case_10775: ;
+  goto case_10774; /* local: Zfa off, ibex has no F */
   uint64_t zz42941;
   zz42941 = (safe_rshift(UINT64_MAX, 64 - 7) & (zz40 >> INT64_C(25)));
   uint64_t zz42942;
@@ -181498,6 +181600,7 @@ endif_19725: ;
   KILL(zast)(&zz42956);
   goto finish_match_10763;
 case_10774: ;
+  goto case_10773; /* local: Zfa off, ibex has no F */
   uint64_t zz42958;
   zz42958 = (safe_rshift(UINT64_MAX, 64 - 7) & (zz40 >> INT64_C(25)));
   uint64_t zz42959;
@@ -181576,6 +181679,7 @@ endif_19735: ;
   KILL(zast)(&zz42973);
   goto finish_match_10763;
 case_10773: ;
+  goto case_10772; /* local: Zfa off, ibex has no F */
   uint64_t zz42975;
   zz42975 = (safe_rshift(UINT64_MAX, 64 - 7) & (zz40 >> INT64_C(25)));
   uint64_t zz42976;
@@ -181643,6 +181747,7 @@ endif_19743: ;
   KILL(zast)(&zz42987);
   goto finish_match_10763;
 case_10772: ;
+  goto case_10771; /* local: Zfa off, ibex has no F */
   uint64_t zz42989;
   zz42989 = (safe_rshift(UINT64_MAX, 64 - 7) & (zz40 >> INT64_C(25)));
   uint64_t zz42990;
@@ -181710,6 +181815,7 @@ endif_19751: ;
   KILL(zast)(&zz43001);
   goto finish_match_10763;
 case_10771: ;
+  goto case_10770; /* local: Zfa off, ibex has no F */
   uint64_t zz43003;
   zz43003 = (safe_rshift(UINT64_MAX, 64 - 7) & (zz40 >> INT64_C(25)));
   uint64_t zz43004;
@@ -181788,6 +181894,7 @@ endif_19761: ;
   KILL(zast)(&zz43018);
   goto finish_match_10763;
 case_10770: ;
+  goto case_10769; /* local: Zfa off, ibex has no F */
   uint64_t zz43020;
   zz43020 = (safe_rshift(UINT64_MAX, 64 - 7) & (zz40 >> INT64_C(25)));
   uint64_t zz43021;
@@ -182076,6 +182183,7 @@ finish_match_10783: ;
 case_11512: ;
   struct zoptionzIUastzK zz43078;
   CREATE(zoptionzIUastzK)(&zz43078);
+  goto case_10793; /* local: Zfa off (RISCV_FROUND_S), ibex has no F */
   uint64_t zz43079;
   zz43079 = (safe_rshift(UINT64_MAX, 64 - 7) & (zz40 >> INT64_C(25)));
   uint64_t zz43080;
@@ -182165,6 +182273,7 @@ finish_match_10791: ;
 case_11511: ;
   struct zoptionzIUastzK zz43096;
   CREATE(zoptionzIUastzK)(&zz43096);
+  goto case_10801; /* local: Zfa off (RISCV_FROUNDNX_S), ibex has no F */
   uint64_t zz43097;
   zz43097 = (safe_rshift(UINT64_MAX, 64 - 7) & (zz40 >> INT64_C(25)));
   uint64_t zz43098;
@@ -182462,6 +182571,7 @@ finish_match_10815: ;
   COPY(zast)(&zz410, zz43135.variants.zSomezIUastzK);
   goto finish_match_10821;
 case_11508: ;
+  goto case_10876; /* local: Zfa off, ibex has no F */
   struct zoptionzIUastzK zz43156;
   CREATE(zoptionzIUastzK)(&zz43156);
   uint64_t zz43157;
@@ -182561,6 +182671,7 @@ endif_19849: ;
   KILL(zast)(&zz43175);
   goto finish_match_10823;
 case_10876: ;
+  goto case_10875; /* local: Zfa off, ibex has no F */
   uint64_t zz43177;
   zz43177 = (safe_rshift(UINT64_MAX, 64 - 7) & (zz40 >> INT64_C(25)));
   uint64_t zz43178;
@@ -182646,6 +182757,7 @@ endif_19861: ;
   KILL(zast)(&zz43193);
   goto finish_match_10823;
 case_10875: ;
+  goto case_10874; /* local: Zfa off, ibex has no F */
   uint64_t zz43195;
   zz43195 = (safe_rshift(UINT64_MAX, 64 - 7) & (zz40 >> INT64_C(25)));
   uint64_t zz43196;
@@ -182724,6 +182836,7 @@ endif_19871: ;
   KILL(zast)(&zz43210);
   goto finish_match_10823;
 case_10874: ;
+  goto case_10873; /* local: Zfa off, ibex has no F */
   uint64_t zz43212;
   zz43212 = (safe_rshift(UINT64_MAX, 64 - 7) & (zz40 >> INT64_C(25)));
   uint64_t zz43213;
@@ -182802,6 +182915,7 @@ endif_19881: ;
   KILL(zast)(&zz43227);
   goto finish_match_10823;
 case_10873: ;
+  goto case_10872; /* local: Zfa off, ibex has no F */
   uint64_t zz43229;
   zz43229 = (safe_rshift(UINT64_MAX, 64 - 7) & (zz40 >> INT64_C(25)));
   uint64_t zz43230;
@@ -182869,6 +182983,7 @@ endif_19889: ;
   KILL(zast)(&zz43241);
   goto finish_match_10823;
 case_10872: ;
+  goto case_10871; /* local: Zfa off, ibex has no F */
   uint64_t zz43243;
   zz43243 = (safe_rshift(UINT64_MAX, 64 - 7) & (zz40 >> INT64_C(25)));
   uint64_t zz43244;
@@ -182936,6 +183051,7 @@ endif_19897: ;
   KILL(zast)(&zz43255);
   goto finish_match_10823;
 case_10871: ;
+  goto case_10870; /* local: Zfa off, ibex has no F */
   uint64_t zz43257;
   zz43257 = (safe_rshift(UINT64_MAX, 64 - 7) & (zz40 >> INT64_C(25)));
   uint64_t zz43258;
@@ -183014,6 +183130,7 @@ endif_19907: ;
   KILL(zast)(&zz43272);
   goto finish_match_10823;
 case_10870: ;
+  goto case_10869; /* local: Zfa off, ibex has no F */
   uint64_t zz43274;
   zz43274 = (safe_rshift(UINT64_MAX, 64 - 7) & (zz40 >> INT64_C(25)));
   uint64_t zz43275;
@@ -183092,6 +183209,7 @@ endif_19917: ;
   KILL(zast)(&zz43289);
   goto finish_match_10823;
 case_10869: ;
+  goto case_10868; /* local: Zfa off, ibex has no F */
   uint64_t zz43291;
   zz43291 = (safe_rshift(UINT64_MAX, 64 - 7) & (zz40 >> INT64_C(25)));
   uint64_t zz43292;
@@ -183182,6 +183300,7 @@ endif_19929: ;
   KILL(zast)(&zz43308);
   goto finish_match_10823;
 case_10868: ;
+  goto case_10867; /* local: scalar crypto (Zkn/Zks) off, ibex has none */
   uint64_t zz43310;
   zz43310 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43311;
@@ -183269,6 +183388,7 @@ endif_19939: ;
   KILL(zast)(&zz43326);
   goto finish_match_10823;
 case_10867: ;
+  goto case_10866; /* local: scalar crypto (Zkn/Zks) off, ibex has none */
   uint64_t zz43328;
   zz43328 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43329;
@@ -183356,6 +183476,7 @@ endif_19949: ;
   KILL(zast)(&zz43344);
   goto finish_match_10823;
 case_10866: ;
+  goto case_10865; /* local: scalar crypto (Zkn/Zks) off, ibex has none */
   uint64_t zz43346;
   zz43346 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43347;
@@ -183443,6 +183564,7 @@ endif_19959: ;
   KILL(zast)(&zz43362);
   goto finish_match_10823;
 case_10865: ;
+  goto case_10864; /* local: scalar crypto (Zkn/Zks) off, ibex has none */
   uint64_t zz43364;
   zz43364 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43365;
@@ -183530,6 +183652,7 @@ endif_19969: ;
   KILL(zast)(&zz43380);
   goto finish_match_10823;
 case_10864: ;
+  goto case_10863; /* local: scalar crypto (Zkn/Zks) off, ibex has none */
   uint64_t zz43382;
   zz43382 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43383;
@@ -183593,6 +183716,7 @@ endif_19975: ;
   KILL(zast)(&zz43394);
   goto finish_match_10823;
 case_10863: ;
+  goto case_10862; /* local: scalar crypto (Zkn/Zks) off, ibex has none */
   uint64_t zz43396;
   zz43396 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43397;
@@ -183656,6 +183780,7 @@ endif_19981: ;
   KILL(zast)(&zz43408);
   goto finish_match_10823;
 case_10862: ;
+  goto case_10861; /* local: scalar crypto (Zkn/Zks) off, ibex has none */
   uint64_t zz43410;
   zz43410 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43411;
@@ -183719,6 +183844,7 @@ endif_19987: ;
   KILL(zast)(&zz43422);
   goto finish_match_10823;
 case_10861: ;
+  goto case_10860; /* local: scalar crypto (Zkn/Zks) off, ibex has none */
   uint64_t zz43424;
   zz43424 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43425;
@@ -183782,6 +183908,7 @@ endif_19993: ;
   KILL(zast)(&zz43436);
   goto finish_match_10823;
 case_10860: ;
+  goto case_10859; /* local: scalar crypto (Zkn/Zks) off, ibex has none */
   uint64_t zz43438;
   zz43438 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43439;
@@ -183857,6 +183984,7 @@ endif_20001: ;
   KILL(zast)(&zz43452);
   goto finish_match_10823;
 case_10859: ;
+  goto case_10858; /* local: scalar crypto (Zkn/Zks) off, ibex has none */
   uint64_t zz43454;
   zz43454 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43455;
@@ -183932,6 +184060,7 @@ endif_20009: ;
   KILL(zast)(&zz43468);
   goto finish_match_10823;
 case_10858: ;
+  goto case_10857; /* local: scalar crypto (Zkn/Zks) off, ibex has none */
   uint64_t zz43470;
   zz43470 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43471;
@@ -184007,6 +184136,7 @@ endif_20017: ;
   KILL(zast)(&zz43484);
   goto finish_match_10823;
 case_10857: ;
+  goto case_10856; /* local: scalar crypto (Zkn/Zks) off, ibex has none */
   uint64_t zz43486;
   zz43486 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43487;
@@ -184082,6 +184212,7 @@ endif_20025: ;
   KILL(zast)(&zz43500);
   goto finish_match_10823;
 case_10856: ;
+  goto case_10855; /* local: scalar crypto (Zkn/Zks) off, ibex has none */
   uint64_t zz43502;
   zz43502 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43503;
@@ -184157,6 +184288,7 @@ endif_20033: ;
   KILL(zast)(&zz43516);
   goto finish_match_10823;
 case_10855: ;
+  goto case_10854; /* local: scalar crypto (Zkn/Zks) off, ibex has none */
   uint64_t zz43518;
   zz43518 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43519;
@@ -184232,6 +184364,7 @@ endif_20041: ;
   KILL(zast)(&zz43532);
   goto finish_match_10823;
 case_10854: ;
+  goto case_10853; /* local: RV64-only scalar crypto, guard lost in the RV32 C */
   uint64_t zz43534;
   zz43534 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43535;
@@ -184322,6 +184455,7 @@ endif_20051: ;
   KILL(zast)(&zz43551);
   goto finish_match_10823;
 case_10853: ;
+  goto case_10852; /* local: RV64-only scalar crypto, guard lost in the RV32 C */
   uint64_t zz43553;
   zz43553 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43554;
@@ -184409,6 +184543,7 @@ endif_20061: ;
   KILL(zast)(&zz43569);
   goto finish_match_10823;
 case_10852: ;
+  goto case_10851; /* local: RV64-only scalar crypto, guard lost in the RV32 C */
   uint64_t zz43571;
   zz43571 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43572;
@@ -184484,6 +184619,7 @@ endif_20069: ;
   KILL(zast)(&zz43585);
   goto finish_match_10823;
 case_10851: ;
+  goto case_10850; /* local: RV64-only scalar crypto, guard lost in the RV32 C */
   uint64_t zz43587;
   zz43587 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43588;
@@ -184559,6 +184695,7 @@ endif_20077: ;
   KILL(zast)(&zz43601);
   goto finish_match_10823;
 case_10850: ;
+  goto case_10849; /* local: RV64-only scalar crypto, guard lost in the RV32 C */
   uint64_t zz43603;
   zz43603 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43604;
@@ -184634,6 +184771,7 @@ endif_20085: ;
   KILL(zast)(&zz43617);
   goto finish_match_10823;
 case_10849: ;
+  goto case_10848; /* local: RV64-only scalar crypto, guard lost in the RV32 C */
   uint64_t zz43619;
   zz43619 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43620;
@@ -184709,6 +184847,7 @@ endif_20093: ;
   KILL(zast)(&zz43633);
   goto finish_match_10823;
 case_10848: ;
+  goto case_10847; /* local: RV64-only scalar crypto, guard lost in the RV32 C */
   uint64_t zz43635;
   zz43635 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43636;
@@ -184784,6 +184923,7 @@ endif_20101: ;
   KILL(zast)(&zz43649);
   goto finish_match_10823;
 case_10847: ;
+  goto case_10846; /* local: RV64-only scalar crypto, guard lost in the RV32 C */
   uint64_t zz43651;
   zz43651 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43652;
@@ -184871,6 +185011,7 @@ endif_20111: ;
   KILL(zast)(&zz43667);
   goto finish_match_10823;
 case_10846: ;
+  goto case_10845; /* local: RV64-only scalar crypto, guard lost in the RV32 C */
   uint64_t zz43669;
   zz43669 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43670;
@@ -184958,6 +185099,7 @@ endif_20121: ;
   KILL(zast)(&zz43685);
   goto finish_match_10823;
 case_10845: ;
+  goto case_10844; /* local: RV64-only scalar crypto, guard lost in the RV32 C */
   uint64_t zz43687;
   zz43687 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43688;
@@ -185045,6 +185187,7 @@ endif_20131: ;
   KILL(zast)(&zz43703);
   goto finish_match_10823;
 case_10844: ;
+  goto case_10843; /* local: RV64-only scalar crypto, guard lost in the RV32 C */
   uint64_t zz43705;
   zz43705 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43706;
@@ -185132,6 +185275,7 @@ endif_20141: ;
   KILL(zast)(&zz43721);
   goto finish_match_10823;
 case_10843: ;
+  goto case_10842; /* local: scalar crypto (Zkn/Zks) off, ibex has none */
   uint64_t zz43723;
   zz43723 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43724;
@@ -185219,6 +185363,7 @@ endif_20151: ;
   KILL(zast)(&zz43739);
   goto finish_match_10823;
 case_10842: ;
+  goto case_10841; /* local: scalar crypto (Zkn/Zks) off, ibex has none */
   uint64_t zz43741;
   zz43741 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43742;
@@ -185306,6 +185451,7 @@ endif_20161: ;
   KILL(zast)(&zz43757);
   goto finish_match_10823;
 case_10841: ;
+  goto case_10840; /* local: scalar crypto (Zkn/Zks) off, ibex has none */
   uint64_t zz43759;
   zz43759 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43760;
@@ -185369,6 +185515,7 @@ endif_20167: ;
   KILL(zast)(&zz43771);
   goto finish_match_10823;
 case_10840: ;
+  goto case_10839; /* local: scalar crypto (Zkn/Zks) off, ibex has none */
   uint64_t zz43773;
   zz43773 = (safe_rshift(UINT64_MAX, 64 - 2) & (zz40 >> INT64_C(30)));
   uint64_t zz43774;
@@ -185910,7 +186057,7 @@ case_10831: ;
   bool zz43888;
   bool zz43889;
   bool zz43890;
-  if (true) goto then_20230;
+  if (false) goto then_20230; /* local: haveZicond() = false (ibex has no Zicond) */
   zz43890 = false;
   goto endif_20231;
 then_20230: ;
@@ -185978,7 +186125,7 @@ case_10830: ;
   bool zz43902;
   bool zz43903;
   bool zz43904;
-  if (true) goto then_20238;
+  if (false) goto then_20238; /* local: haveZicond() = false (ibex has no Zicond) */
   zz43904 = false;
   goto endif_20239;
 then_20238: ;

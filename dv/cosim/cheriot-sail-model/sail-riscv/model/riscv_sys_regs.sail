@@ -160,6 +160,9 @@ function haveZmmul()  -> bool = true
 /* Zicond extension support */
 function haveZicond() -> bool = true
 
+/* Zcb extension support (CHERIoT-Ibex local change, riscv_insts_zcb.sail) */
+function haveZcb() -> bool = true
+
 bitfield Mstatush : bits(32) = {
   MBE  : 5,
   SBE  : 4

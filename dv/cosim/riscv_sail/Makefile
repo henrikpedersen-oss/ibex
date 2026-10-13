@@ -21,7 +21,7 @@ SOFTFLOAT_LIB  := $(SOFTFLOAT_BLD)/softfloat.a
 MODEL_C := $(GEN_C_DIR)/riscv_rvfi_model_RV32.c
 SAIL_RUNTIME_SRCS := $(addprefix $(SAIL_LIB_DIR)/,sail.c rts.c elf.c sail_failure.c)
 PLATFORM_SRCS := $(addprefix $(EMU_DIR)/,riscv_prelude.c riscv_platform_impl.c riscv_platform.c \
-                   riscv_softfloat.c)
+                   riscv_softfloat.c ibex_platform_csrs.c)
 DPI_SRCS := riscv_sail_cosim_dpi.cc
 
 ALL_SRCS := $(MODEL_C) $(PLATFORM_SRCS) $(SAIL_RUNTIME_SRCS) $(DPI_SRCS)

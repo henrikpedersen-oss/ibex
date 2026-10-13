@@ -37,7 +37,9 @@ from pathlib import Path
 import hjson
 
 SIMS = ("xlm",)
-COMPARED = re.compile(r"(\w+): (\d+) instructions compared, (\d+) mismatches")
+# The scoreboard's report_phase line. "N interrupts taken" was added with the interrupt check
+# (ibex_dii_scoreboard.sv); without the optional group every run read as "simulation did not run".
+COMPARED = re.compile(r"(\w+): (\d+) instructions compared, (?:\d+ interrupts taken, )?(\d+) mismatches")
 INJECTED = re.compile(r"\+dii_sb_corrupt: corrupted (\w+) of pc=0x([0-9a-fA-F]{8})")
 MISMATCH = re.compile(r"UVM_ERROR .*pc=0x([0-9a-fA-F]{8}) insn=0x[0-9a-fA-F]{8}: ")
 FULL_SIZE_N = 100

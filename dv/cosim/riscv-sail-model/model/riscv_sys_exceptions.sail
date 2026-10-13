@@ -72,7 +72,8 @@ function get_utvec() -> xlenbits =
   utvec.bits
 
 function set_mtvec(value : xlenbits) -> xlenbits = {
-  mtvec = legalize_tvec(mtvec, value);
+  /* local: Ibex's mtvec (ibex doc cs_registers.rst): BASE 256-byte aligned, MODE read-only 01 (VENDORED_FROM) */
+  mtvec = Mk_Mtvec((value & ~(zero_extend(0xFF))) | zero_extend(0x1));
   mtvec.bits
 }
 

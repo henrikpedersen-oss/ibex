@@ -1086,20 +1086,35 @@ module ibex_icache import ibex_pkg::*; #(
   // compressedness; the skid logic stays self-consistent either way (it only tracks which
   // halfwords have been popped), so the next packet is still served from the right address.
   // Not replicated: cheriot_force_uc_i, which this module does not have (see ibex_if_stage.sv).
+  //
+  // Zcmp (cm.push/pop/mv*): the IF stage holds the instruction here (ready_i low) while the
+  // compressed decoder issues its micro-ops, and takes it only with the last one. Waiting for
+  // that, as for any other instruction, acked the packet after its first micro-ops had retired,
+  // and never if one of them trapped: the trap redirected fetch before ready_i, the packet stayed
+  // on offer, and the core ran the same cm.push again at the handler, forever (TestRIG
+  // riscv_unstructured 2026-10-11, reproducers/zcmp_push_first_op_trap.S). So the testbench also
+  // drives, from this core's compressed decoder (core_ibex_testrig_tb_top.sv):
+  //   dii_uop_first  ID takes the first micro-op of an expanded instruction: the packet is
+  //                  consumed now, as an ordinary instruction is when ID takes it;
+  //   dii_expanding  micro-ops of the word on offer have gone to ID: keep it on offer (the decoder
+  //                  reads it until the last micro-op) although it is consumed, and do not ack it
+  //                  again with the last one. A redirect ends it (flush_expanded).
   logic [31:0] dii_insn;
   logic        dii_valid;
   logic        dii_ack;
+  logic        dii_uop_first;
+  logic        dii_expanding;
 
   logic        dii_taken_q;
   logic        dii_avail;
   logic        dii_compressed;
   logic        dii_ready;
 
-  assign dii_avail      = dii_valid && !dii_taken_q;
+  assign dii_avail      = (dii_valid && !dii_taken_q) || dii_expanding;
   assign dii_compressed = (dii_insn[1:0] != 2'b11);
   assign dii_ready      = ready_i & dii_avail;
   // Not on a branch: the packet stays on offer and is consumed from the new PC instead.
-  assign dii_ack        = ready_i && valid_o && !branch_i;
+  assign dii_ack        = valid_o && (dii_uop_first || (ready_i && !branch_i && !dii_expanding));
 
   always_ff @(posedge clk_i or negedge rst_ni) begin : dii_ff
     if (!rst_ni) begin

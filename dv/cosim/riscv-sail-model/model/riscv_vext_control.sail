@@ -6,14 +6,14 @@
 /*  SPDX-License-Identifier: BSD-2-Clause                                                */
 /*=======================================================================================*/
 
-function clause ext_is_CSR_defined (0x008, _) = true
-function clause ext_is_CSR_defined (0xC20, _) = true
-function clause ext_is_CSR_defined (0xC21, _) = true
-function clause ext_is_CSR_defined (0xC22, _) = true
+function clause ext_is_CSR_defined (0x008, _) = haveVExt() /* local: ibex has no V (VENDORED_FROM) */
+function clause ext_is_CSR_defined (0xC20, _) = haveVExt() /* local: ibex has no V (VENDORED_FROM) */
+function clause ext_is_CSR_defined (0xC21, _) = haveVExt() /* local: ibex has no V (VENDORED_FROM) */
+function clause ext_is_CSR_defined (0xC22, _) = haveVExt() /* local: ibex has no V (VENDORED_FROM) */
 
-function clause ext_is_CSR_defined (0x009, _) = true
-function clause ext_is_CSR_defined (0x00A, _) = true
-function clause ext_is_CSR_defined (0x00F, _) = true
+function clause ext_is_CSR_defined (0x009, _) = haveVExt() /* local: ibex has no V (VENDORED_FROM) */
+function clause ext_is_CSR_defined (0x00A, _) = haveVExt() /* local: ibex has no V (VENDORED_FROM) */
+function clause ext_is_CSR_defined (0x00F, _) = haveVExt() /* local: ibex has no V (VENDORED_FROM) */
 
 function clause ext_read_CSR (0x009) = Some (zero_extend(vcsr[vxsat]))
 function clause ext_read_CSR (0x00A) = Some (zero_extend(vcsr[vxrm]))

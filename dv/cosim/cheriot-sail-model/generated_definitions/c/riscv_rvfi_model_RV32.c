@@ -95185,6 +95185,94 @@ void startup_zencdec_compressed_backwards(void)
   CREATE(lbits)(&zghz35762);
 }
 
+// CHERIoT-Ibex local change (VENDORED_FROM 2026-10-10), mirrors
+// sail-riscv/model/riscv_insts_zcb.sail: the ratified Zcb extension. The Zc specification defines
+// each Zcb instruction as an existing instruction with fixed operands, so each encoding decodes to
+// that instruction's ast (LOAD, STORE, ITYPE, ZBB_EXTOP, MUL) and executes, traps and reaches RVFI
+// exactly as it does: a load or store is authorised by the capability in rs1' (ext_data_get_addr),
+// as for c.lw. rvfi_insn and PC + 2 come from the fetch, as for every compressed instruction, and
+// misa.C is checked by the step. haveZcb, haveZbb and haveZmmul are constant true in this model,
+// so the .sail guards have no C counterpart. Returns false for every other encoding, including
+// the reserved Zcb ones (Q0 funct3 100 with bit 12 set, c.sh with bit 6 set, c.zext.w on RV32,
+// the unary forms 110 and 111), which stay C_ILLEGAL.
+static bool zcb_decode_compressed(struct zast *rop, uint64_t bv)
+{
+  uint64_t rsd  = UINT64_C(8) + ((bv >> 7) & UINT64_C(0x7));  // rs1' (Q0), rsd' (Q1)
+  uint64_t rs2  = UINT64_C(8) + ((bv >> 2) & UINT64_C(0x7));  // rd' / rs2' (Q0), rs2' (Q1)
+  uint64_t b6   = (bv >> 6) & UINT64_C(1);
+  uint64_t b5   = (bv >> 5) & UINT64_C(1);
+  if ((bv & UINT64_C(0xE003)) == UINT64_C(0x8000)) {  // Q0, funct3 100
+    // c.lbu/c.sb: uimm[1:0] = {bit 5, bit 6}; c.lhu/c.lh/c.sh: uimm[1] = bit 5, uimm[0] = 0.
+    uint64_t uimm_b = (b5 << 1) | b6;
+    uint64_t uimm_h = b5 << 1;
+    struct ztuple_z8z5bv12zCz0z5bv5zCz0z5bv5zCz0z5boolzCz0z5enumz0zzword_widthzCz0z5boolzCz0z5boolz9 ld;
+    struct ztuple_z8z5bv12zCz0z5bv5zCz0z5bv5zCz0z5enumz0zzword_widthzCz0z5boolzCz0z5boolz9 st;
+    ld.ztup1 = rsd;  ld.ztup2 = rs2;  ld.ztup5 = false;  ld.ztup6 = false;
+    st.ztup1 = rs2;  st.ztup2 = rsd;  st.ztup4 = false;  st.ztup5 = false;
+    switch ((bv >> 10) & UINT64_C(0x7)) {
+      case 0:  // c.lbu rd', uimm(rs1') -> lbu
+        ld.ztup0 = uimm_b;  ld.ztup3 = true;  ld.ztup4 = zBYTE;
+        zLOAD(rop, ld);
+        return true;
+      case 1:  // c.lhu (bit 6 = 0) -> lhu, c.lh (bit 6 = 1) -> lh
+        ld.ztup0 = uimm_h;  ld.ztup3 = (b6 == 0);  ld.ztup4 = zHALF;
+        zLOAD(rop, ld);
+        return true;
+      case 2:  // c.sb rs2', uimm(rs1') -> sb
+        st.ztup0 = uimm_b;  st.ztup3 = zBYTE;
+        zSTORE(rop, st);
+        return true;
+      case 3:  // c.sh rs2', uimm(rs1') -> sh; bit 6 = 1 is reserved
+        if (b6 != 0) return false;
+        st.ztup0 = uimm_h;  st.ztup3 = zHALF;
+        zSTORE(rop, st);
+        return true;
+      default:
+        return false;
+    }
+  }
+  if ((bv & UINT64_C(0xFC03)) == UINT64_C(0x9C01)) {  // Q1, funct6 100111
+    if (b6 == 1 && b5 == 0) {  // c.mul rsd', rs2' -> mul rsd', rsd', rs2'
+      struct ztuple_z8z5bv5zCz0z5bv5zCz0z5bv5zCz0z5boolzCz0z5boolzCz0z5boolz9 mul;
+      mul.ztup0 = rs2;  mul.ztup1 = rsd;  mul.ztup2 = rsd;
+      mul.ztup3 = false;  mul.ztup4 = true;  mul.ztup5 = true;  // encdec_mul_op 0b000
+      zMUL(rop, mul);
+      return true;
+    }
+    if (b6 == 1 && b5 == 1) {  // unary forms, bits 4:2
+      struct ztuple_z8z5bv12zCz0z5bv5zCz0z5bv5zCz0z5enumz0zziopz9 it;
+      struct ztuple_z8z5bv5zCz0z5bv5zCz0z5enumz0zzextop_zzzzbbz9 ext;
+      it.ztup1 = rsd;  it.ztup2 = rsd;
+      ext.ztup0 = rsd;  ext.ztup1 = rsd;
+      switch ((bv >> 2) & UINT64_C(0x7)) {
+        case 0:  // c.zext.b -> andi rsd', rsd', 0xff
+          it.ztup0 = UINT64_C(0x0FF);  it.ztup3 = zRISCV_ANDI;
+          zITYPE(rop, it);
+          return true;
+        case 1:  // c.sext.b -> sext.b (Zbb)
+          ext.ztup2 = zRISCV_SEXTB;
+          zZBB_EXTOP(rop, ext);
+          return true;
+        case 2:  // c.zext.h -> zext.h (Zbb)
+          ext.ztup2 = zRISCV_ZEXTH;
+          zZBB_EXTOP(rop, ext);
+          return true;
+        case 3:  // c.sext.h -> sext.h (Zbb)
+          ext.ztup2 = zRISCV_SEXTH;
+          zZBB_EXTOP(rop, ext);
+          return true;
+        case 5:  // c.not -> xori rsd', rsd', -1
+          it.ztup0 = UINT64_C(0xFFF);  it.ztup3 = zRISCV_XORI;
+          zITYPE(rop, it);
+          return true;
+        default:  // 4: c.zext.w (RV64 only); 6, 7: reserved
+          return false;
+      }
+    }
+  }
+  return false;
+}
+
 void zencdec_compressed_backwards(struct zast *z6zE756, uint64_t zargz3)
 {
   __label__ case_4704, case_4703, case_4702, case_4701, case_4700, case_4699, case_4698, case_4697, case_4696, case_4695, case_4694, case_4693, case_4692, case_4691, case_4690, case_4689, case_4688, case_4687, case_4686, case_4685, case_4684, case_4683, case_4682, case_4681, case_4680, case_4679, case_4678, case_4677, case_4676, case_4675, case_4674, case_4673, case_4672, case_4671, case_4670, case_4669, case_4668, case_4667, case_4666, case_4665, case_4664, case_4663, case_4662, case_4661, finish_match_4660, end_function_4705, end_block_exception_4706, end_function_5566;
@@ -97985,6 +98073,9 @@ case_4663: ;
     goto finish_match_4660;
   }
 case_4662: ;
+  // CHERIoT-Ibex local change: Zcb (zcb_decode_compressed above), the last clauses before
+  // C_ILLEGAL, as riscv_insts_zcb.sail comes before riscv_insts_end.sail.
+  if (zcb_decode_compressed(&z3zE4536, zargz3)) goto finish_match_4660;
   {
     uint64_t zs;
     zs = zargz3;
@@ -101569,6 +101660,8 @@ case_4710: ;
     goto finish_match_4707;
   }
 case_4709: ;
+  // CHERIoT-Ibex local change: Zcb, as in zencdec_compressed_backwards (no caller in this model).
+  if (zcb_decode_compressed(&z3zE4705, zargz3)) goto finish_match_4707;
   {
     uint64_t zs;
     zs = zargz3;
