@@ -155,7 +155,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--testplan", required=True, type=Path)
     ap.add_argument("--testrig-dir", required=True, type=Path,
-                    help="ibex/dv/testrig (holds <sim>_testrig_out/results/)")
+                    help="ibex/dv/testrig_ibex_cheriot (holds <sim>_testrig_out/results/)")
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--html-extra", type=Path,
                     help="write an HTML section (reference models, coverage) to append to the report")

@@ -4,7 +4,7 @@
 
 // Code-coverage configuration shared by every Xcelium flow that instruments ibex_top: the UVM
 // testbench (yaml/rtl_simulation.yaml via scripts/compile_tb.py), RISC-V compliance
-// (dv/riscv_compliance/build_xlm.sh), TestRIG (dv/testrig/testrig_xlm_build.sh), the Sonata Xcelium
+// (dv/riscv_compliance/build_xlm.sh), TestRIG (dv/testrig_ibex_cheriot/testrig_xlm_build.sh), the Sonata Xcelium
 // flow (sonata-xlm/sonata_xlm_build.sh) and the CHERIoT RTOS test SoC
 // (dv/cheriot-rtos-test-suites/cheriot_rtos_cover.ccf, which includes this file and adds the
 // memory subsystem on top).

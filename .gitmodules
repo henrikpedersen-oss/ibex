@@ -10,3 +10,7 @@
 	path = dv/formal_ibex_cheriot
 	url = git@github.com:lowRISC/formal_ibex_cheriot.git
 	branch = main
+[submodule "dv/testrig_ibex_cheriot"]
+	path = dv/testrig_ibex_cheriot
+	url = git@github.com:lowRISC/testrig_ibex_cheriot.git
+	branch = main
