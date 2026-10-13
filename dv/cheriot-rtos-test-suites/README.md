@@ -80,7 +80,7 @@ make sonata-revocation-xlm          # load barrier, both directions, plus one TB
 make sonata-juliet-xlm              # Juliet CWE compartment enforcement
 make sonata-cheri-c-xlm             # Cambridge CHERI-C suite
 make sonata-test-xlm ELF=<path>     # any firmware image
-make sonata-regression-xlm          # every run ibex/dv/testplans/sonata_testplan.hjson needs
+make sonata-regression-xlm          # every run ibex/dv/cheriot-rtos-test-suites/sonata_testplan.hjson needs
 make testplan-sonata                # report the kept runs against the testplan (no simulation)
 make sonata-mutation-check-xlm      # break one hardware check per run (see below)
 make rtos-firmware                  # build every firmware image above, without simulating

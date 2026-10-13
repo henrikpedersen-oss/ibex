@@ -5,7 +5,7 @@
 // Tests of the CHERIoT memory subsystem block-level bench. Included in cms_tb (they use its
 // helpers). Every test leaves the checking to the scoreboard where it can, and adds explicit
 // checks where the scoreboard cannot know the expectation (fault injection, CSR reset values).
-// The testplan is ibex/dv/testplans/cheriot_mem_subsys_testplan.hjson.
+// The testplan is ibex/dv/cheriot-mem-subsys/cheriot_mem_subsys_testplan.hjson.
 
 // ---------------------------------------------------------------------------------------------
 // Shared stimulus

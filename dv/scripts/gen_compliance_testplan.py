@@ -2,7 +2,7 @@
 # Copyright lowRISC contributors.
 # Licensed under the Apache License, Version 2.0, see LICENSE for details.
 # SPDX-License-Identifier: Apache-2.0
-"""Generate ibex/dv/testplans/compliance_testplan.hjson from the pinned riscv-compliance suite.
+"""Generate ibex/dv/riscv_compliance/compliance_testplan.hjson from the pinned riscv-compliance suite.
 
 The test list is the suite's own: one test per reference signature in
 riscv-compliance/riscv-test-suite/<isa>/references/, for the five ISAs
@@ -22,7 +22,7 @@ from gen_core_ibex_testplan import desc_block, tests_block  # noqa: E402  (templ
 
 REPO = Path(__file__).resolve().parents[3]  # ibex/dv/scripts -> repository root
 SUITE = REPO / "riscv-compliance/riscv-test-suite"
-OUT = REPO / "ibex/dv/testplans/compliance_testplan.hjson"
+OUT = REPO / "ibex/dv/riscv_compliance/compliance_testplan.hjson"
 ISAS = ["rv32i", "rv32im", "rv32imc", "rv32Zicsr", "rv32Zifencei"]
 TAGS = ["enable_low", "enable_high"]
 

@@ -27,7 +27,7 @@ make testrig-cheriot-xlm            # CHERIoT flavour, Xcelium
 make testrig-riscv-xlm              # plain RISC-V flavour, Xcelium
 make testrig-cheriot-vlt            # same testbench on Verilator (nix develop .#vlt_shell)
 make testrig-fault-injection-xlm    # scoreboard fault injection; every run must fail
-make testplan-testrig               # report the kept runs against ibex/dv/testplans/testrig_testplan.hjson
+make testplan-testrig               # report the kept runs against ibex/dv/testrig/testrig_testplan.hjson
 ```
 
 A run is complete only when the scoreboard has compared a non-zero number of instructions with

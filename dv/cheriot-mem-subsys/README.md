@@ -3,7 +3,7 @@
 A SystemVerilog testbench for the OpenTitan CHERIoT memory subsystem on its own: the top module
 `cheriot` (`opentitan-cheriot/hw/ip/cheriot/rtl/cheriot.sv`, lowRISC/opentitan PR #31515 as
 merged, as pinned in `opentitan-cheriot/VENDORED_FROM`), unmodified. The testplan is
-[`../testplans/cheriot_mem_subsys_testplan.hjson`](../testplans/cheriot_mem_subsys_testplan.hjson);
+[`cheriot_mem_subsys_testplan.hjson`](cheriot_mem_subsys_testplan.hjson);
 it also says which obligations are left to the RTOS firmware (`sonata_testplan.hjson`) and to
 formal.
 

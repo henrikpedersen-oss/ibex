@@ -19,7 +19,7 @@
 //           seed listed there must pass (cheriot_mem_subsys_results.py, make
 //           testplan-cheriot-mem-subsys). The reference model (cms_pkg.sv) is written from the
 //           documents, never from DUT state: a shadow tag map, revocation bitmap, data and CSR model.
-//   sonata  CHERIoT RTOS firmware on the RTOS test SoC (ibex/dv/testplans/sonata_testplan.hjson);
+//   sonata  CHERIoT RTOS firmware on the RTOS test SoC (ibex/dv/cheriot-rtos-test-suites/sonata_testplan.hjson);
 //           the named tests are reported there, not here.
 //   formal  property checking, not started; the testpoint names the property and has no test.
 // A testpoint with only sonata/formal tags has tests: [] here.

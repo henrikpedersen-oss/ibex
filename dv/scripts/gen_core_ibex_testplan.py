@@ -2,7 +2,7 @@
 # Copyright lowRISC contributors.
 # Licensed under the Apache License, Version 2.0, see LICENSE for details.
 # SPDX-License-Identifier: Apache-2.0
-"""Generate ibex/dv/testplans/core_ibex_testplan.hjson from the UVM bench's own sources.
+"""Generate ibex/dv/uvm/core_ibex/core_ibex_testplan.hjson from the UVM bench's own sources.
 
 The core_ibex bench has ~1000 tests (riscv-dv testlist + directed testlists) and ~260 coverpoints,
 and both grow; a hand-written testplan would drift at once. So the testplan is generated:
@@ -29,7 +29,7 @@ TESTLISTS = [UVM / "riscv_dv_extension/testlist.yaml"] + sorted(
     (UVM / "directed_tests").glob("directed_testlist*.yaml"))
 FCOV = [UVM / "fcov/core_ibex_fcov_if.sv", UVM / "fcov/core_ibex_pmp_fcov_if.sv",
         UVM / "fcov/core_ibex_trvk_fcov_if.sv"]
-OUT = REPO / "ibex/dv/testplans/core_ibex_testplan.hjson"
+OUT = REPO / "ibex/dv/uvm/core_ibex/core_ibex_testplan.hjson"
 # Coverpoint descriptions and requirement links come from the spec's Functional Coverage chapter.
 # Optional: without the spec (e.g. ibex on its own) only the hand-written CG_DETAILS remain.
 SPEC = REPO / "ibex_cheriot_verification_spec.md"
