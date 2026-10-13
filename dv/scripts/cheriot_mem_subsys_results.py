@@ -90,7 +90,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--testplan", required=True, type=Path)
     ap.add_argument("--bench-dir", required=True, type=Path,
-                    help="ibex/dv/cheriot-mem-subsys (holds cms_regress.list and xlm_out/results/)")
+                    help="ibex/dv/cheriot-mem-ss (holds cms_regress.list and xlm_out/results/)")
     ap.add_argument("--seed-base", type=int, default=1)
     ap.add_argument("--out", required=True, type=Path)
     args = ap.parse_args()

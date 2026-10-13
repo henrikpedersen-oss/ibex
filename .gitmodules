@@ -14,3 +14,7 @@
 	path = dv/testrig_ibex_cheriot
 	url = git@github.com:lowRISC/testrig_ibex_cheriot.git
 	branch = main
+[submodule "dv/cheriot-mem-ss"]
+	path = dv/cheriot-mem-ss
+	url = git@github.com:lowRISC/cheriot-mem-ss.git
+	branch = main

@@ -9,7 +9,7 @@
 // parameters directly. Compiled into the CHERIoT RTOS test SoC build (../cheriot_rtos_dv.f) and
 // instantiated by its testbench; binds are by module name, so they need no hierarchical paths.
 // Derived from the Sonata Xcelium flow's binds (sonata-xlm/fcov/), for the RTL of lowRISC/opentitan
-// PR #31515. ../../cheriot-mem-subsys/tb/cms_fcov_bind.sv repeats the binds whose targets its
+// PR #31515. ../../cheriot-mem-ss/tb/cms_fcov_bind.sv repeats the binds whose targets its
 // block-level bench has: keep the two in step.
 module cheriot_mem_subsys_fcov_bind;
 

@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Mutation check for the CHERIoT memory subsystem bench: does a real RTL bug make its tests fail?
 
-Each mutation (ibex/dv/cheriot-mem-subsys/tb/cms_tb.sv, +cms_mutate=<name>) forces one internal
+Each mutation (ibex/dv/cheriot-mem-ss/tb/cms_tb.sv, +cms_mutate=<name>) forces one internal
 signal of the unmodified subsystem to what a plausible design error would drive. For each, RUNS
 lists the runs of cms_regress.list (result names) that must then FAIL. A test that still passes
 with the bug in is not testing that obligation. The +cms_sb_corrupt runs show the checker can
@@ -34,7 +34,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from cheriot_mem_subsys_results import RESULT, TOOL_ERR  # noqa: E402  (the report's parsing)
 
-BENCH = Path(__file__).resolve().parent.parent / "cheriot-mem-subsys"
+BENCH = Path(__file__).resolve().parent.parent / "cheriot-mem-ss"
 
 # Mutations run at this seed; the expectations below were chosen from what each test drives at any
 # seed, not from a run.
