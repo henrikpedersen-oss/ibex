@@ -23,6 +23,7 @@ to be able to pass. CONTROLS lists runs with a fix model instead of a mutation (
                   PASSES       the test reported PASS with the fix model
                   STILL FAILS  the test reported FAIL even with the fix model
                 and INACTIVE if the run's simulator summary lacks "MUTATION <name> active".
+                DISABLED lists the mutations in DISABLED, which are not run (not a failure).
                 Exits non-zero on any MISSED, STILL FAILS, CRASHED control or INACTIVE.
 """
 
@@ -51,10 +52,6 @@ RUNS = [
     ("exec_off", "sonata-cheri-c-xlm", [("cheri_c_noexec_call", "cheriot_mem")]),
     ("datastore_tag", "sonata-cheri-c-xlm", [("cheri_c_union", "cheriot_mem")]),
     ("barrier_none", "sonata-revocation-xlm", [("revocation_barrier_phase2", "cheriot_mem")]),
-    # barrier_all revokes only revocation_test's barrier object (an unrestricted force strips
-    # every SRAM capability and the RTOS cannot boot; see the testbench).
-    ("barrier_all", "sonata-revocation-xlm", [("revocation_barrier_phase1", "cheriot_mem"),
-                                              ("revocation_barrier_phase3", "cheriot_mem")]),
     # Not bus_master_tbre_invalidate_only: it checks that the sweep writes nothing but tag
     # clears, which a TBRE that writes nothing at all satisfies. revocation_sweep checks that the
     # revoked capability was cleared.
@@ -74,6 +71,18 @@ RUNS = [
 CONTROLS = [
     ("sba_tag_clear_model", "sonata-dbg-host-xlm",
      [("bus_master_dbg_host_tag_clear", "cheriot_mem")]),
+]
+
+# Mutations that are not run, with the reason; --check lists each as DISABLED (not a failure) so
+# the missing check stays visible. Put one back in RUNS once its mutation works.
+DISABLED = [
+    # Meant to revoke only revocation_test's barrier object (an unrestricted force strips every
+    # SRAM capability and the RTOS cannot boot; see the testbench), but the restricted force stops
+    # the boot too: the core traps at 0x00100000 about 1760 cycles in, before any UART output, in
+    # every run so far (2026-10-10, 10-11, 10-14), so phase 1 and 3 never report. Cause not found.
+    ("barrier_all", "sonata-revocation-xlm", [("revocation_barrier_phase1", "cheriot_mem"),
+                                              ("revocation_barrier_phase3", "cheriot_mem")],
+     "the restricted force still stops the RTOS boot (trap loop at 0x00100000); cause not found"),
 ]
 
 # Make target -> the SONATA_RESULT name it saves its log under (Makefile).
@@ -134,6 +143,9 @@ def check(results):
                                 if not p and (t, build) not in expects)
             if collateral:
                 print(f"          also failed: {', '.join(collateral)}")
+    for mutation, args, expects, why in DISABLED:
+        tests = ", ".join(t for t, _ in expects)
+        print(f"DISABLED  {mutation:14s} make {args}: not run ({why}); {tests} unchecked")
     return ok
 
 
