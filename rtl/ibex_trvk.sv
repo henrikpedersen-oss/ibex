@@ -36,6 +36,8 @@ module ibex_trvk #(
   output logic        upstream_err_o,
   input  logic        upstream_tag_i,
   output logic        upstream_tag_o,
+  // With upstream_rvalid_o: upstream_tag_o is 0 because this response was revoked (its tag was set)
+  output logic        upstream_tag_revoked_o,
 
   // Downstream port
   output logic        downstream_req_o,
@@ -193,6 +195,10 @@ module ibex_trvk #(
 
   // Tag handling; always return tag except if we do a revocation bitmap lookup
   assign upstream_tag_o = (revbm_rvalid_i ? !revbm_revoked : 1'b1) & downstream_rsp_out.tag;
+  // The core needs the tag from before revocation as well: a CLC attenuates the loaded permissions
+  // (GL/LG, SD/LM) when the capability is tagged before the revocation check (CHERIoT-Sail
+  // LoadCapImm), and only then does revocation clear the tag (#958).
+  assign upstream_tag_revoked_o = revbm_rvalid_i & revbm_revoked & downstream_rsp_out.tag;
 
   // 64-bit alignment store
   prim_fifo_sync #(

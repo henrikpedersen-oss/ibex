@@ -263,8 +263,10 @@ class core_ibex_rf_addr_intg_test extends core_ibex_base_test;
     vseq.start(env.vseqr);
     clk_vif.wait_n_clks(rnd_delay);
 
-    // Disable TB assertion for alerts.
+    // Disable TB assertions for alerts and for the d-side request handshake, which the forced read
+    // address can disturb (seed 17277).
     `DV_ASSERT_CTRL_REQ("tb_no_alerts_triggered", 1'b0)
+    `DV_ASSERT_CTRL_REQ("tb_data_req_held_until_gnt", 1'b0)
 
     ecc_alert_path = $sformatf("%s.%s", shdw_ecc_path, err_signals[ctrl_signal_idx]);
 
@@ -340,8 +342,9 @@ class core_ibex_rf_addr_intg_test extends core_ibex_base_test;
     `DV_CHECK_FATAL(uvm_hdl_release(glitch_path))
     `uvm_info(`gfn, $sformatf("Releasing force of %s", glitch_path), UVM_LOW)
 
-    // Re-enable TB assertion for alerts.
+    // Re-enable the TB assertions.
     `DV_ASSERT_CTRL_REQ("tb_no_alerts_triggered", 1'b1)
+    `DV_ASSERT_CTRL_REQ("tb_data_req_held_until_gnt", 1'b1)
 
     // Complete the test at this point because cosimulation does not model faults so will cause
     // a mis-match and a test failure.
@@ -1765,10 +1768,10 @@ class core_ibex_debug_wfi_test extends core_ibex_directed_test;
     forever begin
       // A wfi that retires before this loop starts (it starts 50 clocks after core setup) leaves
       // no pulse to see, and the core then sleeps until woken: seeds 23327/23329 hung this way.
-      // core_sleep is only raised by a WFI once the core is running, so accept it directly.
-      if (dut_vif.dut_cb.core_sleep !== 1'b1) begin
-        wait (dut_vif.dut_cb.wfi === 1'b1);
-      end
+      // core_sleep is only raised by a WFI once the core is running, so accept it directly. Wait for
+      // either in one go: testing core_sleep first and then waiting for the pulse hung when the loop
+      // started between the wfi pulse and core_sleep rising (seed 17270).
+      wait (dut_vif.dut_cb.wfi === 1'b1 || dut_vif.dut_cb.core_sleep === 1'b1);
       wait (dut_vif.dut_cb.core_sleep === 1'b1);
       clk_vif.wait_clks($urandom_range(100));
       send_debug_stimulus(init_operating_mode, "Core did not jump into debug mode from WFI state");

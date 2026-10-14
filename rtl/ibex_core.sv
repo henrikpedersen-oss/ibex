@@ -85,6 +85,7 @@ module ibex_core import ibex_pkg::*; import ibex_cheriot_pkg::*; #(
   output logic                         data_tag_o,
   input  logic [MemDataWidth-1:0]      data_rdata_i,
   input  logic                         data_tag_i,
+  input  logic                         data_tag_revoked_i,  // data_tag_i cleared by revocation (TRVK)
   input  logic                         data_err_i,
 
   // Register file interface
@@ -1103,6 +1104,7 @@ module ibex_core import ibex_pkg::*; import ibex_cheriot_pkg::*; #(
     .data_tag_o       (data_tag_o),
     .data_rdata_i     (data_rdata_i),
     .data_tag_i       (data_tag_i),
+    .data_tag_revoked_i (data_tag_revoked_i),
 
     // signals to/from ID/EX stage
     .lsu_we_i      (lsu_we),

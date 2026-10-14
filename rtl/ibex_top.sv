@@ -267,6 +267,7 @@ module ibex_top import ibex_pkg::*; import ibex_cheriot_pkg::*; #(
   logic [31:0] trvk_rdata;
   logic [6:0]  trvk_rdata_intg;
   logic        trvk_rtag;
+  logic        trvk_rtag_revoked;
   logic        trvk_err;
   logic        trvk_revbm_data_intg_error;
   logic        trvk_revbm_device_error;
@@ -432,6 +433,7 @@ module ibex_top import ibex_pkg::*; import ibex_cheriot_pkg::*; #(
     .data_tag_o   (trvk_wtag),
     .data_rdata_i (data_rdata_core),
     .data_tag_i   (trvk_rtag),
+    .data_tag_revoked_i(trvk_rtag_revoked),
     .data_err_i   (trvk_err),
 
     .dummy_instr_id_o (dummy_instr_id),
@@ -900,6 +902,7 @@ module ibex_top import ibex_pkg::*; import ibex_cheriot_pkg::*; #(
       trvk_wtag,
       data_rdata_core,
       trvk_rtag,
+      trvk_rtag_revoked,
       trvk_err,
       rf_rdata_a,
       rf_rdata_b,
@@ -953,6 +956,7 @@ module ibex_top import ibex_pkg::*; import ibex_cheriot_pkg::*; #(
     logic                         data_tag_local;
     logic [MemDataWidth-1:0]      data_rdata_local;
     logic                         data_rdata_tag_local;
+    logic                         data_rdata_tag_revoked_local;
     logic                         data_err_local;
 
     logic [RegFileDataWidth-1:0]  rf_rdata_a_local;
@@ -1009,6 +1013,7 @@ module ibex_top import ibex_pkg::*; import ibex_cheriot_pkg::*; #(
       trvk_wtag,
       data_rdata_core,
       trvk_rtag,
+      trvk_rtag_revoked,
       trvk_err,
       rf_rdata_a,
       rf_rdata_b,
@@ -1059,6 +1064,7 @@ module ibex_top import ibex_pkg::*; import ibex_cheriot_pkg::*; #(
       data_tag_local,
       data_rdata_local,
       data_rdata_tag_local,
+      data_rdata_tag_revoked_local,
       data_err_local,
       rf_rdata_a_local,
       rf_rdata_b_local,
@@ -1184,6 +1190,7 @@ module ibex_top import ibex_pkg::*; import ibex_cheriot_pkg::*; #(
       .data_tag_i               (data_tag_local),
       .data_rdata_i             (data_rdata_local),
       .data_rdata_tag_i         (data_rdata_tag_local),
+      .data_rdata_tag_revoked_i (data_rdata_tag_revoked_local),
       .data_err_i               (data_err_local),
 
       .rf_rdata_a_i             (rf_rdata_a_local),
@@ -1299,6 +1306,7 @@ module ibex_top import ibex_pkg::*; import ibex_cheriot_pkg::*; #(
       .upstream_err_o         (trvk_err),
       .upstream_tag_i         (trvk_wtag),
       .upstream_tag_o         (trvk_rtag),
+      .upstream_tag_revoked_o (trvk_rtag_revoked),
       .downstream_req_o       (data_req_o),
       .downstream_gnt_i       (data_gnt_i),
       .downstream_rvalid_i    (data_rvalid_i),
@@ -1329,6 +1337,7 @@ module ibex_top import ibex_pkg::*; import ibex_cheriot_pkg::*; #(
     assign trvk_revbm_req_o           = '0;
     assign trvk_revbm_addr_o          = '0;
     assign trvk_rtag                  = 1'b0;
+    assign trvk_rtag_revoked          = 1'b0;
     assign data_tag_o                 = 1'b0;
     assign trvk_revbm_data_intg_error = 1'b0;
     assign trvk_revbm_device_error    = 1'b0;

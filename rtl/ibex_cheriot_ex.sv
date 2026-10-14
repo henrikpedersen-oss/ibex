@@ -342,7 +342,8 @@ module ibex_cheriot_ex import ibex_cheriot_pkg::*; import ibex_pkg::*; #(
       cheriot_operator_i.CSET_HIGH:         // cd <-- cs1; cd.high <-- convert(rs2)
         begin
           result_data_o        = rf_rdata_a;
-          result_cap_o         = cheriot_mem_to_cap({1'b0, rf_rdata_b}, {1'b0, rf_rdata_a}, 3'h0);
+          result_cap_o         = cheriot_mem_to_cap({1'b0, rf_rdata_b}, {1'b0, rf_rdata_a}, 3'h0,
+                                                    1'b0);
           cheriot_rf_we_raw    = 1'b1;
           cheriot_ex_valid_raw = 1'b1;
         end

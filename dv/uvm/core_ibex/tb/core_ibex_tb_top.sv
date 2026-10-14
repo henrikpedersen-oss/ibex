@@ -685,6 +685,9 @@ module core_ibex_tb_top;
   // drop data_req_o before data_gnt_i, whatever happens to cheriot_enable_i meanwhile.
   `ASSERT(DataReqHeldUntilGnt, data_mem_vif.request && !data_mem_vif.grant |=> data_mem_vif.request,
     clk, !rst_n)
+  // Off while core_ibex_rf_addr_intg_test forces a register-file read address: the fault injection
+  // disturbs a load whose request is waiting for its grant (seed 17277).
+  `DV_ASSERT_CTRL("tb_data_req_held_until_gnt", core_ibex_tb_top.DataReqHeldUntilGnt)
 
   `DV_ASSERT_CTRL("tb_no_spurious_response",
     core_ibex_tb_top.dut.u_ibex_top.u_ibex_core.NoMemResponseWithoutPendingAccess)

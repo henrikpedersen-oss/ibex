@@ -38,6 +38,7 @@ module ibex_load_store_unit import ibex_pkg::*; import ibex_cheriot_pkg::*; #(
   output logic                    data_tag_o,
   input  logic [MemDataWidth-1:0] data_rdata_i,
   input  logic                    data_tag_i,
+  input  logic                    data_tag_revoked_i,  // data_tag_i cleared by revocation (TRVK)
 
   // signals to/from ID/EX stage
   input  logic         lsu_we_i,             // write enable                     -> from ID/EX
@@ -731,13 +732,15 @@ module ibex_load_store_unit import ibex_pkg::*; import ibex_cheriot_pkg::*; #(
                           data_rvalid_i && (cap_rx_fsm_q == CRX_WAIT_RESP2) &&
                           (~data_or_pmp_err) && (~cap_intg_err)) ?
                          cheriot_mem_to_cap({data_tag_i, data_rdata_i[31:0]},
-                             {cap_lsw_tag_q, cap_lsw_data_q}, resp_lc_clrperm_q) :
+                             {cap_lsw_tag_q, cap_lsw_data_q}, resp_lc_clrperm_q,
+                             data_tag_revoked_i) :
                          NULL_CAP;
   end else begin : gen_no_cap_rd
     assign lsu_rdata_o = data_rdata_ext;
     assign lsu_rcap_o  = NULL_CAP;
     logic unused_cap_rd_sigs;
-    assign unused_cap_rd_sigs = ^{resp_lc_clrperm_q, cap_lsw_data_q, cap_lsw_tag_q, data_tag_i};
+    assign unused_cap_rd_sigs = ^{resp_lc_clrperm_q, cap_lsw_data_q, cap_lsw_tag_q, data_tag_i,
+                                  data_tag_revoked_i};
   end
 
 

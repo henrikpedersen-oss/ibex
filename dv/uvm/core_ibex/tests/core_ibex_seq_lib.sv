@@ -37,6 +37,12 @@ class core_base_seq #(type REQ = uvm_sequence_item) extends uvm_sequence#(REQ);
     if(!uvm_config_db#(virtual clk_rst_if)::get(null, "", "clk_if", clk_vif)) begin
        `uvm_fatal(get_full_name(), "Cannot get clk_if")
     end
+    // Started and not finished from here, before the delay: the sequence objects are reused, and a
+    // seq_finished left at 1 by the previous run (or is_started still 0 during the delay) let
+    // stop()/wait_for_stop() return while this run was still waiting for a grant. The test then
+    // killed it (UVM "SEQREQZMB", riscv_debug_in_irq_test 17265, riscv_multiple_interrupt_test 17271).
+    seq_finished = 1'b0;
+    is_started   = 1'b1;
     `DV_CHECK_MEMBER_RANDOMIZE_FATAL(delay)
     clk_vif.wait_clks(delay);
 
@@ -44,7 +50,6 @@ class core_base_seq #(type REQ = uvm_sequence_item) extends uvm_sequence#(REQ);
     // whichever is longer.
     // Send a request() each time with a randomized interval between items.
     `uvm_info(get_full_name(), "Starting sequence...", UVM_LOW)
-    if (!is_started) is_started = 1'b1;
     while (!stop_seq) begin
       send_req();
       iteration_cnt++;
