@@ -35,8 +35,11 @@ def grade(test, d):
     """(passed, reason) for one run directory."""
     why = []
     rc = read(d / "rc").strip()
-    if rc != "0":
-        why.append(f"simulator exit {rc or 'not recorded'}")
+    if not rc:
+        why.append("simulator exit not recorded (no rc: a run by an older run_cosim_tests.sh;"
+                   " re-run make simple-system-cosim-vlt)")
+    elif rc != "0":
+        why.append(f"simulator exit {rc}")
     sim, uart = read(d / "sim.log"), read(d / "ibex_simple_system.log")
     if "FAILURE" in sim or "FAILURE" in uart:
         why.append("FAILURE in the log")
