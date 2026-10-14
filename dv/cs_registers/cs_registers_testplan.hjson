@@ -8,9 +8,12 @@
 // read compared with a C++ register model (model/). The core's other inputs are tied off: no
 // instruction retires, no trap, no debug mode, CHERIoT disabled.
 //
-// Configuration (csr_xlm.sh, the core file's sim defaults): PMPEnable=1, PMPNumRegions=4,
-// PMPGranularity=0, MHPMCounterNum=8, MHPMCounterWidth=40, everything else ibex_cs_registers'
-// default (BaseIsa RV32I, no ShadowCSR). Not the opentitan configuration of the UVM bench.
+// Configuration: tb_cs_registers takes PMPEnable, PMPGranularity, PMPNumRegions, MHPMCounterNum,
+// MHPMCounterWidth, DbgTriggerEn and ICache from the ibex configuration (csr_xlm.sh, default
+// opentitan: 16 PMP regions, 10 counters of 32 bits), so its coverage merges onto the core's
+// cs_registers_i; the rest keeps ibex_cs_registers' defaults (BaseIsa RV32I, no ShadowCSR). The
+// Verilator run (FuseSoC, upstream's flow) uses the core file's defaults instead (4 PMP regions, 8
+// counters of 40 bits).
 //
 // Tests:
 //   tb_cs_registers      Xcelium, make csr-tb-xlm (graded from xlm_out/result and run.log)
