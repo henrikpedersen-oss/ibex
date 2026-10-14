@@ -266,8 +266,11 @@ function getPendingSet(priv : Privilege) -> option((xlenbits, Privilege)) = {
 function dispatchInterrupt(priv : Privilege) -> option((InterruptType, Privilege)) = {
   /* If we don't have different privilege levels, we don't need to check delegation.
    * Absence of U-mode implies absence of S-mode.
+   * Local change (see VENDORED_FROM): an M/U system without S or N (Ibex) has two privilege
+   * levels, so it takes the getPendingSet path; it used to take this one and fail the assertion
+   * in U-mode.
    */
-  if not(haveUsrMode()) | (not(haveSupMode()) & not(haveNExt())) then {
+  if not(haveUsrMode()) then {
     assert(priv == Machine, "invalid current privilege");
     let enabled_pending = mip.bits & mie.bits;
     match findPendingInterrupt(enabled_pending) {

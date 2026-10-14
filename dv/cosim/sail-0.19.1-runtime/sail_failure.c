@@ -55,6 +55,7 @@
  * handled gracefully rather than crashing the simulation. */
 jmp_buf sail_recovery_buf;
 int     sail_recovery_buf_active = 0;
+char    sail_recovery_msg[256];
 
 #ifdef __cplusplus
 extern "C" {
@@ -64,6 +65,7 @@ void sail_match_failure(const_sail_string msg)
 {
   fprintf(stderr, "Pattern match failure in %s\n", msg);
   if (sail_recovery_buf_active) {
+    snprintf(sail_recovery_msg, sizeof(sail_recovery_msg), "pattern match failure in %s", msg);
     longjmp(sail_recovery_buf, 1);
   }
   exit(EXIT_FAILURE);
@@ -74,6 +76,7 @@ unit sail_assert(bool b, const_sail_string msg)
   if (b) return UNIT;
   fprintf(stderr, "Assertion failed: %s\n", msg);
   if (sail_recovery_buf_active) {
+    snprintf(sail_recovery_msg, sizeof(sail_recovery_msg), "assertion failed: %s", msg);
     longjmp(sail_recovery_buf, 2);
   }
   exit(EXIT_FAILURE);

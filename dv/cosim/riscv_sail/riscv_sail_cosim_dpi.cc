@@ -179,8 +179,9 @@ int riscv_sail_cosim_step(const svBitVecVal *insn_p, const svBitVecVal *pc_p) {
   if (setjmp(sail_recovery_buf) != 0) {
     sail_recovery_buf_active = 0;
     KILL(sail_int)(&sail_step);
-    char buf[128];
-    snprintf(buf, sizeof(buf), "riscv-sail could not step insn=0x%08x pc=0x%08x", insn, pc);
+    char buf[400];
+    snprintf(buf, sizeof(buf), "riscv-sail could not step insn=0x%08x pc=0x%08x (Sail %s)", insn,
+             pc, sail_recovery_msg);
     s_errors.emplace_back(buf);
     s_step_no++;
     return -1;
@@ -252,7 +253,8 @@ int riscv_sail_cosim_take_interrupt(const svBitVecVal *mip_p) {
     sail_recovery_buf_active = 0;
     KILL(sail_int)(&sail_step);
     zmip.zbits = saved_mip;
-    s_errors.emplace_back("riscv-sail could not take the interrupt (Sail failure)");
+    s_errors.emplace_back(std::string("riscv-sail could not take the interrupt (Sail ") +
+                          sail_recovery_msg + ")");
     return -1;
   }
   const bool stepped = zstep(sail_step);

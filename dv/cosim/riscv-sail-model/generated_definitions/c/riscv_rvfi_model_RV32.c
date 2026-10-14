@@ -51237,7 +51237,8 @@ void zdispatchInterrupt(struct zoptionzIz8EInterruptTypez5zCEPrivilegez5z9zK *z6
       } else {  z3zE2136 = false;  }
       z3zE2137 = z3zE2136;
     }
-    z2zE1450 = z3zE2137;
+    z2zE1450 = z2zE1449; /* local: M/U without S/N takes the getPendingSet path (was z3zE2137) */
+    (void)z3zE2137;
   }
   if (z2zE1450) {
     __label__ case_3185, case_3184, finish_match_3183;

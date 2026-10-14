@@ -59,6 +59,9 @@ extern "C" {
  * around zstep() to catch unrecognized instruction encodings gracefully. */
 extern jmp_buf sail_recovery_buf;
 extern int     sail_recovery_buf_active;
+/* The message of the failure that last longjmp'd to sail_recovery_buf, for the bridges' errors
+ * (stderr is not in the simulator log). */
+extern char    sail_recovery_msg[256];
 
 /*
  * This function should be called whenever a pattern match failure

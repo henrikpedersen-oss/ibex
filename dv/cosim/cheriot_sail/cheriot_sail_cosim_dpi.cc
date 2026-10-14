@@ -296,12 +296,11 @@ int cheriot_sail_cosim_step(const svBitVecVal *insn_p,
     sail_recovery_buf_active = 0;
     // sail_step was CREATE'd above; the longjmp bypassed KILL — free it now.
     KILL(sail_int)(&sail_step);
-    char buf[200];
+    char buf[480];
     snprintf(buf, sizeof(buf),
              "cheriot-sail model cannot execute insn=0x%08x at pc=0x%08x (step %lld, "
              "Sail %s): not compared",
-             insn, pc, (long long)s_step_no,
-             recovery == 2 ? "assertion" : "match failure");
+             insn, pc, (long long)s_step_no, sail_recovery_msg);
     s_errors.emplace_back(buf);
     s_step_no++;
     return -1;
