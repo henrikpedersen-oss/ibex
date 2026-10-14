@@ -10,7 +10,7 @@
 # The check in each case is that the capability loses its tag or traps, rather
 # than that the C program misbehaves.
 #
-# Distinct from ibex/dv/cheriot-rtos-test-suites/firmware/juliet_cwe, which runs the
+# Distinct from ibex/dv/cheriot-rtos-test-suite/firmware/juliet_cwe, which runs the
 # same CWE classes as compiled C under CHERIoT RTOS on the RTOS test SoC via
 # `make sonata-juliet-xlm`. These need no RTOS and run under the normal uvm-test-xlm path.
 #

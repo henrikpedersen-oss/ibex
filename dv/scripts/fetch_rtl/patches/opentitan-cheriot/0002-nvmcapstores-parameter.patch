@@ -2,7 +2,7 @@ Make the NVM capability-store verification (NvmCapStores) a parameter of cheriot
 
 Upstream hard-wires cheriot_tag_filter NvmCapStores(1'b1): a capability store to the NVM region
 is turned into a read and compared with the NVM, never written. The CHERIoT RTOS SoC in
-ibex/dv/cheriot-rtos-test-suites maps its writable code RAM (Sonata's HyperRAM, 0x4000_0000) as the
+ibex/dv/cheriot-rtos-test-suite maps its writable code RAM (Sonata's HyperRAM, 0x4000_0000) as the
 subsystem's NVM region to give it tags, and the cheriot-rtos loader stores capabilities into
 import tables there, so boot would fail. This adds a top-level parameter NvmCapStores, default
 1'b1 (upstream behaviour unchanged), which that SoC sets to 0. To be proposed upstream.

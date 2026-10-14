@@ -75,7 +75,7 @@ non-style lint warnings are `UNOPTFLAT` combinational-loop notices, which OpenTi
 
 The Sonata IP the RTOS test SoC builds on: UART, rv_plic, rv_timer, rev_ctl, the SRAM model, the
 address-map packages, Sonata's CHERIoT TL-UL and top_pkg, and the uartdpi DPI model. The patches and
-why each is needed are in `dv/cheriot-rtos-test-suites/README.md` (Sources).
+why each is needed are in `dv/cheriot-rtos-test-suite/README.md` (Sources).
 
 ## pulp_riscv_dbg
 

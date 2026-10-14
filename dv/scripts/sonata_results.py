@@ -31,7 +31,7 @@ from pathlib import Path
 import hjson
 
 # The build tag every log carries (<target>.<build>.uart.log). The CHERIoT RTOS test SoC
-# (ibex/dv/cheriot-rtos-test-suites) has one build, with the CHERIoT memory subsystem; the Sonata
+# (ibex/dv/cheriot-rtos-test-suite) has one build, with the CHERIoT memory subsystem; the Sonata
 # flow's "default" and "revocation" builds are gone, and logs tagged with them are skipped.
 BUILDS = ("cheriot_mem",)
 

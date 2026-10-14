@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Mutation check for the Sonata test suites: does breaking a hardware check make a test fail?
 
-Each mutation (ibex/dv/cheriot-rtos-test-suites/tb/cheriot_rtos_tb.sv, +sonata_mutate=<name>)
+Each mutation (ibex/dv/cheriot-rtos-test-suite/tb/cheriot_rtos_tb.sv, +sonata_mutate=<name>)
 forces one check off. For each, RUNS lists the runs that exercise it and the tests that must then
 report FAIL. A test that still passes with the check broken is not testing that check.
 
@@ -142,7 +142,7 @@ def main():
     ap.add_argument("--list-runs", action="store_true")
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--results", type=Path,
-                    default=Path("ibex/dv/cheriot-rtos-test-suites/xlm_rtos_out/results/mutations"))
+                    default=Path("ibex/dv/cheriot-rtos-test-suite/xlm_rtos_out/results/mutations"))
     args = ap.parse_args()
     if args.list_runs:
         for mutation, make_args, _ in RUNS + CONTROLS:
