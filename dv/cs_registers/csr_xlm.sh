@@ -57,6 +57,11 @@ if [[ ${COVERAGE} -eq 1 ]]; then
             -covtest "csr_${SEED}" -covoverwrite)
 fi
 
+# librun's RUNPATH starts with a Nix glibc-2.31 while xmsim runs on the FHS sandbox's newer glibc in
+# /lib, so librt from the RUNPATH cannot bind to the loaded libpthread (*F,FLDRUN, "GLIBC_PRIVATE
+# not found"). LD_LIBRARY_PATH is searched first; as in cheriot_rtos_xlm_run.sh.
+export LD_LIBRARY_PATH="/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+
 # Parameters: the core file's defaults for the sim target (PMP on, 4 regions, 8 counters of 40 bits).
 xrun -64bit -sv -licqueue -timescale 1ns/1ps \
   -F "${FILES}" \
