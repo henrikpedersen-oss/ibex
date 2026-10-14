@@ -14,9 +14,16 @@ module tb_cs_registers #(
     parameter ibex_pkg::rv32m_e RV32M            = ibex_pkg::RV32MFast,
     parameter ibex_pkg::rv32b_e RV32B            = ibex_pkg::RV32BNone
 ) (
-    // Clock and Reset
+    // Clock and Reset. Inputs in Verilator, driven by the C++ top (tb_cs_registers.cc): Verilator 5
+    // treats an inout with no driver inside as constant and removed every block clocked by it (an
+    // empty eval(), so the run never reached $finish). Inouts elsewhere, driven below.
+`ifdef VERILATOR
+    input  logic                clk_i,
+    input  logic                in_rst_ni,
+`else
     inout  logic                clk_i,
     inout  logic                in_rst_ni,
+`endif
     output logic                test_passed_o
 );
 

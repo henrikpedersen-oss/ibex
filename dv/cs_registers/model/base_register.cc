@@ -38,7 +38,7 @@ bool BaseRegister::MatchAddr(uint32_t addr, uint32_t addr_mask) {
 }
 
 bool BaseRegister::ProcessTransaction(bool *match, RegisterTransaction *trans) {
-  uint32_t read_val;
+  uint32_t read_val = 0;
   if (!MatchAddr(trans->csr_addr)) {
     return false;
   }
