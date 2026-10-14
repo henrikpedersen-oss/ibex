@@ -54,6 +54,9 @@ mapfile -t CC_SRCS < <(find "${HERE}/env" "${HERE}/reg_driver" "${HERE}/rst_driv
 elab_cov=()
 run_cov=()
 if [[ ${COVERAGE} -eq 1 ]]; then
+  # One model per run: -covoverwrite replaces the test's data but leaves the models of earlier
+  # builds beside it, and the coverage merge takes this directory as it finds it.
+  rm -rf "${OUT}/cov_work"
   elab_cov=(-coverage all -covdut ibex_cs_registers)
   run_cov=(-covworkdir "${OUT}/cov_work" -covscope csr -covtest "csr_${SEED}" -covoverwrite)
 fi
