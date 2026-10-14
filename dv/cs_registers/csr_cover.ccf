@@ -1,0 +1,17 @@
+// Copyright lowRISC contributors.
+// Licensed under the Apache License, Version 2.0, see LICENSE for details.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Xcelium coverage configuration of the CS registers testbench (csr_xlm.sh -c). Its coverage is
+// merged onto the core's cs_registers_i in coverage_combined_blocks (run_all_tests.sh), and IMC
+// merges block and expression coverage only between runs scored with the same commands: without
+// this file the bench's run was rejected whole ("Mismatch in coverage configuration file
+// command(s) - set_statement_scoring", 2026-10-14). So it scores as ibex/dv/coverage/ibex_cover.ccf
+// does (the same common.ccf), on ibex_cs_registers and below instead of ibex_top and below.
+// Toggle is left out: the system-level runs score toggle on ibex_top's ports only, so
+// cs_registers_i has none to merge into.
+
+include_ccf ${IBEX_ROOT}/vendor/lowrisc_ip/dv/tools/xcelium/common.ccf
+
+select_coverage -befts -module ibex_cs_registers...
+deselect_coverage -toggle -module ibex_cs_registers...

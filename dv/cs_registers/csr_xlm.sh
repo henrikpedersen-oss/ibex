@@ -20,6 +20,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IBEX_ROOT="$(cd "${HERE}/../.." && pwd)"
+export IBEX_ROOT  # csr_cover.ccf includes ${IBEX_ROOT}/vendor/.../common.ccf
 OUT="${HERE}/xlm_out"
 COVERAGE=0
 SEED=1
@@ -57,7 +58,7 @@ if [[ ${COVERAGE} -eq 1 ]]; then
   # One model per run: -covoverwrite replaces the test's data but leaves the models of earlier
   # builds beside it, and the coverage merge takes this directory as it finds it.
   rm -rf "${OUT}/cov_work"
-  elab_cov=(-coverage all -covdut ibex_cs_registers)
+  elab_cov=(-coverage all -covdut ibex_cs_registers -covfile "${HERE}/csr_cover.ccf")
   run_cov=(-covworkdir "${OUT}/cov_work" -covscope csr -covtest "csr_${SEED}" -covoverwrite)
 fi
 
