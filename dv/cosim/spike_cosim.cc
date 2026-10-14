@@ -866,6 +866,25 @@ void SpikeCosim::set_mip(uint32_t pre_mip, uint32_t post_mip) {
   }
 }
 
+// The DUT committed to an interrupt (RVFI interrupt-only item: IRQ_TAKEN with handle_irq). Defer it
+// as set_mip() does for a newly enabled one. set_mip() only sees a 0->1 change of mip & mie, so it
+// misses an interrupt that was pending all along and became takeable by a privilege change: fast
+// IRQ 7 pending while M-mode had MIE = 0, an mret to U-mode, IRQ 7 taken from U, then an NMI before
+// the handler's first instruction retired. Without the deferral the NMI was taken alone, from U,
+// and the NMI handler's mstatus.MPP differed (riscv_assorted_traps_interrupts_debug_test 17269,
+// 2026-10-14). An NMI notification sets nmi_mode first and is left to set_nmi().
+void SpikeCosim::set_irq_taken() {
+  state_t *s = processor->get_state();
+  if (s->debug_mode || nmi_mode || processor->halt_request == processor_t::HR_REGULAR) {
+    return;
+  }
+  const uint32_t pre_mip = s->mip->read_pre_val();
+  if (pre_mip & s->mie->read()) {
+    pending_irq_early_handle = true;
+    pending_irq_pre_mip = pre_mip;
+  }
+}
+
 // An NMI (set_nmi / set_nmi_int) can reach the model while an interrupt set_mip() deferred is
 // still pending: the DUT entered the interrupt (IRQ_TAKEN committed: mepc, mcause, MPIE written)
 // and the NMI arrived before the handler's first instruction retired, nesting on top of it. The

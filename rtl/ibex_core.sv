@@ -1994,7 +1994,18 @@ module ibex_core import ibex_pkg::*; import ibex_cheriot_pkg::*; #(
   assign trap_commit =
       ((id_stage_i.controller_i.ctrl_fsm_cs == IRQ_TAKEN) & id_stage_i.controller_i.handle_irq) |
       (id_stage_i.controller_i.ctrl_fsm_cs == DBG_TAKEN_IF);
-  assign use_capture = ~instr_valid_id & captured_valid & (captured_taken | rvfi_irq_valid);
+
+  // A dummy instruction (ibex_dummy_instr) never retires on RVFI, so it must neither take nor
+  // clear the captured trap state: that belongs to the first instruction that retires. A dummy
+  // inserted right after a debug entry used to take the captured debug request into its own item,
+  // and the handler's first real instruction then carried the raw debug_req_i, already dropped, so
+  // the cosim never entered debug (riscv_debug_basic_test 17271, 2026-10-14: "DUT retired
+  // 80000000, ISS retired 80003b18"; also seeds 26236, 27562, 21931). rvfi_dummy_id_d: the
+  // instruction ID holds next cycle is a dummy.
+  logic rvfi_dummy_id_d;
+  assign rvfi_dummy_id_d = if_stage_i.instr_new_id_d ? if_stage_i.stall_dummy_instr : dummy_instr_id;
+  assign use_capture = (~instr_valid_id | dummy_instr_id) & captured_valid &
+                       (captured_taken | rvfi_irq_valid);
 
   always_ff @(posedge clk_i or negedge rst_ni) begin
     if (!rst_ni) begin
@@ -2055,8 +2066,8 @@ module ibex_core import ibex_pkg::*; import ibex_cheriot_pkg::*; #(
         rvfi_irq_valid <= 1'b0;
       end
 
-      // Capture cleared out as soon as a new instruction appears in ID
-      if (if_stage_i.instr_valid_id_d) begin
+      // Capture cleared out as soon as a new instruction appears in ID (not a dummy, see above)
+      if (if_stage_i.instr_valid_id_d & ~rvfi_dummy_id_d) begin
         captured_valid <= 1'b0;
         captured_taken <= 1'b0;
       end
@@ -2076,7 +2087,8 @@ module ibex_core import ibex_pkg::*; import ibex_cheriot_pkg::*; #(
       rvfi_ext_stage_nmi_int[0]   <= '0;
       rvfi_ext_stage_debug_req[0] <= '0;
       rvfi_ext_stage_irq_valid[0] <= '0;
-    end else if ((if_stage_i.instr_valid_id_d & if_stage_i.instr_new_id_d) | rvfi_irq_valid) begin
+    end else if ((if_stage_i.instr_valid_id_d & if_stage_i.instr_new_id_d &
+                  ~if_stage_i.stall_dummy_instr) | rvfi_irq_valid) begin
       // The captured state goes into the rvfi_irq_valid notification as before, and into an
       // instruction's item only once the controller committed to the trap (captured_taken).
       rvfi_ext_stage_pre_mip[0]   <= ~use_capture ? cs_registers_i.mip : captured_mip;

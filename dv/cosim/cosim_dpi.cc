@@ -28,6 +28,12 @@ void riscv_cosim_set_mip(Cosim *cosim, const svBitVecVal *pre_mip,
   cosim->set_mip(pre_mip[0], post_mip[0]);
 }
 
+void riscv_cosim_set_irq_taken(Cosim *cosim) {
+  assert(cosim);
+
+  cosim->set_irq_taken();
+}
+
 void riscv_cosim_set_nmi(Cosim *cosim, svBit nmi) {
   assert(cosim);
 

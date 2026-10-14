@@ -110,6 +110,11 @@ class Cosim {
   // new interrupt that is enabled it will step straight to that handler).
   virtual void set_mip(uint32_t pre_mip, uint32_t post_mip) = 0;
 
+  // The DUT committed to taking an interrupt (an RVFI interrupt-only notification), with the MIP
+  // last given by `set_mip`. The co-simulator takes it before a later NMI or debug request, also
+  // when it was pending before but only now enabled (e.g. by an `mret` to U-mode). Optional.
+  virtual void set_irq_taken() {}
+
   // Set the state of the NMI (non-maskable interrupt) line.
   //
   // The NMI signal is a level triggered interrupt. When the NMI is taken the

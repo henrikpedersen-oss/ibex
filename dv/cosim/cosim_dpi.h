@@ -19,6 +19,7 @@ int riscv_cosim_step(Cosim *cosim, const svBitVecVal *write_reg,
                      svBit intr, svBit sync_trap, svBit suppress_reg_write, svBit more_ops);
 void riscv_cosim_set_mip(Cosim *cosim, const svBitVecVal *pre_mip,
                          const svBitVecVal *post_mip);
+void riscv_cosim_set_irq_taken(Cosim *cosim);
 void riscv_cosim_set_nmi(Cosim *cosim, svBit nmi);
 void riscv_cosim_set_nmi_int(Cosim *cosim, svBit nmi_int,
                              const svBitVecVal *mtval);

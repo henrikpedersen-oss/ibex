@@ -666,6 +666,9 @@ class ibex_cosim_scoreboard extends uvm_scoreboard;
         riscv_cosim_set_nmi(cosim_handle, rvfi_instr.nmi);
         riscv_cosim_set_nmi_int(cosim_handle, rvfi_instr.nmi_int, get_nmi_int_mtval());
         riscv_cosim_set_mip(cosim_handle, rvfi_instr.pre_mip, rvfi_instr.pre_mip);
+        // The DUT committed to the interrupt: have the model take it ahead of a later NMI or debug
+        // request even if it was pending, masked, before (set_irq_taken in spike_cosim.cc).
+        riscv_cosim_set_irq_taken(cosim_handle);
 
         continue;
       end
