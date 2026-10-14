@@ -8,7 +8,9 @@ TB-COMPILE-STAMP = $(METADATA-DIR)/tb.compile.stamp
 rtl_tb_compile: $(METADATA-DIR)/tb.compile.stamp
 # Rebuild if these change. DM=1 builds with the real debug module (compile_tb.py), a different
 # snapshot in the same out/build directory, so switching DM must rebuild in both directions.
-rtl-tb-compile-var-deps := SIMULATOR COV WAVES DM
+# USER_XCELIUM_HOME selects the Xcelium installation (lowrisc-it's xrun wrapper; the eda_shell sets
+# it): a snapshot elaborated by another version is one xrun -R cannot use (*E,NOSTUPR).
+rtl-tb-compile-var-deps := SIMULATOR COV WAVES DM USER_XCELIUM_HOME
 
 rtl_sim_run: $(rtl-sim-logs)
 
