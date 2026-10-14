@@ -38,3 +38,7 @@ dv/cosim/cheriot_sail/cheriot_sail_rvfi_emulator
 # CS registers testbench outputs (make csr-tb-xlm / csr-tb-vlt in ibex_cheriot_verification)
 dv/cs_registers/xlm_out/
 dv/cs_registers/vlt_out/
+dv/verilator/simple_system_cosim/vlt_out/
+# CoreMark build by-products (run_cosim_tests.sh builds it)
+examples/sw/benchmarks/coremark/coremark.map
+examples/sw/benchmarks/coremark/run[12].log
