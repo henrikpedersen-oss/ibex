@@ -14,8 +14,8 @@
 #   -s <seed>  +ntb_random_seed (default 1)
 #
 # Needs xrun and fusesoc on PATH: the ibex_cheriot_verification eda_shell (make csr-tb-xlm there).
-# Output in xlm_out/: build.log, run.log, and result ("PASS|FAIL seed=<n> ... <date>"), which the UVM
-# testplan report reads. Exits 0 only on a pass (see the grading at the end).
+# Output in xlm_out/: build.log, run.log (the run's stdout), and result ("PASS|FAIL seed=<n> ...
+# <date>"), which the UVM testplan report reads. Exits 0 only on a pass (see the grading at the end).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -82,11 +82,13 @@ fi
 # librun's RUNPATH starts with a Nix glibc-2.31 while xmsim runs on the FHS sandbox's newer glibc in
 # /lib, so librt from the RUNPATH cannot bind to the loaded libpthread (*F,FLDRUN, "GLIBC_PRIVATE
 # not found"). LD_LIBRARY_PATH is searched first; as in cheriot_rtos_xlm_run.sh.
+# run.log is the whole of the run's stdout: the bench prints its verdict and transaction count from
+# C++ (std::cout), which xrun's -l log (xrun_run.log) does not capture.
 LD_LIBRARY_PATH="/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}" \
   xrun -64bit -licqueue -R \
-    -xmlibdirname "${OUT}/xcelium.d" -l "${OUT}/run.log" \
+    -xmlibdirname "${OUT}/xcelium.d" -l "${OUT}/xrun_run.log" \
     "${run_cov[@]+"${run_cov[@]}"}" \
-    +ntb_random_seed="${SEED}" || true
+    +ntb_random_seed="${SEED}" 2>&1 | tee "${OUT}/run.log" || true
 
 # PASS needs all three: the bench's own verdict, no Xcelium error or SVA failure (the model compares
 # CSR read data only; 2804 IbexCSREnValid failures once came with a run that got far), and the
