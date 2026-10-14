@@ -63,7 +63,9 @@ fi
 export LD_LIBRARY_PATH="/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 
 # Parameters: the core file's defaults for the sim target (PMP on, 4 regions, 8 counters of 40 bits).
-xrun -64bit -sv -licqueue -timescale 1ns/1ps \
+# -clean: a fresh xcelium.d every run (a few seconds). xmsc's incremental C++ rebuild after a model
+# change failed with *E,CCERR and no compiler message, though the sources compile.
+xrun -64bit -sv -licqueue -timescale 1ns/1ps -clean \
   -F "${FILES}" \
   -top tb_cs_registers \
   -defparam tb_cs_registers.PMPEnable=1 -defparam tb_cs_registers.PMPNumRegions=4 \
@@ -81,7 +83,7 @@ xrun -64bit -sv -licqueue -timescale 1ns/1ps \
 LOG="${OUT}/run.log"
 why=""
 grep -q '// TEST PASSED //' "${LOG}" || why="no TEST PASSED"
-if grep -qE '^\s*xmsim: \*[EF],|^\s*\*[EF],|ASSERT FAILED|Assertion .* has failed' "${LOG}"; then
+if grep -qE '^\s*([a-z_]+: )?\*[EF],|ASSERT FAILED|Assertion .* has failed' "${LOG}"; then
   why="${why:+${why}, }Xcelium error or SVA failure"
 fi
 driven=$(sed -n 's/.*drove: \([0-9]*\) register transactions.*/\1/p' "${LOG}" | tail -1)

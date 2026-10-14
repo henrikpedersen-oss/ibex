@@ -21,7 +21,7 @@ import re
 from pathlib import Path
 
 RUNS = {"tb_cs_registers": "xlm_out/run.log", "tb_cs_registers_vlt": "vlt_out/run.log"}
-TOOL_ERR = re.compile(r"^\s*((xmsim: )?\*[EF],|%Error|.*ASSERT FAILED|.*Assertion .* has failed).*", re.M)
+TOOL_ERR = re.compile(r"^\s*(([a-z_]+: )?\*[EF],|%Error|.*ASSERT FAILED|.*Assertion .* has failed).*", re.M)
 DRIVEN = re.compile(r"drove: (\d+) register transactions")
 
 
