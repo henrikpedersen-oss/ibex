@@ -5,7 +5,7 @@
 # in the test's failure message, which holds the log extract check_logs.py collected). A failure
 # that matches no entry stays a failure, so a different failure in a waived test still fails.
 #
-# Only model, generator or upstream gaps belong here. RTL findings (tech-notes/rtl_todo.md) are
+# Only model, generator or upstream gaps belong here. RTL findings (status/rtl_todo.md) are
 # never waived. Every entry names its gap ID; remove the entry when the gap is closed.
 
 - id: GAP-RV-3
