@@ -870,4 +870,52 @@ module ibex_load_store_unit import ibex_pkg::*; import ibex_cheriot_pkg::*; #(
   `ASSERT(IbexLsuCtxCheriotOn, (ls_fsm_cs inside {CTX_WAIT_GNT1, CTX_WAIT_GNT2, CTX_WAIT_RESP}) |->
                                (cheriot_enable_i == IbexMuBiOn))
 
+  // Capability accesses are atomic on the bus: the memory subsystem's tag filter acts on the first
+  // word of a CSC and the TRVK expects a CLC's two words back to back. Once the first word of a
+  // CLC/CSC is granted, the next request is its second word -- the next word address, the same
+  // direction, all four bytes and, for a CSC, the same tag -- raised until it is granted, whatever
+  // happens meanwhile (an error response to the first word, an interrupt, the pin leaving On).
+  // Only a reset ends the access after one word. A bus error on either word is reported as a load
+  // or store access fault once both have completed; it does not stop the second word.
+`ifdef INC_ASSERT
+  logic        cap_w0_gnt;
+  logic [31:0] cap_w0_addr_q;
+  logic        cap_w0_we_q;
+  logic        cap_w0_tag_q;
+
+  assign cap_w0_gnt = data_req_o && data_gnt_i &&
+                      (((ls_fsm_cs == IDLE) && lsu_go_goodcap) || (ls_fsm_cs == CTX_WAIT_GNT1));
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni) begin
+      cap_w0_addr_q <= '0;
+      cap_w0_we_q   <= 1'b0;
+      cap_w0_tag_q  <= 1'b0;
+    end else if (cap_w0_gnt) begin
+      cap_w0_addr_q <= data_addr_o;
+      cap_w0_we_q   <= data_we_o;
+      cap_w0_tag_q  <= data_tag_o;
+    end
+  end
+
+  `ASSERT(IbexLsuCapW0ThenW1, cap_w0_gnt |=> (ls_fsm_cs == CTX_WAIT_GNT2))
+  `ASSERT(IbexLsuCapW1HeldUntilGnt, (ls_fsm_cs == CTX_WAIT_GNT2) && !data_gnt_i |=>
+                                    (ls_fsm_cs == CTX_WAIT_GNT2))
+  `ASSERT(IbexLsuCapW1Request, (ls_fsm_cs == CTX_WAIT_GNT2) |->
+                               data_req_o && (data_addr_o == cap_w0_addr_q + 32'd4) &&
+                               (data_we_o == cap_w0_we_q) && (data_be_o == 4'b1111))
+  `ASSERT(IbexLsuCscSameTagBothWords, (ls_fsm_cs == CTX_WAIT_GNT2) && data_we_o |->
+                                      (data_tag_o == cap_w0_tag_q))
+`endif
+
+  // A tag reaches the register file only from a CLC, and only when the memory returned it set on
+  // both words (fault-injection hardening: one word's tag alone does not make a capability).
+  // Loads other than a CLC, misaligned ones included, never return a tag, whatever data_tag_i is.
+  if (BaseIsa == BaseIsaRV32IorCHERIoT) begin : g_rcap_tag_asserts
+    `ASSERT(IbexLsuRcapTagOnlyFromClc, lsu_rdata_valid_o && lsu_rcap_o.valid |->
+                                       resp_is_cap_q && (cap_rx_fsm_q == CRX_WAIT_RESP2))
+    `ASSERT(IbexLsuRcapTagBothWords, lsu_rdata_valid_o && lsu_rcap_o.valid |->
+                                     cap_lsw_tag_q && data_tag_i)
+  end
+
 endmodule
