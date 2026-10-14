@@ -14,8 +14,8 @@
 #   -s <seed>  +ntb_random_seed (default 1)
 #
 # Needs xrun and fusesoc on PATH: the ibex_cheriot_verification eda_shell (make csr-tb-xlm there).
-# Output in xlm_out/: run.log, and result ("PASS|FAIL seed=<n> <date>"), which the UVM testplan
-# report reads. Exits 0 only on // TEST PASSED //.
+# Output in xlm_out/: build.log, run.log, and result ("PASS|FAIL seed=<n> ... <date>"), which the UVM
+# testplan report reads. Exits 0 only on a pass (see the grading at the end).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -51,36 +51,48 @@ grep -v '^-pvalue+' "${SCR}" > "${FILES}"
 mapfile -t CC_SRCS < <(find "${HERE}/env" "${HERE}/reg_driver" "${HERE}/rst_driver" "${HERE}/model" \
                          -name '*.cc' | sort)
 
-cov_args=()
+elab_cov=()
+run_cov=()
 if [[ ${COVERAGE} -eq 1 ]]; then
-  cov_args=(-coverage all -covdut ibex_cs_registers -covworkdir "${OUT}/cov_work" -covscope csr
-            -covtest "csr_${SEED}" -covoverwrite)
+  elab_cov=(-coverage all -covdut ibex_cs_registers)
+  run_cov=(-covworkdir "${OUT}/cov_work" -covscope csr -covtest "csr_${SEED}" -covoverwrite)
+fi
+
+# Build and run are two xrun calls, as in the RTOS flow (cheriot_rtos_xlm_build.sh / _run.sh), for
+# the LD_LIBRARY_PATH below: with it set, the Cadence gcc compiling the C++ fails (*E,CCERR, no
+# compiler message); without it, the simulation cannot load librun.
+# Parameters: the core file's defaults for the sim target (PMP on, 4 regions, 8 counters of 40 bits).
+# -clean: a fresh xcelium.d every build (a few seconds).
+rm -f "${OUT}/run.log"
+if ! xrun -64bit -sv -licqueue -timescale 1ns/1ps -clean -elaborate \
+       -F "${FILES}" \
+       -top tb_cs_registers \
+       -defparam tb_cs_registers.PMPEnable=1 -defparam tb_cs_registers.PMPNumRegions=4 \
+       -defparam tb_cs_registers.PMPGranularity=0 -defparam tb_cs_registers.MHPMCounterNum=8 \
+       -defparam tb_cs_registers.MHPMCounterWidth=40 \
+       -I"${HERE}/env" -I"${HERE}/reg_driver" -I"${HERE}/rst_driver" -I"${HERE}/model" \
+       "${CC_SRCS[@]}" \
+       "${elab_cov[@]+"${elab_cov[@]}"}" \
+       -xmlibdirname "${OUT}/xcelium.d" -l "${OUT}/build.log"; then
+  echo "FAIL seed=${SEED} transactions=0 build failed $(date '+%F %T')" > "${OUT}/result"
+  echo "csr_xlm.sh: FAIL (build); log ${OUT}/build.log" >&2
+  exit 1
 fi
 
 # librun's RUNPATH starts with a Nix glibc-2.31 while xmsim runs on the FHS sandbox's newer glibc in
 # /lib, so librt from the RUNPATH cannot bind to the loaded libpthread (*F,FLDRUN, "GLIBC_PRIVATE
 # not found"). LD_LIBRARY_PATH is searched first; as in cheriot_rtos_xlm_run.sh.
-export LD_LIBRARY_PATH="/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
-
-# Parameters: the core file's defaults for the sim target (PMP on, 4 regions, 8 counters of 40 bits).
-# -clean: a fresh xcelium.d every run (a few seconds). xmsc's incremental C++ rebuild after a model
-# change failed with *E,CCERR and no compiler message, though the sources compile.
-xrun -64bit -sv -licqueue -timescale 1ns/1ps -clean \
-  -F "${FILES}" \
-  -top tb_cs_registers \
-  -defparam tb_cs_registers.PMPEnable=1 -defparam tb_cs_registers.PMPNumRegions=4 \
-  -defparam tb_cs_registers.PMPGranularity=0 -defparam tb_cs_registers.MHPMCounterNum=8 \
-  -defparam tb_cs_registers.MHPMCounterWidth=40 \
-  -I"${HERE}/env" -I"${HERE}/reg_driver" -I"${HERE}/rst_driver" -I"${HERE}/model" \
-  "${CC_SRCS[@]}" \
-  -xmlibdirname "${OUT}/xcelium.d" -l "${OUT}/run.log" \
-  "${cov_args[@]+"${cov_args[@]}"}" \
-  +ntb_random_seed="${SEED}" || true
+LD_LIBRARY_PATH="/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}" \
+  xrun -64bit -licqueue -R \
+    -xmlibdirname "${OUT}/xcelium.d" -l "${OUT}/run.log" \
+    "${run_cov[@]+"${run_cov[@]}"}" \
+    +ntb_random_seed="${SEED}" || true
 
 # PASS needs all three: the bench's own verdict, no Xcelium error or SVA failure (the model compares
 # CSR read data only; 2804 IbexCSREnValid failures once came with a run that got far), and the
 # driver having driven transactions (a bench that checks nothing is not a pass).
 LOG="${OUT}/run.log"
+[[ -f "${LOG}" ]] || : > "${LOG}"  # xrun -R did not start: graded as empty
 why=""
 grep -q '// TEST PASSED //' "${LOG}" || why="no TEST PASSED"
 if grep -qE '^\s*([a-z_]+: )?\*[EF],|ASSERT FAILED|Assertion .* has failed' "${LOG}"; then
