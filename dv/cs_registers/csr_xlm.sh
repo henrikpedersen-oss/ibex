@@ -74,7 +74,8 @@ fi
 CFG="${IBEX_CONFIG:-opentitan}"
 defparams=()
 for p in PMPEnable PMPGranularity PMPNumRegions MHPMCounterNum MHPMCounterWidth DbgTriggerEn ICache; do
-  v=$(python3 "${IBEX_ROOT}/util/ibex_config.py" "${CFG}" query_fields "${p}" | sed -n "s/^${p}=//p")
+  v=$(python3 "${IBEX_ROOT}/util/ibex_config.py" --config_filename "${IBEX_ROOT}/ibex_configs.yaml" \
+        "${CFG}" query_fields "${p}" | sed -n "s/^${p}=//p")
   [[ -n "${v}" ]] || { echo "csr_xlm.sh: no ${p} in ibex configuration ${CFG}" >&2; exit 1; }
   defparams+=(-defparam "tb_cs_registers.${p}=${v}")
 done
