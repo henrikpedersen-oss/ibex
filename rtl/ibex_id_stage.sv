@@ -1146,7 +1146,8 @@ module ibex_id_stage import ibex_cheriot_pkg::*; #(
     // Without writeback stage any valid instruction that hasn't seen an error will execute
     assign instr_executing_spec = instr_valid_i & ~instr_fetch_err_i & controller_run;
     assign instr_executing      = instr_executing_spec;
-    assign cheriot_exec_id_o    = (cheriot_enable_i == IbexMuBiOn) & instr_executing;
+    assign cheriot_exec_id_o    = (cheriot_enable_i == IbexMuBiOn) & instr_executing &
+                                  instr_is_legal_cheriot;
 
     `ASSERT(IbexStallIfValidInstrNotExecuting,
       instr_valid_i & ~instr_fetch_err_i & ~instr_executing & controller_run |-> stall_id)
@@ -1186,7 +1187,7 @@ module ibex_id_stage import ibex_cheriot_pkg::*; #(
     assign unused_rf_wdata_fwd_wb      = rf_wdata_fwd_wb_i;
 
     logic unused_cheriot_wb_signals;
-    assign unused_cheriot_wb_signals = ^{id_exception_nc, rf_we_or_load, instr_is_legal_cheriot};
+    assign unused_cheriot_wb_signals = ^{id_exception_nc, rf_we_or_load};
 
     assign instr_type_wb_o = WB_INSTR_OTHER;
     assign stall_wb        = 1'b0;
