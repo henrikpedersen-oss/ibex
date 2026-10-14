@@ -23,8 +23,9 @@
 # A test passes, as in ci/run-cosim-test.sh, when the simulator exits 0 and its log has no FAILURE
 # and (except coremark and pmp_smoke_test, which CI runs with --skip-pass-check) a PASS; and, here,
 # when the co-simulation matched at least one instruction. Each test runs in <outdir>/<test>/
-# (ibex_simple_system.log, simple_system_cosim.log, trace); <outdir>/results.txt holds one
-# "PASS|FAIL|SKIP <test> <reason>" line per test. Exits 0 only if none failed.
+# (sim.log, ibex_simple_system.log, simple_system_cosim.log, rc = the exit status, the trace);
+# <outdir>/results.txt holds one "PASS|FAIL|SKIP <test> <reason>" line per test. Exits 0 only if
+# none failed. The testplan: simple_system_cosim_testplan.hjson (make testplan-simple-system-cosim).
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -85,10 +86,11 @@ for entry in "${TESTS[@]}"; do
   fi
   dir="${OUT}/${name}"
   mkdir -p "${dir}"
-  rm -f "${dir}/ibex_simple_system.log"
+  rm -f "${dir}/ibex_simple_system.log" "${dir}/rc"
   echo "== ${name}"
   (cd "${dir}" && "${SIM}" --meminit=ram,"${IBEX_ROOT}/${elf}" > sim.log 2>&1)
   rc=$?
+  echo "${rc}" > "${dir}/rc"  # for dv/scripts/simple_system_cosim_results.py
   log="${dir}/ibex_simple_system.log"
   why=""
   [[ ${rc} -eq 0 ]] || why="simulator exit ${rc}"

@@ -1,0 +1,73 @@
+// Copyright lowRISC contributors.
+// Licensed under the Apache License, Version 2.0, see LICENSE for details.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Testplan of upstream lowRISC/ibex CI's Verilator co-simulation tests (.github/actions/
+// ibex-rtl-ci-steps, "Run Verilator co-sim tests"), run by run_cosim_tests.sh (this directory;
+// make simple-system-cosim-vlt in ibex_cheriot_verification).
+//
+// Each program runs on examples/simple_system built with Verilator for one ibex_configs.yaml
+// configuration (default opentitan; CHERIoT present but cheriot_enable_i tied off, so plain
+// RISC-V), with Spike in lock-step: every retired instruction (PC, register write, trap) and
+// every data memory access is compared with Spike's (dv/cosim/spike_cosim.cc, the checker the
+// UVM bench uses too). A test passes when the simulator exits 0, nothing reported a FAILURE, the
+// program printed PASS (coremark and pmp_smoke_test do not report one: upstream runs them with
+// --skip-pass-check, the co-simulation is the check) and the co-simulation matched at least one
+// instruction (dv/scripts/simple_system_cosim_results.py). A program the configuration does not
+// support (pmp_smoke_test without PMP, dit_test and dummy_instr_test without SecureIbex) is not
+// run and shows as not run.
+{
+  name: "simple_system_cosim"
+
+  testpoints: [
+    {
+      name: coremark
+      desc: '''CoreMark under co-simulation
+
+            examples/sw/benchmarks/coremark, built with SUPPRESS_PCOUNT_DUMP=1 (Spike does not
+            model Ibex's performance counters, so reading them would mismatch). About 2.8
+            million instructions of integer, multiply/divide and compressed code, each
+            compared with Spike.'''
+      stage: V1
+      tests: ["coremark"]
+    }
+
+    {
+      name: pmp_smoke
+      desc: '''PMP: a locked read-only region traps a store
+
+            pmp_smoke_test locks PMP entry 0 as an NA4 read-only region over a variable
+            (pmpcfg0 = 0x91: L, NA4, R) and then writes it. The store must take a store access
+            fault in M-mode (the region is locked), with the same mcause, mtval and handler PC
+            as Spike. Needs PMPEnable=1.'''
+      stage: V1
+      tests: ["pmp_smoke_test"]
+    }
+
+    {
+      name: data_independent_timing
+      desc: '''cpuctrlsts.data_ind_timing
+
+            dit_test times count_ones_zeros (data-dependent branches) and div_ones_zeros
+            (division) over 100 LFSR inputs: with data-independent timing off at least 25 % of
+            the run times must differ, with it on (and again with the ICache on, after a
+            warm-up call) all must be identical. The program prints PASS; every instruction is
+            also checked against Spike. Needs SecureIbex=1.'''
+      stage: V2
+      tests: ["dit_test"]
+    }
+
+    {
+      name: dummy_instructions
+      desc: '''cpuctrlsts.dummy_instr_en
+
+            dummy_instr_test times busy_work, which has no data-dependent timing, over several
+            iterations: with dummy instruction insertion off every run takes the same time,
+            with it on every run takes a different time. The program prints PASS; the inserted
+            dummy instructions must not show up as retired instructions to Spike. Needs
+            SecureIbex=1.'''
+      stage: V2
+      tests: ["dummy_instr_test"]
+    }
+  ]
+}
