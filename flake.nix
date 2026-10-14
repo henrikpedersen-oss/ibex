@@ -186,13 +186,13 @@
         };
 
         # Create a python package set suitable for the formal flow
-        # - The file dv/formal/pyproject.toml defines the package set for this environment
+        # - The file nix/formal_python_env/pyproject.toml defines the package set for this environment
         # - Using the fusesoc .core files in this repo requires a lowrisc-fork of fusesoc, so this
         #   file specifies the forked repository. Most other python package dependencies are in
         #   support of fusesoc.
         formal_python_env = let
           workspace = inputs.uv2nix.lib.workspace.loadWorkspace {
-            workspaceRoot = ./dv/formal;
+            workspaceRoot = ./nix/formal_python_env;
           };
           overlay = workspace.mkPyprojectOverlay {
             sourcePreference = "wheel";
