@@ -411,7 +411,7 @@ module core_ibex_tb_top;
   /////////////////////////////////////////////////////////////////////////////////////////////////
   // Real debug module (DM build: make uvm-test-xlm ... DM=1)
   /////////////////////////////////////////////////////////////////////////////////////////////////
-  // vendor/pulp_riscv_dbg dm_top with the CHERIoT patches (cheriot_enable_i selects the CHERIoT
+  // pulp_riscv_dbg dm_top with the CHERIoT patches (cheriot_enable_i selects the CHERIoT
   // debug ROM, CSpecialRW scratch handling and 64-bit capability abstract register access). It
   // replaces the riscv-dv debug flow of the normal build, where the TB's debug agent drives
   // debug_req_i and the program carries its own debug section at DEBUG_MODE_HALT_ADDR = BOOT_ADDR.

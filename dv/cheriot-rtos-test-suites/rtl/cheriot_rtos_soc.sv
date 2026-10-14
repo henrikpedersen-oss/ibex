@@ -24,7 +24,7 @@
 // controller, system_info, UARTs 1 and 2, the HyperRAM controller, Sonata's own tag stores and
 // revocation RAM, the legacy ibexc core and the REVOCATION_CONNECT stub path.
 //
-// The debug module is ibex/vendor/pulp_riscv_dbg's dm_top (OpenTitan's rv_dm core with Samuel
+// The debug module is pulp_riscv_dbg's dm_top (fetched; OpenTitan's rv_dm core with Samuel
 // Riedel's CHERIoT patches), connected as in sonata_system.sv: its memory at 0xb000_0000 on both
 // crossbars, debug_req to the core, and its system bus access (SBA) as the crossbar's dbg_host,
 // which reaches the SRAM and the code RAM and bypasses the memory subsystem's tag filter. Unlike

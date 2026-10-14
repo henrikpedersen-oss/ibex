@@ -2977,7 +2977,7 @@ Tests:
 
 The real debug module driven over DMI, RISC-V and CHERIoT mode
 
-The real RISC-V debug module (vendor/pulp_riscv_dbg dm_top with the CHERIoT patches)
+The real RISC-V debug module (pulp_riscv_dbg dm_top with the CHERIoT patches)
 behind the core's instruction and data buses, driven over its DMI port: dmstatus,
 hartinfo and abstractcs reset values; halt, cross-checked against the core's debug
 mode; dcsr and dpc; GPR reads and writes by abstract command, with s0 and a0, which

@@ -1,0 +1,159 @@
+Build the CHERIoT subsystem against older prim and TL-UL (Sonata's vendored libraries)
+
+Removes three parameter overrides that Sonata's prim_fifo_sync, prim_alert_sender and
+tlul_err_resp do not have. None changes behaviour in Sonata:
+- prim_fifo_sync NeverClears(1'b1) (two instances): only adds NeverClears_A, an assertion that
+  clr_i stays low; clr_i is tied low. The assertion is lost.
+- prim_alert_sender SkewCycles(AlertSkewCycles): AlertSkewCycles defaults to 1, the new sender's
+  default. Sonata has no alert handler; alert_tx_o is unused.
+- tlul_err_resp ReturnBlankResp(1'b0): the default, and the only behaviour of the older module.
+Also gives cheriot_tag_filter a local copy of tlul_pkg::get_rsp_intg, which Sonata's tlul_pkg
+lacks. It is built from the same tlul_pkg and prim_secded_pkg functions as the original.
+Also drops the reinit_i(1'b0) connections of cheriot_regs_reg_top's prim_subreg instances (eight since the TBRE_STATUS.sweep_err field):
+neither Sonata's nor ibex/vendor's prim_subreg has the port, and tied low it does nothing.
+The patched RTL still builds, and behaves the same, against ibex/vendor's newer prim and OpenTitan's
+TL-UL (cheriot_rtl.f).
+
+diff -ru a/hw/ip/cheriot/rtl/cheriot_access_check.sv b/hw/ip/cheriot/rtl/cheriot_access_check.sv
+--- a/hw/ip/cheriot/rtl/cheriot_access_check.sv	2026-10-09 21:58:45.679577645 +0100
++++ b/hw/ip/cheriot/rtl/cheriot_access_check.sv	2026-10-09 21:58:47.016583544 +0100
+@@ -101,9 +101,7 @@
+   assign tl_demux_d2h[0] = tl_d_i;
+   assign tl_demux_d2h[1] = tl_err_d2h;
+ 
+-  tlul_err_resp #(
+-    .ReturnBlankResp(1'b0)
+-  ) u_tlul_err_resp (
++  tlul_err_resp u_tlul_err_resp (
+     .clk_i,
+     .rst_ni,
+     .tl_h_i(tl_err_h2d),
+diff -ru a/hw/ip/cheriot/rtl/cheriot_regs_reg_top.sv b/hw/ip/cheriot/rtl/cheriot_regs_reg_top.sv
+--- a/hw/ip/cheriot/rtl/cheriot_regs_reg_top.sv	2026-10-09 21:58:47.007886061 +0100
++++ b/hw/ip/cheriot/rtl/cheriot_regs_reg_top.sv	2026-10-09 21:58:55.369598172 +0100
+@@ -163,7 +163,6 @@
+   ) u_intr_state (
+     .clk_i   (clk_i),
+     .rst_ni  (rst_ni),
+-    .reinit_i(1'b0),
+ 
+     // from register interface
+     .we     (intr_state_we),
+@@ -192,7 +191,6 @@
+   ) u_intr_enable (
+     .clk_i   (clk_i),
+     .rst_ni  (rst_ni),
+-    .reinit_i(1'b0),
+ 
+     // from register interface
+     .we     (intr_enable_we),
+@@ -264,7 +262,6 @@
+   ) u_alert_test_regwen (
+     .clk_i   (clk_i),
+     .rst_ni  (rst_ni),
+-    .reinit_i(1'b0),
+ 
+     // from register interface
+     .we     (alert_test_we),
+@@ -312,7 +309,6 @@
+   ) u_tbre_base_addr (
+     .clk_i   (clk_i),
+     .rst_ni  (rst_ni),
+-    .reinit_i(1'b0),
+ 
+     // from register interface
+     .we     (tbre_base_addr_gated_we),
+@@ -344,7 +340,6 @@
+   ) u_tbre_num_caps (
+     .clk_i   (clk_i),
+     .rst_ni  (rst_ni),
+-    .reinit_i(1'b0),
+ 
+     // from register interface
+     .we     (tbre_num_caps_gated_we),
+@@ -397,7 +392,6 @@
+   ) u_tbre_status_busy (
+     .clk_i   (clk_i),
+     .rst_ni  (rst_ni),
+-    .reinit_i(1'b0),
+ 
+     // from register interface
+     .we     (1'b0),
+@@ -425,7 +419,6 @@
+   ) u_tbre_status_start_err (
+     .clk_i   (clk_i),
+     .rst_ni  (rst_ni),
+-    .reinit_i(1'b0),
+ 
+     // from register interface
+     .we     (tbre_status_we),
+@@ -453,7 +446,6 @@
+   ) u_tbre_status_sweep_err (
+     .clk_i   (clk_i),
+     .rst_ni  (rst_ni),
+-    .reinit_i(1'b0),
+ 
+     // from register interface
+     .we     (tbre_status_we),
+diff -ru a/hw/ip/cheriot/rtl/cheriot.sv b/hw/ip/cheriot/rtl/cheriot.sv
+--- a/hw/ip/cheriot/rtl/cheriot.sv	2026-10-09 21:58:46.047662986 +0100
++++ b/hw/ip/cheriot/rtl/cheriot.sv	2026-10-09 21:58:47.016729559 +0100
+@@ -694,7 +694,6 @@
+ 
+   prim_alert_sender #(
+     .AsyncOn(AlertAsyncOn[0]),
+-    .SkewCycles(AlertSkewCycles),
+     .IsFatal(1'b1)
+   ) u_prim_alert_sender_fatal_fault (
+     .clk_i,
+diff -ru a/hw/ip/cheriot/rtl/cheriot_tag_filter.sv b/hw/ip/cheriot/rtl/cheriot_tag_filter.sv
+--- a/hw/ip/cheriot/rtl/cheriot_tag_filter.sv	2026-10-09 21:58:46.338730606 +0100
++++ b/hw/ip/cheriot/rtl/cheriot_tag_filter.sv	2026-10-09 21:58:47.016821461 +0100
+@@ -264,8 +264,7 @@
+   prim_fifo_sync #(
+     .Width(FifoWidth),
+     .Pass(1'b0),
+-    .Depth(NumOutstanding),
+-    .NeverClears(1'b1)
++    .Depth(NumOutstanding)
+   ) u_prim_fifo_sync_align (
+     .clk_i,
+     .rst_ni,
+@@ -380,6 +379,15 @@
+ 
+   assign host_rsp_meta_err = require_join && meta_buf_err;
+ 
++  // The response integrity tlul_rsp_intg_gen computes (tlul_pkg::get_rsp_intg)
++  function automatic logic [tlul_pkg::D2HRspIntgWidth-1:0] get_rsp_intg(tlul_pkg::tl_d2h_t tl);
++    logic [tlul_pkg::D2HRspIntgWidth-1:0] rsp_intg;
++    logic [tlul_pkg::D2HRspMaxWidth-1:0]  unused_rsp_payload;
++    {rsp_intg, unused_rsp_payload} = prim_secded_pkg::prim_secded_inv_64_57_enc(
++        tlul_pkg::D2HRspMaxWidth'(tlul_pkg::extract_d2h_rsp_intg(tl)));
++    return rsp_intg;
++  endfunction
++
+   // We disregard all of the meta SRAM response except for the tag bit and the error bit
+   always_comb begin: proc_connect_tl_rsp
+     tl_d_o = host_rsp;
+@@ -387,8 +395,8 @@
+     // correct integrity stays correct, a broken one stays broken.
+     if (host_rsp_meta_err) begin
+       tl_d_o.d_error         = 1'b1;
+-      tl_d_o.d_user.rsp_intg = host_rsp.d_user.rsp_intg ^ tlul_pkg::get_rsp_intg(tl_d_o) ^
+-                               tlul_pkg::get_rsp_intg(host_rsp);
++      tl_d_o.d_user.rsp_intg = host_rsp.d_user.rsp_intg ^ get_rsp_intg(tl_d_o) ^
++                               get_rsp_intg(host_rsp);
+     end
+     if (!host_join) begin
+       tl_d_o = local_rsp_intg;
+diff -ru a/hw/ip/cheriot/rtl/cheriot_trvk_core.sv b/hw/ip/cheriot/rtl/cheriot_trvk_core.sv
+--- a/hw/ip/cheriot/rtl/cheriot_trvk_core.sv	2026-10-09 21:58:46.637800082 +0100
++++ b/hw/ip/cheriot/rtl/cheriot_trvk_core.sv	2026-10-09 21:58:47.016895195 +0100
+@@ -168,7 +168,6 @@
+     .Width(32'd1),
+     .Pass(1'b0),
+     .Depth(NumOutstanding),
+-    .NeverClears(1'b1),
+     .Secure(1'b0)
+   ) u_prim_fifo_sync_align (
+     .clk_i,

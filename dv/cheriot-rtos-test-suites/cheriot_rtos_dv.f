@@ -6,14 +6,16 @@
 //   IBEX_ROOT_DIR   the ibex repository this directory is in: the core, and every prim / prim_generic
 //                   / dv_utils file (vendor/lowrisc_ip), the same copies the core builds with in the
 //                   UVM testbench
-//   OT_CHERIOT_DIR  the superproject's opentitan-cheriot/: the CHERIoT memory subsystem
+//   SONATA_DIR          the Sonata IP around the core (TL-UL, top_pkg, UART, rv_timer, rv_plic,
+//                       rev_ctl, the SRAM model, uartdpi and the address-map packages)
+//   OT_CHERIOT_DIR      the CHERIoT memory subsystem (OpenTitan hw/ip/cheriot)
+//   PULP_RISCV_DBG_DIR  the RISC-V debug module with the CHERIoT changes
+// The last three are fetched into the build's output directory by ibex/dv/scripts/fetch_rtl.sh,
+// which pins their commits and applies the local patches in ibex/dv/scripts/fetch_rtl/patches/.
 //
-// The Sonata IP around the core (TL-UL, top_pkg, UART, rv_timer, rv_plic, rev_ctl, the SRAM model,
-// uartdpi and the address-map packages) is vendored under vendor/sonata-system/ (vendor/fetch.sh,
-// pinned commit in vendor/VENDORED_FROM, local patches in vendor/patches/). One tlul_pkg: Sonata's,
-// which carries the capability bit in a_user/d_user (see vendor/fetch.sh for why not OpenTitan's);
-// opentitan-cheriot is patched to build against it (opentitan-cheriot/patches/0001), so none of its
-// own hw/ip/tlul is compiled.
+// One tlul_pkg: Sonata's, which carries the capability bit in a_user/d_user (fetch_rtl.sh says why
+// not OpenTitan's); opentitan-cheriot is patched to build against it (its patch 0001), so none of
+// its own hw/ip/tlul is compiled.
 //
 // Only what the SoC and testbench elaborate is listed (checked with verilator --json-only: every
 // file here defines a module, interface or package in the elaborated design), plus the rest of
@@ -46,7 +48,7 @@ ${IBEX_ROOT_DIR}/vendor/lowrisc_ip/ip/prim/rtl/prim_cipher_pkg.sv
 ${IBEX_ROOT_DIR}/vendor/lowrisc_ip/ip/prim/rtl/prim_esc_pkg.sv
 ${IBEX_ROOT_DIR}/vendor/lowrisc_ip/ip/prim/rtl/prim_alert_pkg.sv
 // Sonata's: TL_AUW = 21, the a_user width of its tlul_pkg below (OpenTitan's is 23)
-${RTOS_TB_DIR}/vendor/sonata-system/vendor/lowrisc_ip/ip/top_pkg/rtl/top_pkg.sv
+${SONATA_DIR}/vendor/lowrisc_ip/ip/top_pkg/rtl/top_pkg.sv
 
 // ------ prim SECDED ------------------------------------------------------------------------------
 ${IBEX_ROOT_DIR}/vendor/lowrisc_ip/ip/prim/rtl/prim_secded_inv_28_22_enc.sv
@@ -105,22 +107,22 @@ ${IBEX_ROOT_DIR}/vendor/lowrisc_ip/ip/prim/rtl/prim_subst_perm.sv
 ${IBEX_ROOT_DIR}/vendor/lowrisc_ip/ip/prim/rtl/prim_prince.sv
 
 // ------ TL-UL (Sonata's, with the capability bit) ------------------------------------------------
-${RTOS_TB_DIR}/vendor/sonata-system/vendor/lowrisc_ip/ip/tlul/rtl/tlul_pkg.sv
-${RTOS_TB_DIR}/vendor/sonata-system/vendor/lowrisc_ip/ip/tlul/rtl/tlul_data_integ_enc.sv
-${RTOS_TB_DIR}/vendor/sonata-system/vendor/lowrisc_ip/ip/tlul/rtl/tlul_data_integ_dec.sv
-${RTOS_TB_DIR}/vendor/sonata-system/vendor/lowrisc_ip/ip/tlul/rtl/tlul_cmd_intg_gen.sv
-${RTOS_TB_DIR}/vendor/sonata-system/vendor/lowrisc_ip/ip/tlul/rtl/tlul_cmd_intg_chk.sv
-${RTOS_TB_DIR}/vendor/sonata-system/vendor/lowrisc_ip/ip/tlul/rtl/tlul_rsp_intg_gen.sv
-${RTOS_TB_DIR}/vendor/sonata-system/vendor/lowrisc_ip/ip/tlul/rtl/tlul_rsp_intg_chk.sv
-${RTOS_TB_DIR}/vendor/sonata-system/vendor/lowrisc_ip/ip/tlul/rtl/tlul_fifo_sync.sv
-${RTOS_TB_DIR}/vendor/sonata-system/vendor/lowrisc_ip/ip/tlul/rtl/tlul_err.sv
-${RTOS_TB_DIR}/vendor/sonata-system/vendor/lowrisc_ip/ip/tlul/rtl/tlul_err_resp.sv
-${RTOS_TB_DIR}/vendor/sonata-system/vendor/lowrisc_ip/ip/tlul/rtl/tlul_socket_1n.sv
-${RTOS_TB_DIR}/vendor/sonata-system/vendor/lowrisc_ip/ip/tlul/rtl/tlul_socket_m1.sv
-${RTOS_TB_DIR}/vendor/sonata-system/vendor/lowrisc_ip/ip/tlul/rtl/tlul_adapter_reg.sv
-${RTOS_TB_DIR}/vendor/sonata-system/vendor/lowrisc_ip/ip/tlul/rtl/tlul_adapter_host.sv
-${RTOS_TB_DIR}/vendor/sonata-system/vendor/lowrisc_ip/ip/tlul/rtl/tlul_adapter_sram.sv
-${RTOS_TB_DIR}/vendor/sonata-system/vendor/lowrisc_ip/ip/tlul/rtl/tlul_sram_byte.sv
+${SONATA_DIR}/vendor/lowrisc_ip/ip/tlul/rtl/tlul_pkg.sv
+${SONATA_DIR}/vendor/lowrisc_ip/ip/tlul/rtl/tlul_data_integ_enc.sv
+${SONATA_DIR}/vendor/lowrisc_ip/ip/tlul/rtl/tlul_data_integ_dec.sv
+${SONATA_DIR}/vendor/lowrisc_ip/ip/tlul/rtl/tlul_cmd_intg_gen.sv
+${SONATA_DIR}/vendor/lowrisc_ip/ip/tlul/rtl/tlul_cmd_intg_chk.sv
+${SONATA_DIR}/vendor/lowrisc_ip/ip/tlul/rtl/tlul_rsp_intg_gen.sv
+${SONATA_DIR}/vendor/lowrisc_ip/ip/tlul/rtl/tlul_rsp_intg_chk.sv
+${SONATA_DIR}/vendor/lowrisc_ip/ip/tlul/rtl/tlul_fifo_sync.sv
+${SONATA_DIR}/vendor/lowrisc_ip/ip/tlul/rtl/tlul_err.sv
+${SONATA_DIR}/vendor/lowrisc_ip/ip/tlul/rtl/tlul_err_resp.sv
+${SONATA_DIR}/vendor/lowrisc_ip/ip/tlul/rtl/tlul_socket_1n.sv
+${SONATA_DIR}/vendor/lowrisc_ip/ip/tlul/rtl/tlul_socket_m1.sv
+${SONATA_DIR}/vendor/lowrisc_ip/ip/tlul/rtl/tlul_adapter_reg.sv
+${SONATA_DIR}/vendor/lowrisc_ip/ip/tlul/rtl/tlul_adapter_host.sv
+${SONATA_DIR}/vendor/lowrisc_ip/ip/tlul/rtl/tlul_adapter_sram.sv
+${SONATA_DIR}/vendor/lowrisc_ip/ip/tlul/rtl/tlul_sram_byte.sv
 
 // ------ ibex / CHERIoT core (this repository) ----------------------------------------------------
 // pulp_common_cells: ibex_trvk (the load barrier) instantiates stream_fork and stream_join_dynamic.
@@ -160,26 +162,26 @@ ${IBEX_ROOT_DIR}/rtl/ibex_trvk.sv
 ${IBEX_ROOT_DIR}/rtl/ibex_top.sv
 ${IBEX_ROOT_DIR}/rtl/ibex_top_tracing.sv
 
-// ------ Sonata address map and peripherals (vendor/sonata-system) --------------------------------
+// ------ Sonata address map and peripherals (${SONATA_DIR}) ---------------------------------------
 // ADDR_SPACE_* / ADDR_MASK_* only; the crossbar is cheriot_rtos_xbar.sv.
-${RTOS_TB_DIR}/vendor/sonata-system/rtl/bus/tl_main_pkg.sv
-${RTOS_TB_DIR}/vendor/sonata-system/rtl/bus/tl_ifetch_pkg.sv
-${RTOS_TB_DIR}/vendor/sonata-system/vendor/lowrisc_ip/ip/uart/rtl/uart_reg_pkg.sv
-${RTOS_TB_DIR}/vendor/sonata-system/vendor/lowrisc_ip/ip/uart/rtl/uart_reg_top.sv
-${RTOS_TB_DIR}/vendor/sonata-system/vendor/lowrisc_ip/ip/uart/rtl/uart_rx.sv
-${RTOS_TB_DIR}/vendor/sonata-system/vendor/lowrisc_ip/ip/uart/rtl/uart_tx.sv
-${RTOS_TB_DIR}/vendor/sonata-system/vendor/lowrisc_ip/ip/uart/rtl/uart_core.sv
-${RTOS_TB_DIR}/vendor/sonata-system/vendor/lowrisc_ip/ip/uart/rtl/uart.sv
-${RTOS_TB_DIR}/vendor/sonata-system/rtl/ip/rev_ctl/rtl/rev_ctl_reg_pkg.sv
-${RTOS_TB_DIR}/vendor/sonata-system/rtl/ip/rev_ctl/rtl/rev_ctl_reg_top.sv
-${RTOS_TB_DIR}/vendor/sonata-system/rtl/ip/rev_ctl/rtl/rev_ctl.sv
-${RTOS_TB_DIR}/vendor/sonata-system/rtl/system/autogen/rv_plic/rtl/rv_plic_gateway.sv
-${RTOS_TB_DIR}/vendor/sonata-system/rtl/system/autogen/rv_plic/rtl/rv_plic_target.sv
-${RTOS_TB_DIR}/vendor/sonata-system/rtl/system/autogen/rv_plic/rtl/rv_plic_reg_pkg.sv
-${RTOS_TB_DIR}/vendor/sonata-system/rtl/system/autogen/rv_plic/rtl/rv_plic_reg_top.sv
-${RTOS_TB_DIR}/vendor/sonata-system/rtl/system/autogen/rv_plic/rtl/rv_plic.sv
-${RTOS_TB_DIR}/vendor/sonata-system/rtl/system/sram.sv
-${RTOS_TB_DIR}/vendor/sonata-system/rtl/system/rv_timer.sv
+${SONATA_DIR}/rtl/bus/tl_main_pkg.sv
+${SONATA_DIR}/rtl/bus/tl_ifetch_pkg.sv
+${SONATA_DIR}/vendor/lowrisc_ip/ip/uart/rtl/uart_reg_pkg.sv
+${SONATA_DIR}/vendor/lowrisc_ip/ip/uart/rtl/uart_reg_top.sv
+${SONATA_DIR}/vendor/lowrisc_ip/ip/uart/rtl/uart_rx.sv
+${SONATA_DIR}/vendor/lowrisc_ip/ip/uart/rtl/uart_tx.sv
+${SONATA_DIR}/vendor/lowrisc_ip/ip/uart/rtl/uart_core.sv
+${SONATA_DIR}/vendor/lowrisc_ip/ip/uart/rtl/uart.sv
+${SONATA_DIR}/rtl/ip/rev_ctl/rtl/rev_ctl_reg_pkg.sv
+${SONATA_DIR}/rtl/ip/rev_ctl/rtl/rev_ctl_reg_top.sv
+${SONATA_DIR}/rtl/ip/rev_ctl/rtl/rev_ctl.sv
+${SONATA_DIR}/rtl/system/autogen/rv_plic/rtl/rv_plic_gateway.sv
+${SONATA_DIR}/rtl/system/autogen/rv_plic/rtl/rv_plic_target.sv
+${SONATA_DIR}/rtl/system/autogen/rv_plic/rtl/rv_plic_reg_pkg.sv
+${SONATA_DIR}/rtl/system/autogen/rv_plic/rtl/rv_plic_reg_top.sv
+${SONATA_DIR}/rtl/system/autogen/rv_plic/rtl/rv_plic.sv
+${SONATA_DIR}/rtl/system/sram.sv
+${SONATA_DIR}/rtl/system/rv_timer.sv
 
 // ------ OpenTitan CHERIoT memory subsystem (lowRISC/opentitan PR #31515) -------------------------
 ${OT_CHERIOT_DIR}/hw/vendor/pulp_common_cells/rtl/stream_fork_dynamic.sv
@@ -196,18 +198,18 @@ ${OT_CHERIOT_DIR}/hw/ip/cheriot/rtl/cheriot_trvk_tlul.sv
 ${OT_CHERIOT_DIR}/hw/ip/cheriot/rtl/cheriot_tbre.sv
 ${OT_CHERIOT_DIR}/hw/ip/cheriot/rtl/cheriot.sv
 
-// ------ RISC-V debug module (ibex/vendor/pulp_riscv_dbg, CHERIoT patches) ------------------------
+// ------ RISC-V debug module (${PULP_RISCV_DBG_DIR}, CHERIoT changes) ----------------------------
 // dm_top and what it instantiates, as the UVM testbench's DM build compiles them
 // (dv/uvm/core_ibex/ibex_dv_dm.f). Not compiled: dmi_jtag*.sv, dmi_cdc.sv, dmi_bscane_tap.sv (no
 // JTAG DTM: the testbench drives the DMI) and sva/. dm_pkg before the SoC, whose ports use it.
-${IBEX_ROOT_DIR}/vendor/pulp_riscv_dbg/src/dm_pkg.sv
-${IBEX_ROOT_DIR}/vendor/pulp_riscv_dbg/debug_rom/debug_rom.sv
-${IBEX_ROOT_DIR}/vendor/pulp_riscv_dbg/debug_rom/debug_rom_one_scratch.sv
-${IBEX_ROOT_DIR}/vendor/pulp_riscv_dbg/debug_rom/debug_rom_cheriot.sv
-${IBEX_ROOT_DIR}/vendor/pulp_riscv_dbg/src/dm_csrs.sv
-${IBEX_ROOT_DIR}/vendor/pulp_riscv_dbg/src/dm_sba.sv
-${IBEX_ROOT_DIR}/vendor/pulp_riscv_dbg/src/dm_mem.sv
-${IBEX_ROOT_DIR}/vendor/pulp_riscv_dbg/src/dm_top.sv
+${PULP_RISCV_DBG_DIR}/src/dm_pkg.sv
+${PULP_RISCV_DBG_DIR}/debug_rom/debug_rom.sv
+${PULP_RISCV_DBG_DIR}/debug_rom/debug_rom_one_scratch.sv
+${PULP_RISCV_DBG_DIR}/debug_rom/debug_rom_cheriot.sv
+${PULP_RISCV_DBG_DIR}/src/dm_csrs.sv
+${PULP_RISCV_DBG_DIR}/src/dm_sba.sv
+${PULP_RISCV_DBG_DIR}/src/dm_mem.sv
+${PULP_RISCV_DBG_DIR}/src/dm_top.sv
 
 // ------ The SoC ----------------------------------------------------------------------------------
 // The Sonata integration glue for the subsystem (cheriot_rev_ctl_tbre, cheriot_mem_subsys) began
@@ -225,6 +227,6 @@ ${RTOS_TB_DIR}/fcov/cheriot_mem_subsys_fcov.sv
 ${RTOS_TB_DIR}/fcov/cheriot_mem_subsys_fcov_bind.sv
 
 // ------ Testbench --------------------------------------------------------------------------------
-${RTOS_TB_DIR}/vendor/sonata-system/vendor/lowrisc_ip/dv/dpi/uartdpi/uartdpi.sv
+${SONATA_DIR}/vendor/lowrisc_ip/dv/dpi/uartdpi/uartdpi.sv
 ${RTOS_TB_DIR}/tb/cheriot_rtos_dbg_host.sv
 ${RTOS_TB_DIR}/tb/cheriot_rtos_tb.sv

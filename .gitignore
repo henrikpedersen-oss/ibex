@@ -37,6 +37,7 @@ dv/cosim/cheriot_sail/cheriot_sail_rvfi_emulator
 
 # CHERIoT RTOS test SoC build and run outputs, including kept results (dv/cheriot-rtos-test-suites/README.md)
 dv/cheriot-rtos-test-suites/xlm_rtos_out*/
+dv/cheriot-rtos-test-suites/lint_out/
 dv/cheriot-rtos-test-suites/cov_work/
 # Written by xrun / imc / SimVision into the directory they run in.
 dv/cheriot-rtos-test-suites/xrun.key

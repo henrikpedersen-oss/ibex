@@ -2,7 +2,7 @@
 # Licensed under the Apache License, Version 2.0, see LICENSE for details.
 # SPDX-License-Identifier: Apache-2.0
 #
-# Tests of the core with the real RISC-V debug module (vendor/pulp_riscv_dbg dm_top, with the
+# Tests of the core with the real RISC-V debug module (pulp_riscv_dbg dm_top, with the
 # CHERIoT patches), driven over its DMI port by core_ibex_dm_test.
 #
 # They need the DM build of the testbench and are skipped by all_directed without it

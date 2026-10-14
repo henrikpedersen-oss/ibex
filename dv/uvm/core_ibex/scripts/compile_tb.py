@@ -118,6 +118,13 @@ def _main() -> int:
         # need the normal build.
         dm_build = os.environ.get('DM', '').strip() == '1'
         if dm_build:
+            # The debug module is not committed: fetch it into the build directory (pinned by
+            # dv/scripts/fetch_rtl.sh; a later build reuses the fetch). ibex_dv_dm.f names it
+            # ${PULP_RISCV_DBG_DIR}, which the simulator expands from this process's environment.
+            dbg_fetch = md.dir_build/'rtl'/'pulp_riscv_dbg'
+            fetch_rtl = pathlib.Path(os.environ['PRJ_DIR'])/'dv'/'scripts'/'fetch_rtl.sh'
+            subprocess.run([str(fetch_rtl), 'pulp_riscv_dbg', str(dbg_fetch)], check=True)
+            os.environ['PULP_RISCV_DBG_DIR'] = str(dbg_fetch/'hw'/'vendor'/'pulp_riscv_dbg')
             debug_mode_opts = (r" +define+DEBUG_MODE_HALT_ADDR=1A11_0800 " +
                                r" +define+DEBUG_MODE_EXCEPTION_ADDR=1A11_0810 " +
                                r" +define+IBEX_DM_REAL " +

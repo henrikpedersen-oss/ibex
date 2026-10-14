@@ -323,7 +323,7 @@
             drives the bus master directly from the testbench and checks the tag with a core load.
 
             On the RTOS test SoC the debug host is the RISC-V debug module
-            (ibex/vendor/pulp_riscv_dbg) with its SBA as the crossbar's dbg_host, behind the SoC's
+            (pulp_riscv_dbg, fetched at build time) with its SBA as the crossbar's dbg_host, behind the SoC's
             model of rv_dm's lc_hw_debug_en gate, whose enable the testbench drives; the testbench
             is the debug module's DMI host (tb/cheriot_rtos_dbg_host.sv). The firmware
             firmware/dbg_host_test stores tagged capabilities in SRAM and asks the testbench for

@@ -2,7 +2,7 @@
 // Licensed under the Apache License, Version 2.0, see LICENSE for details.
 // SPDX-License-Identifier: Apache-2.0
 
-// DMI port of the real debug module (vendor/pulp_riscv_dbg dm_top), driven directly by the test
+// DMI port of the real debug module (pulp_riscv_dbg dm_top), driven directly by the test
 // (core_ibex_dm_test) instead of through a JTAG DTM.
 //
 // Only a DM build (make ... DM=1, +define+IBEX_DM_REAL) connects it to dm_top; core_ibex_tb_top

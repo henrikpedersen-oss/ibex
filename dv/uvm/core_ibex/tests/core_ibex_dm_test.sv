@@ -2,7 +2,7 @@
 // Licensed under the Apache License, Version 2.0, see LICENSE for details.
 // SPDX-License-Identifier: Apache-2.0
 
-// Tests of the core with the real RISC-V debug module (vendor/pulp_riscv_dbg dm_top, CHERIoT
+// Tests of the core with the real RISC-V debug module (pulp_riscv_dbg dm_top, CHERIoT
 // patches), driven over its DMI port. They need the DM build of the testbench:
 //
 //   make uvm-test-xlm TEST=dm_basic,dm_basic_cheriot DM=1

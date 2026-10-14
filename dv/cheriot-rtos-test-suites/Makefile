@@ -30,9 +30,13 @@ _run_args   := $(if $(filter 1,$(COV)),-c) $(if $(filter 1,$(GUI)),-g)
 _run_env    := SONATA_TEST_ELF=$(ELF) $(if $(BOOT),SONATA_BOOT_STUB=$(BOOT)) \
                $(if $(MAX_CYCLES),SONATA_MAX_CYCLES=$(MAX_CYCLES)) $(if $(MUTATE),SONATA_MUTATE=$(MUTATE))
 
-# Same environment the build script exports for the filelist.
-_lint_env := RTOS_TB_DIR=$(CURDIR) IBEX_ROOT_DIR=$(PRJ_DIR) \
-             OT_CHERIOT_DIR=$(or $(OT_CHERIOT_DIR),$(SUPER_DIR)/opentitan-cheriot)
+# Same environment the build script exports for the filelist. The third-party RTL for lint is
+# fetched into lint_out/rtl/, as the build fetches its own into $(OUT_DIR)/rtl/.
+LINT_RTL  := $(CURDIR)/lint_out/rtl
+FETCH_RTL := $(PRJ_DIR)/dv/scripts/fetch_rtl.sh
+_lint_env := RTOS_TB_DIR=$(CURDIR) IBEX_ROOT_DIR=$(PRJ_DIR) SONATA_DIR=$(LINT_RTL)/sonata-system \
+             OT_CHERIOT_DIR=$(LINT_RTL)/opentitan-cheriot \
+             PULP_RISCV_DBG_DIR=$(LINT_RTL)/pulp_riscv_dbg/hw/vendor/pulp_riscv_dbg
 
 .PHONY: help build run lint clean
 
@@ -50,9 +54,12 @@ run:
 
 # --timing for the testbench's delays.
 lint:
+	$(FETCH_RTL) sonata-system $(LINT_RTL)/sonata-system
+	$(FETCH_RTL) opentitan-cheriot $(LINT_RTL)/opentitan-cheriot
+	$(FETCH_RTL) pulp_riscv_dbg $(LINT_RTL)/pulp_riscv_dbg
 	$(_lint_env) verilator --lint-only --timing -Wno-fatal \
 	  -DRVFI -DPRIM_DEFAULT_IMPL=prim_pkg::ImplGeneric \
 	  --top-module cheriot_rtos_tb -f cheriot_rtos_dv.f
 
 clean:
-	rm -rf $(OUT_DIR) cov_work
+	rm -rf $(OUT_DIR) lint_out cov_work

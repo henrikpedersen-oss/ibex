@@ -110,7 +110,7 @@ module cheriot_mem_subsys #(
     .AlertAsyncOn    ('0),
     // The "NVM" region here is the writable code RAM (Sonata's HyperRAM), and the RTOS loader stores
     // capabilities into its import tables: they must be written, not verified against the RAM.
-    // Parameter added by opentitan-cheriot/patches/0002-nvmcapstores-parameter.patch.
+    // Parameter added by the fetch_rtl patch opentitan-cheriot/0002-nvmcapstores-parameter.patch.
     .NvmCapStores    (1'b0)
   ) u_cheriot (
     .clk_i,

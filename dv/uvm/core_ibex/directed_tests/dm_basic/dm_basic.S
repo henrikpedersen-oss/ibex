@@ -7,7 +7,7 @@
 # resumes this program over DMI
 # =============================================================================
 # Needs the DM build of the testbench (make uvm-test-xlm TEST=dm_basic,dm_basic_cheriot DM=1):
-# the core's debug entry points are the debug ROM of vendor/pulp_riscv_dbg's dm_top at
+# the core's debug entry points are the debug ROM of pulp_riscv_dbg's dm_top at
 # 0x1A11_0800 / 0x1A11_0810, and debug requests come from dm_top, driven over its DMI port by
 # rtl_test core_ibex_dm_test (tests/core_ibex_dm_test.sv), which also lists what it checks.
 #

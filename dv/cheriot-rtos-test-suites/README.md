@@ -20,7 +20,7 @@ two memories, the four peripherals the firmware uses and the RISC-V debug module
 | `0x8004_0000` | 64 KiB | `rv_timer` (CLINT: `mtime`, `mtimecmp`) | Sonata `rv_timer.sv` |
 | `0x8010_0000` | 4 KiB | UART0 | OpenTitan `uart`, as vendored by Sonata |
 | `0x8800_0000` | 128 MiB | `rv_plic`. Sources: 1 = revoker, 8 = UART0 (Sonata's numbering) | Sonata `rv_plic` |
-| `0xB000_0000` | 4 KiB | Debug module memory (debug ROM at `+0x800`), data and instruction side. Its system bus access is a bus host; see [Debug module](#debug-module) | `ibex/vendor/pulp_riscv_dbg` `dm_top` |
+| `0xB000_0000` | 4 KiB | Debug module memory (debug ROM at `+0x800`), data and instruction side. Its system bus access is a bus host; see [Debug module](#debug-module) | `pulp_riscv_dbg` `dm_top` (fetched; see [Sources](#sources)) |
 | anything else | | Default responder: logs the access; reads return 0, writes are dropped | `rtl/cheriot_rtos_default_rsp.sv` |
 
 The address decode uses Sonata's own `tl_main_pkg` and `tl_ifetch_pkg` constants, so the map
@@ -33,8 +33,8 @@ The core and memory subsystem are integrated as in Sonata's `sonata_system.sv` w
 encoding and subsystem parameters. The integration glue (`cheriot_mem_subsys.sv`,
 `cheriot_rev_ctl_tbre.sv`, `cheriot_rev_ctl_trbe.sv` there) began as an uncommitted addition to a
 sonata-system checkout; the copies
-in `rtl/` are this flow's own, ported to #31515. The Sonata RTL the SoC uses is vendored under
-`vendor/` (see [Sources](#sources)).
+in `rtl/` are this flow's own, ported to #31515. The Sonata RTL the SoC uses is fetched at build
+time (see [Sources](#sources)).
 
 ## What the firmware needs
 
@@ -199,7 +199,7 @@ design's.
  testbench (tb/cheriot_rtos_dbg_host.sv)
    |  DMI (dm::dmi_req_t / dmi_resp_t)            dbg_en_i (lc_hw_debug_en model)
    v                                                 |
- dm_top (ibex/vendor/pulp_riscv_dbg) --debug_req--> AND --> ibex_top debug_req_i
+ dm_top (pulp_riscv_dbg)             --debug_req--> AND --> ibex_top debug_req_i
    |  slave port (debug memory)      ^ master port (SBA)
    |                                 |
  tlul_adapter_reg <- tlul_socket_m1 <- data xbar dbg_dev (0xB000_0000)
@@ -213,7 +213,7 @@ design's.
                                                   --> anything else: TL-UL error
 ```
 
-The debug module is `ibex/vendor/pulp_riscv_dbg`'s `dm_top`, connected as in Sonata's
+The debug module is `pulp_riscv_dbg`'s `dm_top` (fetched), connected as in Sonata's
 `sonata_system.sv`: its memory in Sonata's `dbg_dev` window (`0xB000_0000`, 4 KiB, which was free
 here: it went to the default responder) on both crossbars, through one `tlul_socket_m1` and a
 `tlul_adapter_reg`; `debug_req` to the core; its system bus access (SBA) as the crossbar's
@@ -284,7 +284,6 @@ and they sample with `+enable_ibex_fcov=1`:
 | `tb/cheriot_rtos_dbg_host.sv` | The debug module's DMI host and debug access enable, serving `firmware/dbg_host_test` |
 | `fcov/` | Memory-subsystem covergroups and their binds |
 | `firmware/` | The revocation, debug host, Juliet CWE and CHERI-C firmware (xmake) and the boot stub |
-| `vendor/` | The Sonata RTL the SoC uses, pinned: `fetch.sh`, `VENDORED_FROM`, local `patches/` |
 | `patches/cheriot-rtos/` | Local cheriot-rtos change the root Makefile applies (the test-runner filter) |
 | `patches/cheri-c-tests/` | Local cheri-c-tests change the CHERI-C build needs (kept for reference) |
 | `patches/archive/` | The retired Sonata filelist of the CHERIoT memory subsystem (`opentitan-cheriot/cheriot_rtl_sonata.f`) |
@@ -297,14 +296,19 @@ and they sample with `+enable_ibex_fcov=1`:
 | What | From |
 |---|---|
 | The core, every `prim` / `prim_generic` / `dv_utils` file | this ibex repository (`rtl/`, `vendor/lowrisc_ip`): the same copies the UVM testbench builds the core with |
-| The RISC-V debug module | this ibex repository's `vendor/pulp_riscv_dbg` (OpenTitan's, with the CHERIoT patches; see its `VENDORED_FROM`), as the UVM testbench's `DM=1` build compiles it |
-| The CHERIoT memory subsystem | the superproject's `opentitan-cheriot/` (override with `OT_CHERIOT_DIR`) |
-| TL-UL, `top_pkg`, UART, `rv_timer`, `rv_plic`, `rev_ctl`, the SRAM model, `uartdpi`, the address-map packages | `vendor/sonata-system/`: lowRISC/sonata-system at the commit in `vendor/VENDORED_FROM`, fetched by `vendor/fetch.sh` |
+| The RISC-V debug module | `pulp_riscv_dbg`: OpenTitan's, with the CHERIoT changes (Samuel Riedel's branch `rv-dm-cheriot`), as the UVM testbench's `DM=1` build compiles it |
+| The CHERIoT memory subsystem | `opentitan-cheriot`: lowRISC/opentitan `hw/ip/cheriot` and its TL-UL |
+| TL-UL, `top_pkg`, UART, `rv_timer`, `rv_plic`, `rev_ctl`, the SRAM model, `uartdpi`, the address-map packages | `sonata-system`: lowRISC/sonata-system |
+
+The last three are not committed. Each build fetches them into its output directory
+(`xlm_rtos_out/rtl/`; `lint_out/rtl/` for `make lint`) with `ibex/dv/scripts/fetch_rtl.sh`, which
+pins their commits and applies the local patches in `ibex/dv/scripts/fetch_rtl/patches/`; a later
+build with the same pins reuses the fetch. The first build needs network access to github.com.
 
 One `tlul_pkg` is compiled: Sonata's, which carries the CHERIoT capability bit in `a_user`/`d_user`
 and whose host and SRAM adapters have the `wdata_cap`/`rdata_cap` ports the SoC and the SRAM model
-connect (OpenTitan's has neither). `vendor/fetch.sh` re-fetches the files and re-applies
-`vendor/patches/` in order:
+connect (OpenTitan's has neither). The Sonata patches, applied in order
+(`fetch_rtl/patches/sonata-system/`):
 
 | Patch | Why |
 |---|---|
@@ -352,9 +356,9 @@ e34c07ef, board `sonata-prerelease`, built as sonata-system's flake built it).
   the flake's CHERIoT toolchain. A plain ibex checkout cannot build it.
 - **Older Sonata IP on newer prims.** The vendored Sonata TL-UL, UART, PLIC and `rev_ctl` were
   written against the older prim Sonata vendors; here they build against `ibex/vendor/lowrisc_ip`
-  (lint-clean; the only port change is `prim_ram_2p`'s `cfg_o`, `vendor/patches/0003`). The
+  (lint-clean; the only port change is `prim_ram_2p`'s `cfg_o`, Sonata patch 0003). The
   register block's `prim_subreg` `reinit_i` connections, which neither prim set has, are dropped by
-  `opentitan-cheriot/patches/0001`.
+  the opentitan-cheriot patch 0001.
 - **The code RAM is the subsystem's NVM.** The core's tag filter treats the NVM as read-only: a
   capability store (`csc`) to `0x4000_0000` is a read and compare, answered with a bus error unless
   the code RAM already holds the capability's 64 bits, and never writes it.

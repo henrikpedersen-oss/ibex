@@ -14,9 +14,10 @@
 #                configurations elaborate.
 #
 # Needs xrun on PATH (the superproject's run_all_tests.sh calls it inside run_in_eda_shell). The
-# Sonata IP is vendored under vendor/sonata-system/ (vendor/fetch.sh). The CHERIoT memory subsystem
-# comes from the ibex_cheriot_verification superproject this ibex checkout is a submodule of
-# (opentitan-cheriot/); override its location with OT_CHERIOT_DIR.
+# third-party RTL is not committed: the build fetches it into <outdir>/rtl/ (ibex/dv/scripts/
+# fetch_rtl.sh, pinned commits; a later build with the same pins reuses it): the Sonata IP
+# (sonata-system), the CHERIoT memory subsystem (opentitan-cheriot) and the debug module
+# (pulp_riscv_dbg). The first build needs network access to github.com.
 #
 # There is one build. The Sonata flow's compile-time knobs are gone: the CHERIoT memory subsystem
 # is always in (its CHERIOT_MEM=1), and the REVOCATION=1 bitmap-RAM stub no longer exists.
@@ -30,17 +31,6 @@ SUPER_DIR="$(realpath "${SCRIPT_DIR}/../../..")"
 # must be exported, not just set.
 export RTOS_TB_DIR="${SCRIPT_DIR}"
 export IBEX_ROOT_DIR="${IBEX_ROOT_DIR:-$(realpath "${SCRIPT_DIR}/../..")}"
-export OT_CHERIOT_DIR="${OT_CHERIOT_DIR:-${SUPER_DIR}/opentitan-cheriot}"
-
-VENDOR_DIR="${SCRIPT_DIR}/vendor/sonata-system"
-for d in "${VENDOR_DIR}/rtl/bus" "${OT_CHERIOT_DIR}/hw/ip/cheriot/rtl"; do
-  if [[ ! -d "$d" ]]; then
-    echo "[cheriot_rtos_xlm_build] ERROR: $d not found. This flow builds IP from the" >&2
-    echo "  ibex_cheriot_verification superproject (set OT_CHERIOT_DIR) and the vendored Sonata IP" >&2
-    echo "  (vendor/fetch.sh)." >&2
-    exit 1
-  fi
-done
 
 # A caller still passing the Sonata flow's build knobs would otherwise get a build that silently
 # differs from the one it asked for.
@@ -62,6 +52,16 @@ while getopts "co:C:" opt; do
   esac
 done
 OUT_DIR="${SCRIPT_DIR}/${OUT_DIR_NAME}"
+
+# The fetched third-party RTL, named in cheriot_rtos_dv.f as ${SONATA_DIR}, ${OT_CHERIOT_DIR} and
+# ${PULP_RISCV_DBG_DIR}.
+FETCH_RTL="${IBEX_ROOT_DIR}/dv/scripts/fetch_rtl.sh"
+export SONATA_DIR="${OUT_DIR}/rtl/sonata-system"
+export OT_CHERIOT_DIR="${OUT_DIR}/rtl/opentitan-cheriot"
+export PULP_RISCV_DBG_DIR="${OUT_DIR}/rtl/pulp_riscv_dbg/hw/vendor/pulp_riscv_dbg"
+"${FETCH_RTL}" sonata-system "${SONATA_DIR}"
+"${FETCH_RTL}" opentitan-cheriot "${OT_CHERIOT_DIR}"
+"${FETCH_RTL}" pulp_riscv_dbg "${OUT_DIR}/rtl/pulp_riscv_dbg"
 
 # Core parameters (see rtl/cheriot_rtos_soc.sv): IBEX_CFG_* defines for the enum-typed ones,
 # -defparam on the SoC instance for the rest.
@@ -90,8 +90,9 @@ rm -f  "${OUT_DIR}/.elab_ok" "${OUT_DIR}/.coverage_enabled" "${OUT_DIR}/.ibex_co
 
 echo "[cheriot_rtos_xlm_build] Elaborating the CHERIoT RTOS test SoC..."
 echo "  ibex:             ${IBEX_ROOT_DIR}"
-echo "  Sonata IP:        ${VENDOR_DIR} ($(head -1 "${SCRIPT_DIR}/vendor/VENDORED_FROM" | cut -d" " -f1-2))"
+echo "  Sonata IP:        ${SONATA_DIR}"
 echo "  opentitan-cheriot:${OT_CHERIOT_DIR}"
+echo "  debug module:     ${PULP_RISCV_DBG_DIR}"
 echo "  Ibex configuration: ${IBEX_CFG}"
 # uartdpi.c is compiled inline by xrun.
 xrun \
@@ -108,8 +109,8 @@ xrun \
   -access rwc \
   ${config_opts} \
   ${coverage_arg} \
-  -I"${VENDOR_DIR}/vendor/lowrisc_ip/dv/dpi/uartdpi" \
-  "${VENDOR_DIR}/vendor/lowrisc_ip/dv/dpi/uartdpi/uartdpi.c" \
+  -I"${SONATA_DIR}/vendor/lowrisc_ip/dv/dpi/uartdpi" \
+  "${SONATA_DIR}/vendor/lowrisc_ip/dv/dpi/uartdpi/uartdpi.c" \
   -top cheriot_rtos_tb
 
 touch "${OUT_DIR}/.elab_ok"
