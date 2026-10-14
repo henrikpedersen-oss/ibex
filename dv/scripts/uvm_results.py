@@ -162,6 +162,9 @@ def main():
     ap.add_argument("--seed", type=int)
     ap.add_argument("--seed-span", type=int, default=SEED_SPAN)
     ap.add_argument("--out", required=True, type=Path)
+    ap.add_argument("--csr-tb-result", type=Path,
+                    help="result file of the CS registers testbench (dv/cs_registers/xlm_out/result, "
+                         "make csr-tb-xlm): the verdict of test tb_cs_registers")
     ap.add_argument("--html-extra", type=Path,
                     help="write the functional coverage section here (appended to the report)")
     args = ap.parse_args()
@@ -194,6 +197,12 @@ def main():
                 continue
             text = log.read_text(errors="replace")
             verdicts.setdefault(name, []).append(bool(PASSED.search(text)))
+    # The CS registers testbench is a bench of its own (testpoint csr_unit_testbench): its last run,
+    # whatever the regression's seed, from the one-line result file csr_xlm.sh writes.
+    if args.csr_tb_result and args.csr_tb_result.is_file():
+        line = args.csr_tb_result.read_text().strip()
+        verdicts.setdefault("tb_cs_registers", []).append(line.startswith("PASS"))
+        print(f"CS registers testbench: {line}")
     for name in sorted(set(verdicts) - in_plan):
         print(f"WARNING  test '{name}' ran but is in no testpoint")
 

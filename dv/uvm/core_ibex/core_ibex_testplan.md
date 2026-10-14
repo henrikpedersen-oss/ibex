@@ -2977,14 +2977,14 @@ Tests:
 
 The real debug module driven over DMI, RISC-V and CHERIoT mode
 
-The real RISC-V debug module (pulp_riscv_dbg dm_top with the CHERIoT patches)
-behind the core's instruction and data buses, driven over its DMI port: dmstatus,
-hartinfo and abstractcs reset values; halt, cross-checked against the core's debug
-mode; dcsr and dpc; GPR reads and writes by abstract command, with s0 and a0, which
-every command borrows, restored; the program buffer; a mailbox write; resume. RISC-V
-mode (dm_basic): a 64-bit access is refused (cmderr 2) and a read of an unimplemented
-CSR reports the debug-mode exception (cmderr 3). CHERIoT mode (dm_basic_cheriot):
-64-bit capability register reads match the program's own stored images, DEPCC is read
+The real RISC-V debug module (pulp_riscv_dbg dm_top with the CHERIoT patches) behind
+the core's instruction and data buses, driven over its DMI port: dmstatus, hartinfo
+and abstractcs reset values; halt, cross-checked against the core's debug mode; dcsr
+and dpc; GPR reads and writes by abstract command, with s0 and a0, which every
+command borrows, restored; the program buffer; a mailbox write; resume. RISC-V mode
+(dm_basic): a 64-bit access is refused (cmderr 2) and a read of an unimplemented CSR
+reports the debug-mode exception (cmderr 3). CHERIoT mode (dm_basic_cheriot): 64-bit
+capability register reads match the program's own stored images, DEPCC is read
 through the SCR path, a 64-bit write puts an untagged capability in a4, x16 faults
 (cmderr 3), and s0/a0 keep their tags (REQ_DBG_05). Needs the DM=1 testbench build,
 which ties the core's debug addresses to the DM ROM and takes debug_req_i from
@@ -3009,6 +3009,24 @@ no model has the debug module's ROM).
   resume the program checks that s0/a0 kept their tags (DScratchC0/1) and the
   capability written to a4. Self-checking, cosim off. Returns 0 on success; codes in
   the test header.
+
+#### `csr_unit_testbench`
+
+Test: `tb_cs_registers`
+
+ibex_cs_registers alone against a C++ register model
+
+ibex_cs_registers on its own, in upstream lowRISC/ibex's CS registers testbench
+(dv/cs_registers): random CSR reads and writes with random resets, checked against a
+C++ register model of mseccfg(h), pmpcfg0-3 and pmpaddr0-15 (PMP on, 4 regions),
+mcountinhibit, mhpmevent3-31, mcycle, minstret and mhpmcounter3-31(h) (8 counters of
+40 bits): reset values, WARL masks, unimplemented registers and the PMP lock rules.
+10000 transactions per run. Graded from make csr-tb-xlm (Xcelium, xlm_out/result);
+make csr-tb-vlt runs the same bench on Verilator as upstream's CI does. The other
+CSRs, and these in the full core, are the CSR testpoints above.
+
+Generated tests from dv/cs_registers; each name encodes its scenario (tb_cs_registers
+... tb_cs_registers).
 
 ### Stage V2S Testpoints
 

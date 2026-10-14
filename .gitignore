@@ -35,3 +35,6 @@ dv/uvm/core_ibex/link.log
 # Built by 'make -C dv/cosim/cheriot_sail emulator' (Verilator TestRIG flow).
 dv/cosim/cheriot_sail/cheriot_sail_rvfi_emulator
 
+# CS registers testbench outputs (make csr-tb-xlm / csr-tb-vlt in ibex_cheriot_verification)
+dv/cs_registers/xlm_out/
+dv/cs_registers/vlt_out/

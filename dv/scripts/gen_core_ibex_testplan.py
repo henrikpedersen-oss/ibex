@@ -415,6 +415,24 @@ FAMILIES = [
      "all_directed without it. Self-checking, cosim off (+cosim_off=1: no model has the debug "
      "module's ROM).",
      directed(lambda t: t["name"] in ("dm_basic", "dm_basic_cheriot"))),
+    ("csr_unit_testbench", "V2", ["unit"],
+     "ibex_cs_registers on its own, in upstream lowRISC/ibex's CS registers testbench "
+     "(dv/cs_registers): random CSR reads and writes with random resets, checked against a C++ "
+     "register model of mseccfg(h), pmpcfg0-3 and pmpaddr0-15 (PMP on, 4 regions), "
+     "mcountinhibit, mhpmevent3-31, mcycle, minstret and mhpmcounter3-31(h) (8 counters of 40 "
+     "bits): reset values, WARL masks, unimplemented registers and the PMP lock rules. 10000 "
+     "transactions per run. Graded from make csr-tb-xlm (Xcelium, xlm_out/result); make "
+     "csr-tb-vlt runs the same bench on Verilator as upstream's CI does. The other CSRs, and "
+     "these in the full core, are the CSR testpoints above.",
+     lambda t: t["list"] == STANDALONE_LIST),
+]
+
+# Tests outside the UVM test lists: separate benches graded in this testplan. uvm_results.py reads
+# each one's verdict from its own output (--csr-tb-result).
+STANDALONE_LIST = "dv/cs_registers"
+STANDALONE_TESTS = [
+    {"name": "tb_cs_registers", "list": STANDALONE_LIST, "config": "", "src": "",
+     "desc": ""},
 ]
 
 
@@ -459,6 +477,7 @@ TITLES = {
     "trap_timing_hazards": "Debug requests, NMIs and fetch drops timed to a data access's grant",
     "integrity_directed": "Directed bus integrity errors: internal NMI and fetch faults",
     "debug_module": "The real debug module driven over DMI, RISC-V and CHERIoT mode",
+    "csr_unit_testbench": "ibex_cs_registers alone against a C++ register model",
 }
 
 # One-line summary per covergroup.
@@ -807,7 +826,7 @@ def render(testpoints, covergroups):
 
 
 def main():
-    tests = [t for tl in TESTLISTS for t in read_testlist(tl)]
+    tests = [t for tl in TESTLISTS for t in read_testlist(tl)] + STANDALONE_TESTS
     selected = {name: [] for name, *_ in FAMILIES}
     errors = []
     for t in tests:
