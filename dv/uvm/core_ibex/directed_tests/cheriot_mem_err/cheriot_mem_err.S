@@ -31,7 +31,8 @@
 # spec (an access fault reports the faulting address in mtval; for a misaligned access, the
 # address of the portion that faulted), ibex's documentation (doc/03_reference/
 # exception_interrupts.rst: load integrity error = internal NMI, mcause 0xFFFFFFE0, mtval =
-# faulting address, taken at most one instruction after the load) and the verification spec
+# faulting address, taken at most two instructions after the load -- the doc says one; #929: the
+# RTL team is changing it to two, 2026-10-14) and the verification spec
 # (REQ_IBX_INT_05, REQ_EXC_05: the faulting instruction is not retired, MEPCC.address = its pc):
 #   probe                         mcause      mtval                    codes
 #   lw   W1                       5           W1                       10-14
@@ -44,7 +45,7 @@
 #   clc  W2   (1st beat faults)   5           W2                       46-51
 #   csc  W1-4 (2nd beat)          7           W1-4 or W1 (*)           52-56
 #   csc  W2   (1st beat)          7           W2                       57-61
-#   lw   W4 (bad integrity)       0xFFFFFFE0  W4, MEPCC in {pc+4,pc+8}, rd not written  62-67
+#   lw   W4 (bad integrity)       0xFFFFFFE0  W4, MEPCC in {pc+4..pc+12}, rd not written 62-67
 #   clc  W3-4 (2nd beat bad intg) 0xFFFFFFE0  W3-4 or W3 (*), cd not written            68-73
 #   fetch ifetch_bus_poison       1           its address, MEPCC.address = it          74-78
 #   fetch ifetch_intg_poison      1           its address                              79-83
@@ -53,13 +54,13 @@
 #   lw   W1; cincaddrimm          5           W1; the CHERI op after the faulting load does
 #                                             not execute (precise exception)    106-112
 #   lw   W1; beq                  5           W1                       113-117
-#   lw   W4 (bad intg); CHERI ops 0xFFFFFFE0  W4, MEPCC in {pc+4,pc+8}, rd not written,
+#   lw   W4 (bad intg); CHERI ops 0xFFFFFFE0  W4, MEPCC in {pc+4..pc+12}, rd not written,
 #                                             exactly the ops before MEPCC executed   118-125
 #     first op cincaddr reading the load's rd (load-hazard stall)
 #   lw   W4 (bad intg); CHERI ops 0xFFFFFFE0  as above, every op independent of the load 126-133
 #   lw   W1; cincaddr reading rd  5           W1; the CHERI op, held in ID by the load hazard
 #                                             on rd, does not execute                 134-140
-# The two CLC integrity probes also check MEPCC in {pc+4,pc+8} (codes 72, 88); a later MEPC
+# The two CLC integrity probes also check MEPCC in {pc+4,pc+8,pc+12} (codes 72, 88); a later MEPC
 # inside the 8-nop sled is reported only at the end, so code 89 still runs (see NMI_MEPC). The
 # two later word-load integrity probes do the same (codes 122, 130) inside a sled of CHERI ops.
 # Probes 100-140 run before the lw W4 probe (62-67), whose late NMI ends the test at once.
@@ -186,8 +187,10 @@ main:
     CHECK_EQI t0, 1, \code+4, t1
 .endm
 
-# MEPC after a load-integrity NMI. Ibex takes it "at most one instruction after the faulting
-# load" (doc/03_reference/exception_interrupts.rst:87): MEPC is \pc+4 or \pc+8. A later MEPC
+# MEPC after a load-integrity NMI, taken at most two instructions after the faulting load (#929:
+# doc/03_reference/exception_interrupts.rst:87 says one and is being changed to two; the core takes
+# it two late when the next instruction is already in decode): MEPC is \pc+4, \pc+8 or \pc+12
+# (.option norvc: every instruction after the load is 4 bytes). A later MEPC
 # that is still inside the probe's nop sled (up to \pc_late) breaks that bound but leaves every
 # other check meaningful, so it is recorded in G_LATE_NMI and reported at the end, after the
 # remaining probes (code 89 in particular) have run. Outside the sled: fail with \code at once.
@@ -197,6 +200,8 @@ main:
     LA_FAR    t1, \pc+4, a1
     beq       t0, t1, 3f
     LA_FAR    t1, \pc+8, a1
+    beq       t0, t1, 3f
+    LA_FAR    t1, \pc+12, a1
     beq       t0, t1, 3f
     LA_FAR    t1, \pc+4, a1
     bltu      t0, t1, 2f
@@ -461,9 +466,10 @@ r20: lw       t0, G_TRAPS(a5)
     ARM       r11
     li        a0, 0x1234
 p11: lw       a0, W4(a4)
-    nop                              # may execute before the NMI (exception_interrupts.rst)
+    nop                              # these two may execute before the NMI (#929: at most two
+    nop                              # instructions after the load)
 p11_late:
-    li        a0, 62                 # the NMI was not taken within one instruction
+    li        a0, 62                 # the NMI was not taken within two instructions
     j         test_end
 r11: lw       t0, G_TRAPS(a5)
     CHECK_EQI t0, 1, 63, t1
@@ -474,7 +480,9 @@ r11: lw       t0, G_TRAPS(a5)
     lw        t0, G_MEPC_ADDR(a5)
     LA_FAR    t1, p11+4, a1
     beq       t0, t1, 1f
-    LA_FAR    t1, p11_late, a1
+    LA_FAR    t1, p11+8, a1
+    beq       t0, t1, 1f
+    LA_FAR    t1, p11_late, a1         # p11+12
     CHECK_EQ  t0, t1, 66
 1:  RD_UNTOUCHED 67
 
