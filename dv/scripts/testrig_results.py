@@ -153,15 +153,54 @@ def html_table(header, rows):
     return "\n".join(out)
 
 
+def check_injection(rdir, names, newer):
+    """Grade the fault-injection runs `names` in rdir as `judge` does; 0 if every one was caught.
+
+    Every injection run fails by design, so its own [FAIL] banner says nothing: this is the verdict
+    (make testrig-fault-injection-<sim>). A run counts only if its result is newer than `newer`,
+    the stamp the target writes before the first run, so a result kept from an earlier run cannot
+    stand in for one that did not happen.
+    """
+    stamp = newer.stat().st_mtime if newer else 0
+    missed = 0
+    print(f"Fault injection, {rdir}:")
+    for name in names:
+        rpath = rdir / f"{name}.result"
+        log = rpath.with_suffix(".run.log")
+        if not rpath.exists() or rpath.stat().st_mtime < stamp:
+            ok, why = False, "no result from this run"
+        elif not log.exists():
+            ok, why = False, f"no kept log {log.name}"
+        else:
+            ok, why = judge(read_result(rpath), log.read_text(errors="replace"))
+        print(f"  {'CAUGHT' if ok else 'MISSED'}  {name:28s} {why}")
+        missed += not ok
+    print(f"{len(names) - missed}/{len(names)} injections caught"
+          + ("" if not missed else " -- a MISSED injection means a scoreboard check can not fail"))
+    return 1 if missed else 0
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--testplan", required=True, type=Path)
+    ap.add_argument("--testplan", type=Path)
     ap.add_argument("--testrig-dir", required=True, type=Path,
                     help="ibex/dv/testrig_ibex_cheriot (holds <sim>_testrig_out/results/)")
-    ap.add_argument("--out", required=True, type=Path)
+    ap.add_argument("--out", type=Path)
     ap.add_argument("--html-extra", type=Path,
                     help="write an HTML section (reference models, coverage) to append to the report")
+    ap.add_argument("--check-injection", nargs="+", metavar="NAME",
+                    help="only grade these fault-injection runs (e.g. cheriot_corrupt_rd) of --sim; "
+                         "exit 1 unless every one was caught")
+    ap.add_argument("--sim", default="xlm", help="simulator of --check-injection (xlm, vlt)")
+    ap.add_argument("--newer", type=Path,
+                    help="with --check-injection: ignore results older than this file")
     args = ap.parse_args()
+
+    if args.check_injection:
+        rdir = args.testrig_dir / f"{args.sim}_testrig_out" / "results"
+        raise SystemExit(check_injection(rdir, args.check_injection, args.newer))
+    if not args.testplan or not args.out:
+        ap.error("--testplan and --out are required (except with --check-injection)")
 
     required = {}
     for tp in hjson.loads(args.testplan.read_text()).get("testpoints", []):
