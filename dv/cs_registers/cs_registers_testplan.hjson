@@ -1,0 +1,92 @@
+// Copyright lowRISC contributors.
+// Licensed under the Apache License, Version 2.0, see LICENSE for details.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Testplan of the CS registers testbench (this directory): ibex_cs_registers alone, driven with
+// random CSR reads, writes, sets and clears (10000 transactions, uniformly over the CSRs of
+// reg_driver/csr_listing.def, random write data) and random resets (every 100-1000 cycles), each
+// read compared with a C++ register model (model/). The core's other inputs are tied off: no
+// instruction retires, no trap, no debug mode, CHERIoT disabled.
+//
+// Configuration (csr_xlm.sh, the core file's sim defaults): PMPEnable=1, PMPNumRegions=4,
+// PMPGranularity=0, MHPMCounterNum=8, MHPMCounterWidth=40, everything else ibex_cs_registers'
+// default (BaseIsa RV32I, no ShadowCSR). Not the opentitan configuration of the UVM bench.
+//
+// Tests:
+//   tb_cs_registers      Xcelium, make csr-tb-xlm (graded from xlm_out/result and run.log)
+//   tb_cs_registers_vlt  Verilator, make csr-tb-vlt (graded from vlt_out/run.log)
+// A run passes with the bench's // TEST PASSED //, no simulator error or SVA failure, and a
+// non-zero number of driven transactions (dv/scripts/cs_registers_results.py).
+//
+// The CSRs outside the listing (mstatus, mtvec, mepc, mcause, the debug CSRs, cpuctrlsts, the
+// CHERIoT SCRs, ...) are not checked here; the UVM bench and the Sail-equivalence formal proofs
+// cover them through the core.
+{
+  name: "cs_registers"
+
+  testpoints: [
+    {
+      name: pmp_cfg
+      desc: '''pmpcfg0-3: WARL fields, lock and reserved encodings
+
+            Random writes, sets and clears of pmpcfg0-3. The model checks that:
+
+            - an entry whose L bit is set ignores every write until reset, unless mseccfg.RLB
+              is set
+            - R=0 W=1 is reserved and reads back with R and W cleared, unless mseccfg.MML is
+              set (where it encodes a shared region)
+            - the configuration bytes of entries above PMPNumRegions read as zero'''
+      stage: V2
+      tests: ["tb_cs_registers", "tb_cs_registers_vlt"]
+    }
+
+    {
+      name: pmp_addr
+      desc: '''pmpaddr0-15: read-write, lock rules
+
+            Random accesses to pmpaddr0-15. pmpaddr i ignores writes when entry i is locked, or
+            when entry i+1 is locked and in TOR mode (it is the top of that range); mseccfg.RLB
+            lifts both. The addresses of entries above PMPNumRegions read as zero.'''
+      stage: V2
+      tests: ["tb_cs_registers", "tb_cs_registers_vlt"]
+    }
+
+    {
+      name: mseccfg
+      desc: '''mseccfg / mseccfgh: the Smepmp sticky bits
+
+            mseccfg.MML and mseccfg.MMWP, once set, stay set until reset; mseccfg.RLB cannot be
+            set while any pmpcfg L bit is set and RLB is clear; the other bits read as zero.
+            mseccfgh reads as zero and ignores writes.'''
+      stage: V2
+      tests: ["tb_cs_registers", "tb_cs_registers_vlt"]
+    }
+
+    {
+      name: counters
+      desc: '''Performance counter CSRs
+
+            - mcountinhibit: bit 1 (time) and the bits of unimplemented counters read as zero
+            - mhpmevent3-31: read-only, event i-3 for the MHPMCounterNum implemented counters,
+              zero for the others
+            - mhpmcounter3-31 and mhpmcounter3-31h: MHPMCounterWidth bits read-write for the
+              implemented counters, zero for the others
+            - minstret / minstreth: read-write; nothing retires, so a read returns the value
+              last written
+            - mcycle / mcycleh: accessed, but not compared (the counter runs every cycle)'''
+      stage: V2
+      tests: ["tb_cs_registers", "tb_cs_registers_vlt"]
+    }
+
+    {
+      name: reset
+      desc: '''Reset values
+
+            Random resets (3 cycles, every 100 to 1000 cycles) during the transaction stream.
+            After each, every modelled CSR must read its reset value: zero, except mhpmevent
+            (fixed event) and the read-only zero fields above.'''
+      stage: V2
+      tests: ["tb_cs_registers", "tb_cs_registers_vlt"]
+    }
+  ]
+}

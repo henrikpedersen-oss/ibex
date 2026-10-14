@@ -75,11 +75,22 @@ xrun -64bit -sv -licqueue -timescale 1ns/1ps \
   "${cov_args[@]+"${cov_args[@]}"}" \
   +ntb_random_seed="${SEED}" || true
 
-if grep -q '// TEST PASSED //' "${OUT}/run.log"; then
-  echo "PASS seed=${SEED} $(date '+%F %T')" > "${OUT}/result"
-  echo "csr_xlm.sh: PASS (seed ${SEED}); log ${OUT}/run.log"
+# PASS needs all three: the bench's own verdict, no Xcelium error or SVA failure (the model compares
+# CSR read data only; 2804 IbexCSREnValid failures once came with a run that got far), and the
+# driver having driven transactions (a bench that checks nothing is not a pass).
+LOG="${OUT}/run.log"
+why=""
+grep -q '// TEST PASSED //' "${LOG}" || why="no TEST PASSED"
+if grep -qE '^\s*xmsim: \*[EF],|^\s*\*[EF],|ASSERT FAILED|Assertion .* has failed' "${LOG}"; then
+  why="${why:+${why}, }Xcelium error or SVA failure"
+fi
+driven=$(sed -n 's/.*drove: \([0-9]*\) register transactions.*/\1/p' "${LOG}" | tail -1)
+[[ "${driven:-0}" -gt 0 ]] || why="${why:+${why}, }no register transactions driven"
+if [[ -z "${why}" ]]; then
+  echo "PASS seed=${SEED} transactions=${driven} $(date '+%F %T')" > "${OUT}/result"
+  echo "csr_xlm.sh: PASS (seed ${SEED}, ${driven} transactions); log ${LOG}"
 else
-  echo "FAIL seed=${SEED} $(date '+%F %T')" > "${OUT}/result"
-  echo "csr_xlm.sh: FAIL (seed ${SEED}); log ${OUT}/run.log" >&2
+  echo "FAIL seed=${SEED} transactions=${driven:-0} ${why} $(date '+%F %T')" > "${OUT}/result"
+  echo "csr_xlm.sh: FAIL (seed ${SEED}: ${why}); log ${LOG}" >&2
   exit 1
 fi

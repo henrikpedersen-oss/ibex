@@ -18,6 +18,11 @@ VCS version:
    ```sh
    fusesoc --cores-root=. run --target=sim --tool=vcs lowrisc:ibex:tb_cs_registers
    ```
+Xcelium version (`csr_xlm.sh [-c] [-s <seed>]`, from ibex_cheriot_verification: `make csr-tb-xlm`):
+FuseSoC writes the file list, xrun compiles and runs it; output and the verdict in `xlm_out/`.
+
+What the bench checks is in `cs_registers_testplan.hjson`; `make testplan-csr` (or
+`csr-results-nyx`) grades the last Xcelium and Verilator runs against it.
 
 Testbench file structure
 ------------------------
