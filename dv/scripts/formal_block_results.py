@@ -61,6 +61,7 @@ EMBEDDED = "rtl_embedded_assertions"
 MAPPED = "properties_mapped"
 ASSERT_STATUS = ("proven", "cex", "undetermined")
 COVER_STATUS = ("covered", "unreachable")
+VERDICTS = ("proven", "cex", "covered", "unreachable")
 # "[n]  name  status ...": the RESULTS table. The ASSUMPTIONS table has an expression there instead.
 RESULT_LINE = re.compile(r"^\[\d+\]\s+(\S+)\s+([a-z_]+)(?:\s|$)")
 # `ASSERT(name, ...), `COVER(name, ...), `ASSUME(name, ...) in formal_tb.sv, and the testbench's own
@@ -180,8 +181,14 @@ def main():
                       f"last step): not used")
                 continue
             status.update(read_results(step))
+        # A verdict in the last report wins; "undetermined" there only fills a gap. Step 2 of
+        # check_e2e.tcl resets every property it does not prove again to undetermined -- the
+        # environment's witness covers among them -- so letting it override step 1 left the
+        # e2e environment testpoint with nothing graded (2026-10-15). Step 1's verdicts still
+        # hold in step 2: it adds only proven assertions as assumptions, which removes no
+        # reachable state.
         for name, st in read_results(res).items():
-            if st in ASSERT_STATUS + COVER_STATUS or name not in status:
+            if st in VERDICTS or name not in status:
                 status[name] = st
 
         groups = {}   # testpoint -> [passing, total, [failures]]
