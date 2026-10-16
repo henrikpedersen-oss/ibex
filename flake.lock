@@ -1,5 +1,22 @@
 {
   "nodes": {
+    "eqy": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1758539351,
+        "narHash": "sha256-7OwtyV3+9vZhTD0Ur8Dhd39xNtqNs2M5XETBN1F6Xb0=",
+        "owner": "YosysHQ",
+        "repo": "eqy",
+        "rev": "91b2178dc5b141aba3794d1d088740f9d1a48a54",
+        "type": "github"
+      },
+      "original": {
+        "owner": "YosysHQ",
+        "ref": "v0.62",
+        "repo": "eqy",
+        "type": "github"
+      }
+    },
     "fenix": {
       "inputs": {
         "nixpkgs": [
@@ -276,6 +293,7 @@
     },
     "root": {
       "inputs": {
+        "eqy": "eqy",
         "fenix": "fenix",
         "flake-utils": "flake-utils",
         "gomod2nix": "gomod2nix",

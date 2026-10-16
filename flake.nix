@@ -74,6 +74,11 @@
       url = "github:zachjs/sv2v";
       flake = false;
     };
+    # Equivalence checking of the sv2v output; the tag must match nixpkgs' Yosys (0.62).
+    eqy = {
+      url = "github:YosysHQ/eqy/v0.62";
+      flake = false;
+    };
   };
 
   # The lowRISC public nix-cache contains builds of nix packages used by lowRISC, primarily coming from github:lowRISC/lowrisc-nix.
@@ -172,6 +177,11 @@
           ]);
 
         ibex_syn = import ./nix/syn.nix {inherit inputs pkgs;};
+
+        eqy = import ./nix/eqy.nix {
+          inherit pkgs;
+          src = inputs.eqy;
+        };
 
         # lowRISC fork of the Sail repository. The SAIL -> SV flow is used to generate the reference model.
         lowrisc_sail = import ./nix/lowrisc_sail.nix {
@@ -316,6 +326,23 @@
           shellHook = prev.shellHook + ibex_syn.profile;
         });
 
+        # Equivalence of the SystemVerilog RTL (read by yosys-slang) and its sv2v conversion.
+        eqy_shell = pkgs.mkShellNoCC {
+          name = "ibex-devshell-eqy";
+          packages = [
+            (import ./nix/sv2v.nix {inherit inputs pkgs;}).default
+            pkgs.yosys
+            lowrisc_yosys_slang
+            eqy
+            pkgs.sby
+            # Not bitwuzla: Yosys 0.62's smtbmc passes it --smt2, which bitwuzla 0.9 rejects.
+            pkgs.yices
+          ];
+          shellHook = ''
+            export LOWRISC_YOSYS_SLANG=${lowrisc_yosys_slang.out}/lib/slang.so
+          '';
+        };
+
         # This shell uses mkShellNoCC as the stdenv CC can interfere with EDA tools.
         eda_shell = pkgs.lib.makeOverridable pkgs.mkShellNoCC {
           name = "ibex-devshell-eda";
@@ -336,10 +363,10 @@
           packages = {
             # Export the package for the lowrisc fork of the sail compiler. This allows us
             # to re-use its build environment when using the .#formal-dev flow.
-            inherit lowrisc_sail;
+            inherit lowrisc_sail eqy;
           };
           devShells = rec {
-            inherit shell syn_shell eda_shell;
+            inherit shell syn_shell eda_shell eqy_shell;
             formal = pkgs.mkShellNoCC {
               packages = standard_deps;
               shellHook = check_jg + exports;
