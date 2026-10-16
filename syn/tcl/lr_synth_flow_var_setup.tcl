@@ -23,6 +23,10 @@ set_flow_var ibex_bitmanip 0 "Bitmanip extension setting for Ibex (see ibex_pkg:
 set_flow_var ibex_multiplier 2 "Multiplier extension setting for Ibex (see ibex_pkg::rv32m_e for permitted values. Enum names are not supported in Yosys.)"
 set_flow_var ibex_regfile 2 "Register file implementation selection for Ibex (see ibex_pkg::regfile_e for permitted values. Enum names are not supported in Yosys.)"
 
+if { $lr_synth_ibex_config ne "" } {
+  puts "NOTE: Ibex configuration $lr_synth_ibex_config: its parameters (ibex_configs.yaml) replace the Ibex settings above"
+}
+
 source $lr_synth_config_file
 
 if { $lr_synth_timing_run } {
