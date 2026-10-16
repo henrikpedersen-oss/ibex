@@ -101,6 +101,8 @@ void cheriot_sail_cosim_set_mcounteren_writable(svBit writable);
 // mem getters return 0 when the model reported no integer write / memory access.
 uint32_t cheriot_sail_cosim_get_pc_wdata(void);
 svBit    cheriot_sail_cosim_get_trap(void);
+// The model's privilege now, as rvfi_mode encodes it (0 U, 1 S, 3 M).
+uint32_t cheriot_sail_cosim_get_priv(void);
 uint32_t cheriot_sail_cosim_get_rd_addr(void);
 uint32_t cheriot_sail_cosim_get_rd_wdata(void);
 uint32_t cheriot_sail_cosim_get_cd_addr(void);

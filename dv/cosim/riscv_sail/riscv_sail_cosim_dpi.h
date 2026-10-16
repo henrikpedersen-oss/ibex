@@ -72,6 +72,8 @@ RISCV_SAIL_DPI void riscv_sail_cosim_set_ic_scr_key_valid(svBit valid);
 // the model reported no integer write / memory access.
 RISCV_SAIL_DPI uint32_t riscv_sail_cosim_get_pc_wdata(void);
 RISCV_SAIL_DPI svBit    riscv_sail_cosim_get_trap(void);
+// The model's privilege now, as rvfi_mode encodes it (0 U, 1 S, 3 M).
+RISCV_SAIL_DPI uint32_t riscv_sail_cosim_get_priv(void);
 RISCV_SAIL_DPI uint32_t riscv_sail_cosim_get_rd_addr(void);
 RISCV_SAIL_DPI uint32_t riscv_sail_cosim_get_rd_wdata(void);
 RISCV_SAIL_DPI uint32_t riscv_sail_cosim_get_mem_addr(void);

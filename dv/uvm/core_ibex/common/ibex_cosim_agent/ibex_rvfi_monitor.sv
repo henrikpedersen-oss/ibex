@@ -36,6 +36,7 @@ class ibex_rvfi_monitor extends uvm_monitor;
       trans_collected.irq_only         = !vif.monitor_cb.valid && vif.monitor_cb.ext_irq_valid;
       trans_collected.intr             = vif.monitor_cb.intr;
       trans_collected.trap             = vif.monitor_cb.trap;
+      trans_collected.mode             = vif.monitor_cb.mode;
       trans_collected.insn             = vif.monitor_cb.insn;
       trans_collected.pc               = vif.monitor_cb.pc_rdata;
       trans_collected.rd_addr          = vif.monitor_cb.rd_addr;

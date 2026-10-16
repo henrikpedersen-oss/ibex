@@ -24,6 +24,8 @@ if { $lr_synth_ibex_writeback_stage } {
   yosys "chparam -set WritebackStage 1 $lr_synth_top_module"
 }
 
+yosys "chparam -set BaseIsa $lr_synth_ibex_base_isa $lr_synth_top_module"
+
 yosys "chparam -set RV32B $lr_synth_ibex_bitmanip $lr_synth_top_module"
 
 yosys "chparam -set RV32M $lr_synth_ibex_multiplier $lr_synth_top_module"

@@ -27,6 +27,7 @@ import "DPI-C" function void riscv_sail_cosim_set_ic_scr_key_valid(bit valid);
 
 import "DPI-C" function int unsigned     riscv_sail_cosim_get_pc_wdata();
 import "DPI-C" function bit              riscv_sail_cosim_get_trap();
+import "DPI-C" function int unsigned riscv_sail_cosim_get_priv();
 import "DPI-C" function int unsigned     riscv_sail_cosim_get_rd_addr();
 import "DPI-C" function int unsigned     riscv_sail_cosim_get_rd_wdata();
 import "DPI-C" function int unsigned     riscv_sail_cosim_get_mem_addr();

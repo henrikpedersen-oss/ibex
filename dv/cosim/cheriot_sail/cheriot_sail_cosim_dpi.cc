@@ -568,6 +568,16 @@ svBit cheriot_sail_cosim_get_trap(void) {
   return z_get_RVFI_DII_Execution_Packet_InstMetaData_rvfi_trap(zrvfi_inst_data) != 0;
 }
 
+// The privilege the model is at now, in the RISC-V encoding of rvfi_mode (0 U, 1 S, 3 M). Read
+// before a step, it is the privilege the next instruction executes at. CHERIoT is M-mode only.
+uint32_t cheriot_sail_cosim_get_priv(void) {
+  switch (zcur_privilege) {
+    case zUser:       return 0;
+    case zSupervisor: return 1;
+    default:          return 3;
+  }
+}
+
 uint32_t cheriot_sail_cosim_get_rd_addr(void) {
   if (!zrvfi_int_data_present) return 0;
   return (uint32_t)z_get_RVFI_DII_Execution_Packet_Ext_Integer_rvfi_rd_addr(zrvfi_int_data);

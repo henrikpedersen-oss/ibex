@@ -6,6 +6,7 @@ class ibex_rvfi_seq_item extends uvm_sequence_item;
   bit        irq_only;
   bit        intr;
   bit        trap;
+  bit [1:0]  mode;      // privilege the instruction executed at (rvfi_mode: 0 U, 3 M)
   bit [31:0] insn;
   bit [31:0] pc;
   bit [4:0]  rd_addr;
@@ -50,6 +51,7 @@ class ibex_rvfi_seq_item extends uvm_sequence_item;
   `uvm_object_utils_begin(ibex_rvfi_seq_item)
     `uvm_field_int (intr, UVM_DEFAULT)
     `uvm_field_int (trap, UVM_DEFAULT)
+    `uvm_field_int (mode, UVM_DEFAULT)
     `uvm_field_int (insn, UVM_DEFAULT)
     `uvm_field_int (pc, UVM_DEFAULT)
     `uvm_field_int (rd_addr, UVM_DEFAULT)

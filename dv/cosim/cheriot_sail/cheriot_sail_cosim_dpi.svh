@@ -91,6 +91,7 @@ import "DPI-C" function void cheriot_sail_cosim_set_mcounteren_writable(bit writ
 // mem getters return 0 when the model reported no integer write / memory access.
 import "DPI-C" function int unsigned     cheriot_sail_cosim_get_pc_wdata();
 import "DPI-C" function bit              cheriot_sail_cosim_get_trap();
+import "DPI-C" function int unsigned cheriot_sail_cosim_get_priv();
 import "DPI-C" function int unsigned     cheriot_sail_cosim_get_rd_addr();
 import "DPI-C" function int unsigned     cheriot_sail_cosim_get_rd_wdata();
 import "DPI-C" function int unsigned     cheriot_sail_cosim_get_cd_addr();

@@ -11,10 +11,11 @@
   ...
 }: let
   packageName = "sv2v";
-  ghcVersion = "928";
 
   inherit (pkgs.haskell.lib) overrideCabal justStaticExecutables;
-  hpkgs = pkgs.haskell.packages."ghc${ghcVersion}";
+  # nixpkgs' default GHC package set (binary-cached). A pinned "ghc928" stopped evaluating when the
+  # flake moved to nixos-26.05, which no longer has that compiler, and broke syn_shell.
+  hpkgs = pkgs.haskellPackages;
 
   # executableToolDepends - from "sv2v" expression in https://raw.githubusercontent.com/NixOS/nixpkgs/nixos-unstable/pkgs/development/haskell-modules/hackage-packages.nix
   package = overrideCabal (hpkgs.callCabal2nix packageName inputs.sv2v.outPath { })
