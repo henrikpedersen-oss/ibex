@@ -72,6 +72,35 @@ def parse_report(path):
     return modules, order, top_area
 
 
+def uncounted_cells(modules, top):
+    """Cells without a library area, counted per instance from the top: (black-box macros such as
+    the iCache's prim_ram_1p arrays, other unmapped cells), each {name: count}."""
+    counts = {}
+
+    def walk(name, mult):
+        for typ, (c, area) in modules[name]['cells'].items():
+            if area is None:
+                base = clean_name(typ)
+                counts[base] = counts.get(base, 0) + mult * c
+        for ch, c in modules[name]['children'].items():
+            walk(ch, mult * c)
+
+    walk(top, 1)
+    macros = {k: v for k, v in counts.items() if k.startswith('prim_ram_')}
+    return macros, {k: v for k, v in counts.items() if k not in macros}
+
+
+def uncounted_notes(modules, top, prefix=''):
+    macros, other = uncounted_cells(modules, top)
+    fmt = lambda d: ', '.join('{} ×{}'.format(k, v) for k, v in sorted(d.items()))  # noqa: E731
+    notes = []
+    if macros:
+        notes.append(prefix + 'SRAM macros (black boxes), not counted: ' + fmt(macros) + '.')
+    if other:
+        notes.append(prefix + 'Not mapped to library cells, so not counted: ' + fmt(other) + '.')
+    return notes
+
+
 def find_top(modules, order):
     instantiated = {c for m in modules.values() for c in m['children']}
     tops = [n for n in order if n not in instantiated]
@@ -331,11 +360,7 @@ def main():
     isa = config_label(cfg)
     hierarchical = any(m['children'] for m in modules.values())
 
-    notes = []
-    unmapped = sorted({'{} ×{}'.format(t, c) for m in modules.values()
-                       for t, (c, a) in m['cells'].items() if a is None})
-    if unmapped:
-        notes.append('Not mapped to library cells, so not counted: ' + ', '.join(unmapped) + '.')
+    notes = uncounted_notes(modules, top)
 
     if hierarchical:
         total, slices, memo = split_by_block(modules, top, args.max_share)

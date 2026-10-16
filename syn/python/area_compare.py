@@ -19,7 +19,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from area_chart import (NANGATE45_NAND2_X1_AREA, clean_name, config_label,  # noqa: E402
-                        find_top, inclusive, parse_report, read_config)
+                        find_top, inclusive, parse_report, read_config, uncounted_notes)
 
 COLORS_LIGHT = ['#2a78d6', '#eb6834']
 COLORS_DARK = ['#3987e5', '#d95926']
@@ -36,8 +36,7 @@ class Design:
         self.total = inclusive(self.modules, self.top, self.memo)
         self.label = label or config_label(read_config(report)) or os.path.basename(
             os.path.dirname(os.path.dirname(os.path.abspath(report))))
-        self.unmapped = sorted({'{} ×{}'.format(t, c) for m in self.modules.values()
-                                for t, (c, a) in m['cells'].items() if a is None})
+        self.notes = uncounted_notes(self.modules, self.top, self.label + ': ')
 
     def blocks(self, expand):
         """{label: [area, instances, expandable]} with every module in `expand` split open."""
@@ -225,8 +224,7 @@ def main():
     rows = sorted(((lab, ba.get(lab, [0, 0])[0], ba.get(lab, [0, 0])[1],
                     bb.get(lab, [0, 0])[0], bb.get(lab, [0, 0])[1]) for lab in set(ba) | set(bb)),
                   key=lambda r: -max(r[1], r[3]))
-    notes = ['{}: not mapped to library cells, not counted: {}.'.format(d.label, ', '.join(d.unmapped))
-             for d in (a, b) if d.unmapped]
+    notes = a.notes + b.notes
     write_html(args.out, a, b, rows, args.ge_area, notes)
 
     g = args.ge_area * 1000

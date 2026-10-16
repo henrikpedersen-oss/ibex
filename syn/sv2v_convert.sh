@@ -50,6 +50,33 @@ LR_INCDIRS=(
     "../vendor/lowrisc_ip/dv/sv/dv_utils"
 )
 
+# The iCache's RAM wrappers (ICache=1): ECC (prim_ram_1p_adv) and PRINCE scrambling
+# (prim_ram_1p_scr), and the iCache's tag ECC. The bare array, prim_ram_1p, is a black box
+# (rtl/prim_ram_1p_blackbox.sv, converted into lib/): an SRAM macro in silicon.
+LR_ICACHE_PKGS=(
+    "${LR_DEP_PKGS[@]}"
+    "../vendor/lowrisc_ip/ip/prim_generic/rtl/prim_ram_1p_pkg.sv"
+    "../vendor/lowrisc_ip/ip/prim/rtl/prim_secded_pkg.sv"
+    "../vendor/lowrisc_ip/ip/prim/rtl/prim_mubi_pkg.sv"
+)
+
+LR_ICACHE_SOURCES=(
+    "../vendor/lowrisc_ip/ip/prim/rtl/prim_ram_1p_scr.sv"
+    "../vendor/lowrisc_ip/ip/prim/rtl/prim_ram_1p_adv.sv"
+    "../vendor/lowrisc_ip/ip/prim/rtl/prim_prince.sv"
+    "../vendor/lowrisc_ip/ip/prim/rtl/prim_subst_perm.sv"
+    "../vendor/lowrisc_ip/ip/prim/rtl/prim_secded_inv_22_16_dec.sv"
+    "../vendor/lowrisc_ip/ip/prim/rtl/prim_secded_inv_22_16_enc.sv"
+    "../vendor/lowrisc_ip/ip/prim/rtl/prim_secded_inv_28_22_dec.sv"
+    "../vendor/lowrisc_ip/ip/prim/rtl/prim_secded_inv_28_22_enc.sv"
+    "../vendor/lowrisc_ip/ip/prim/rtl/prim_secded_inv_hamming_22_16_dec.sv"
+    "../vendor/lowrisc_ip/ip/prim/rtl/prim_secded_inv_hamming_22_16_enc.sv"
+    "../vendor/lowrisc_ip/ip/prim/rtl/prim_secded_inv_hamming_39_32_dec.sv"
+    "../vendor/lowrisc_ip/ip/prim/rtl/prim_secded_inv_hamming_39_32_enc.sv"
+)
+
+LR_RAM_BLACKBOX="rtl/prim_ram_1p_blackbox.sv"
+
 [[ "${BASH_SOURCE[0]}" != "$0" ]] && return 0
 
 set -e
@@ -77,3 +104,14 @@ for file in "${LR_CORE_SOURCES[@]}"; do
         "$file" > "$out/$module.v"
     generic_prims "$out/$module.v"
 done
+
+for file in "${LR_ICACHE_SOURCES[@]}"; do
+    module=$(basename -s .sv "$file")
+    sv2v --define=SYNTHESIS --define=YOSYS "${LR_ICACHE_PKGS[@]}" -I"${LR_INCDIRS[0]}" \
+        "$file" > "$out/$module.v"
+    generic_prims "$out/$module.v"
+done
+
+mkdir -p "$out/lib"
+sv2v --define=SYNTHESIS --define=YOSYS "${LR_ICACHE_PKGS[@]}" "$LR_RAM_BLACKBOX" \
+    > "$out/lib/prim_ram_1p.v"

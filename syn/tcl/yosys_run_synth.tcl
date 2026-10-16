@@ -14,6 +14,11 @@ if { $lr_synth_timing_run } {
   write_sdc_out $lr_synth_sdc_file_in $lr_synth_sdc_file_out
 }
 
+# Black boxes (sv2v_convert.sh: the iCache's bare RAM arrays, SRAM macros in silicon).
+foreach lib_file [glob -nocomplain $lr_synth_out_dir/generated/lib/*.v] {
+  yosys "read_verilog -lib $lib_file"
+}
+
 yosys "read_verilog -defer -sv ./rtl/prim_clock_gating.v $lr_synth_out_dir/generated/*.v"
 
 if { $lr_synth_ibex_config ne "" } {
