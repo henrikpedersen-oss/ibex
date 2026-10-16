@@ -48,6 +48,7 @@ class ibex_sail_rvfi_cmp extends uvm_object;
 
   // Set by a trapping instruction or an mret; checked against the next retirement's PC.
   protected bit        trap_target_valid;
+  protected bit        trap_target_after_trap;  // set by a trap, not an mret
   protected bit [31:0] trap_target;
 
   protected int unsigned corrupt_at;
@@ -141,11 +142,17 @@ class ibex_sail_rvfi_cmp extends uvm_object;
   // there. Call before stepping the model for rtl.
   function void check_trap_target(ibex_rvfi_seq_item rtl, ref string errs[$]);
     if (!trap_target_valid) return;
+    trap_target_valid = 1'b0;
+    // A handler entry right after an mret is an interrupt (rvfi_intr marks every handler's first
+    // instruction; after a trap it is the trap's own handler, whose address is checked here). The
+    // mret target became the interrupt's mepc, which RVFI does not show. The interrupt entry is
+    // checked on its own: the model takes it from its own state and steps the handler's first
+    // instruction, whose next pc is compared.
+    if (rtl.intr && !trap_target_after_trap) return;
     if (rtl.pc != trap_target) begin
       errs.push_back($sformatf("trap/mret target: core went to 0x%08x, model 0x%08x",
                                rtl.pc, trap_target));
     end
-    trap_target_valid = 1'b0;
   endfunction
 
   function void compare(ibex_rvfi_seq_item rtl, model_result_t model, ref string errs[$]);
@@ -159,8 +166,9 @@ class ibex_sail_rvfi_cmp extends uvm_object;
     // instruction or an mret; the redirect happens later, in writeback. So for those, check
     // where the core actually went: the next retired instruction must be at the model's target.
     if ((rtl.trap && model.trap) || (!rtl.trap && !model.trap && rtl.insn == MRET_INSN)) begin
-      trap_target       = model.pc_wdata;
-      trap_target_valid = 1'b1;
+      trap_target            = model.pc_wdata;
+      trap_target_valid      = 1'b1;
+      trap_target_after_trap = rtl.trap;
     end else if (!rtl.trap && !model.trap &&
                  {rtl.pc_wdata[31:1], 1'b0} != model.pc_wdata) begin
       // Bit 0 is ignored: for jalr ibex's RVFI reports the raw target (rs1 + imm); the fetch
