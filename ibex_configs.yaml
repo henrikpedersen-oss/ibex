@@ -185,9 +185,11 @@ maxperf-pmp-bmfull-icache:
 # ===============================
 
 # Smallest CHERIoT core that keeps SecureIbex: a control processor that leaves data movement to an
-# external DMA. Two-stage pipeline, slow multiplier (keeps M so rv32emc binaries run), no B, Zca
-# only, no cache, PMP, debug triggers or performance counters. RV32E is the CHERIoT register set;
-# with dummy instructions on it does not change the register file's storage.
+# external DMA. Slow multiplier (keeps M so rv32emc binaries run), no B, Zca only, no cache, PMP,
+# debug triggers or performance counters, no branch target ALU. The writeback stage stays: CHERIoT
+# requires it (doc/03_reference/cheriot.rst, IllegalParamCHERIoTNoWriteback in ibex_core). RV32E
+# is the CHERIoT register set; with dummy instructions on it does not change the register file's
+# storage.
 cheriot-min:
   BaseIsa                  : "ibex_pkg::BaseIsaRV32IorCHERIoT"
   RV32E                    : 1
@@ -196,7 +198,7 @@ cheriot-min:
   RV32ZC                   : "ibex_pkg::RV32Zca"
   RegFile                  : "ibex_pkg::RegFileLatch"
   BranchTargetALU          : 0
-  WritebackStage           : 0
+  WritebackStage           : 1
   ICache                   : 0
   ICacheECC                : 0
   ICacheScramble           : 0

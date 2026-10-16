@@ -14,6 +14,9 @@
 #   EQY_MUTATE=1      break the gate's ALU adder first: the run must then report a difference
 #   EQY_JOBS=<n>      parallel partitions (default: nproc)
 #   EQY_DEPTH=<n>     k-induction depth per partition (default 5)
+#   EQY_TIMEOUT=<s>   per-partition limit of the smtbmc strategy (default 300), then ABC PDR
+#   EQY_ABC_TIMEOUT=<s>  per-partition limit of the ABC strategy (default 1800); a partition that
+#                     neither strategy finishes is UNKNOWN, and so is the run
 #
 # The register file is the flip-flop one (RegFile=RegFileFF) and prim_clock_gating a pass-through
 # on both sides (eqy/prim_clock_gating.v): the proof has one global clock and no latches.
@@ -89,6 +92,14 @@ opt_clean
 use sby
 depth ${EQY_DEPTH:-5}
 engine smtbmc yices
+timeout ${EQY_TIMEOUT:-300}
+
+# Tried for partitions the first strategy did not finish in time, in practice the multiplier
+# bits: ABC handles two structurally similar multipliers far better than bit-level SMT.
+[strategy abc]
+use sby
+engine abc pdr
+timeout ${EQY_ABC_TIMEOUT:-1800}
 EOF
 
 echo "EQY config: $out/ibex_top.eqy"

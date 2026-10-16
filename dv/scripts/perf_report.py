@@ -24,7 +24,8 @@ CLOCK_HZ = 150e6
 BUDGET_CYCLES = 15_000_000
 
 LOG_RE = re.compile(r'^perf-(?P<cfg>.+)-lat(?P<lat>\d+)\.[^.]+\.uart\.log$')
-PERF_RE = re.compile(r'PERF (?P<wl>\S+) cycles (?P<cyc>\S+) instret (?P<ins>\S+) words (?P<words>\S+)')
+PERF_RE = re.compile(r'PERF (?P<wl>\S+) cycles (?P<cyc>\S+)(?: core_cycles (?P<core>\S+))? '
+                     r'instret (?P<ins>\S+) words (?P<words>\S+)')
 ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
 
 WORKLOADS = {
@@ -48,7 +49,9 @@ def read_logs(results_dir):
             continue
         with open(path, errors='replace') as f:
             text = ANSI_RE.sub('', f.read())
-        perf = {p.group('wl'): (num(p.group('cyc')), num(p.group('ins')), num(p.group('words')))
+        # (cycles, instret, words, core awake cycles); logs before core_cycles: the same as cycles.
+        perf = {p.group('wl'): (num(p.group('cyc')), num(p.group('ins')), num(p.group('words')),
+                                num(p.group('core') or p.group('cyc')))
                 for p in PERF_RE.finditer(text)}
         ok = 'All tests finished' in text and 'FAIL' not in text
         runs[(m.group('cfg'), int(m.group('lat')))] = {'ok': ok, 'perf': perf, 'log': path}
@@ -59,17 +62,17 @@ def text_report(runs, cfgs, lats, workloads):
     out = []
     for wl in workloads:
         out.append('{} ({})'.format(WORKLOADS.get(wl, wl), wl))
-        out.append('  {:<14} {:>4} {:>12} {:>10} {:>9} {:>9}  {}'.format(
-            'config', 'lat', 'cycles', 'instret', 'ms@150', 'budget', 'run'))
+        out.append('  {:<14} {:>4} {:>12} {:>11} {:>10} {:>9} {:>9}  {}'.format(
+            'config', 'lat', 'cycles', 'core awake', 'instret', 'ms@150', 'budget', 'run'))
         for cfg in cfgs:
             for lat in lats:
                 r = runs.get((cfg, lat))
                 if not r or wl not in r['perf']:
                     out.append('  {:<14} {:>4} {:>12}'.format(cfg, lat, 'no result'))
                     continue
-                cyc, ins, _ = r['perf'][wl]
-                out.append('  {:<14} {:>4} {:>12,} {:>10,} {:>9.3f} {:>8.2f}%  {}'.format(
-                    cfg, lat, cyc, ins, 1e3 * cyc / CLOCK_HZ, 100 * cyc / BUDGET_CYCLES,
+                cyc, ins, _, core = r['perf'][wl]
+                out.append('  {:<14} {:>4} {:>12,} {:>11,} {:>10,} {:>9.3f} {:>8.2f}%  {}'.format(
+                    cfg, lat, cyc, core, ins, 1e3 * cyc / CLOCK_HZ, 100 * cyc / BUDGET_CYCLES,
                     'pass' if r['ok'] else 'FAIL'))
         out.append('')
     return '\n'.join(out)
@@ -121,14 +124,14 @@ def html_report(out, runs, cfgs, lats, workloads, text):
                 r = runs.get((cfg, lat))
                 if not r or wl not in r['perf']:
                     continue
-                cyc, ins, _ = r['perf'][wl]
+                cyc, ins, _, core = r['perf'][wl]
                 rows.append('<tr><td>{}</td><td class="num">{}</td><td class="num">{:,}</td>'
-                            '<td class="num">{:,}</td><td class="num">{:.3f}</td>'
+                            '<td class="num">{:,}</td><td class="num">{:,}</td><td class="num">{:.3f}</td>'
                             '<td class="num">{:.2f}%</td><td>{}</td></tr>'.format(
-                                html.escape(cfg), lat, cyc, ins, 1e3 * cyc / CLOCK_HZ,
+                                html.escape(cfg), lat, cyc, core, ins, 1e3 * cyc / CLOCK_HZ,
                                 100 * cyc / BUDGET_CYCLES, 'pass' if r['ok'] else '<b>FAIL</b>'))
         sections.append('<h2>{}</h2>{}<table><thead><tr><th>Configuration</th><th class="num">Latency</th>'
-                        '<th class="num">Cycles</th><th class="num">Instructions</th>'
+                        '<th class="num">Cycles</th><th class="num">Core awake</th><th class="num">Instructions</th>'
                         '<th class="num">ms at 150 MHz</th><th class="num">Of 15M budget</th>'
                         '<th>Run</th></tr></thead><tbody>{}</tbody></table>'.format(
                             html.escape(WORKLOADS.get(wl, wl)), svg_chart(wl, runs, cfgs, lats),

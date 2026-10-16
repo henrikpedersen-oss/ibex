@@ -70,6 +70,20 @@ def main():
     enums = read_enums(args.pkg)
     values = [(k, value(v, enums)) for k, v in params.items()]
 
+    # ibex_core's ASSERT_INIT parameter checks. Yosys does not evaluate them, so a forbidden
+    # combination would synthesise without complaint.
+    v = dict(values)
+    forbidden = [
+        (v.get('BaseIsa') == enums['BaseIsaRV32IorCHERIoT'] and v.get('WritebackStage') == 0,
+         'CHERIoT needs WritebackStage=1 (IllegalParamCHERIoTNoWriteback, '
+         'doc/03_reference/cheriot.rst)'),
+        (v.get('SecureIbex') == 1 and v.get('RV32M') == enums['RV32MNone'],
+         'SecureIbex needs M (IllegalParamSecure)'),
+    ]
+    for bad, why in forbidden:
+        if bad:
+            sys.exit('{}: unsupported configuration: {}'.format(args.config, why))
+
     print('# {} {}'.format(args.config, ' '.join(args.override)).rstrip())
     print('set lr_synth_ibex_params {' + ' '.join('{{{} {}}}'.format(k, v) for k, v in values) + '}')
     print('set lr_synth_ibex_secure_ibex {}'.format(dict(values).get('SecureIbex', 0)))
