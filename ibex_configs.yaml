@@ -189,14 +189,15 @@ maxperf-pmp-bmfull-icache:
 # debug triggers or performance counters, no branch target ALU. The writeback stage stays: CHERIoT
 # requires it (doc/03_reference/cheriot.rst, IllegalParamCHERIoTNoWriteback in ibex_core). RV32E
 # is the CHERIoT register set; with dummy instructions on it does not change the register file's
-# storage.
+# storage. Flip-flop register file: the latch one has no reset, and with SecureIbex the ECC checks of
+# dummy-instruction reads see X before every register is written (unverified with CHERIoT).
 cheriot-min:
   BaseIsa                  : "ibex_pkg::BaseIsaRV32IorCHERIoT"
   RV32E                    : 1
   RV32M                    : "ibex_pkg::RV32MSlow"
   RV32B                    : "ibex_pkg::RV32BNone"
   RV32ZC                   : "ibex_pkg::RV32Zca"
-  RegFile                  : "ibex_pkg::RegFileLatch"
+  RegFile                  : "ibex_pkg::RegFileFF"
   BranchTargetALU          : 0
   WritebackStage           : 1
   ICache                   : 0
