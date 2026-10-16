@@ -22,9 +22,13 @@ to be able to pass. CONTROLS lists runs with a fix model instead of a mutation (
                 and for a control, per expectation:
                   PASSES       the test reported PASS with the fix model
                   STILL FAILS  the test reported FAIL even with the fix model
+                and for a monitor mutation:
+                  CAUGHT   the testbench monitor's error is in the run's simulator summary
+                  MISSED   it is not: the monitor did not fire with the fault injected
                 and INACTIVE if the run's simulator summary lacks "MUTATION <name> active".
                 DISABLED lists the mutations in DISABLED, which are not run (not a failure).
-                Exits non-zero on any MISSED, STILL FAILS, CRASHED control or INACTIVE.
+                Exits non-zero on any MISSED, STILL FAILS, CRASHED control, INACTIVE or NO LOG
+                of a monitor mutation.
 """
 
 import argparse
@@ -51,11 +55,13 @@ RUNS = [
     # before it checks Permit_Execute, in the mutated design as in the unmutated one.
     ("exec_off", "sonata-cheri-c-xlm", [("cheri_c_noexec_call", "cheriot_mem")]),
     ("datastore_tag", "sonata-cheri-c-xlm", [("cheri_c_union", "cheriot_mem")]),
-    ("barrier_none", "sonata-revocation-xlm", [("revocation_barrier_phase2", "cheriot_mem")]),
+    ("barrier_none", "sonata-revocation-xlm", [("revocation_barrier_phase2", "cheriot_mem"),
+                                               ("revocation_random", "cheriot_mem")]),
     # Not bus_master_tbre_invalidate_only: it checks that the sweep writes nothing but tag
     # clears, which a TBRE that writes nothing at all satisfies. revocation_sweep checks that the
     # revoked capability was cleared.
-    ("tbre_no_inval", "sonata-revocation-xlm", [("revocation_sweep", "cheriot_mem")]),
+    ("tbre_no_inval", "sonata-revocation-xlm", [("revocation_sweep", "cheriot_mem"),
+                                                ("revocation_random", "cheriot_mem")]),
     # Not juliet_cwe190_int_overflow: its wrapped cursor is unrepresentable, so the tag is
     # cleared and the store faults on the tag before it reaches the bounds check.
     ("bounds_off", "sonata-juliet-xlm", [("juliet_cwe121_bof", "cheriot_mem"),
@@ -71,6 +77,16 @@ RUNS = [
 CONTROLS = [
     ("sba_tag_clear_model", "sonata-dbg-host-xlm",
      [("bus_master_dbg_host_tag_clear", "cheriot_mem")]),
+]
+
+# Monitor mutations: (mutation, make arguments, regex the run's simulator summary must match).
+# They inject a fault the firmware cannot see, only a testbench monitor can: the memory
+# subsystem's fatal errors and the rev_ctl shim's sticky error are wired to nothing in the SoC
+# (tb/cheriot_rtos_tb.sv tbre_monitor). The summary keeps the monitors' error lines (Makefile,
+# sonata-test-xlm).
+MONITORS = [
+    ("tbre_read_err", "sonata-revocation-xlm", r"\[tbre_monitor\] \d+: rev_ctl shim: sweep failed"),
+    ("tbre_fatal", "sonata-revocation-xlm", r"\[tbre_monitor\] \d+: fatal errors 0+ -> [01]*1"),
 ]
 
 # Mutations that are not run, with the reason; --check lists each as DISABLED (not a failure) so
@@ -143,6 +159,24 @@ def check(results):
                                 if not p and (t, build) not in expects)
             if collateral:
                 print(f"          also failed: {', '.join(collateral)}")
+    for mutation, args, pattern in MONITORS:
+        stem = results / mutation / f"{RESULT_NAME[args.split()[0]]}.cheriot_mem"
+        sim = Path(f"{stem}.sim.txt")
+        head = f"{mutation:14s} make {args}"
+        if not sim.exists():
+            print(f"NO LOG    {head}: {sim} missing")
+            ok = False
+            continue
+        text = sim.read_text(errors="replace")
+        if not re.search(rf"MUTATION {re.escape(mutation)} active", text):
+            print(f"INACTIVE  {head}: no 'MUTATION {mutation} active' in {sim} -- the "
+                  f"result says nothing about the mutation")
+            ok = False
+        elif re.search(pattern, text):
+            print(f"CAUGHT    {head}: monitor error /{pattern}/")
+        else:
+            print(f"MISSED    {head}: no monitor error /{pattern}/ in {sim}")
+            ok = False
     for mutation, args, expects, why in DISABLED:
         tests = ", ".join(t for t, _ in expects)
         print(f"DISABLED  {mutation:14s} make {args}: not run ({why}); {tests} unchecked")
@@ -157,7 +191,7 @@ def main():
                     default=Path("ibex/dv/cheriot-rtos-test-suite/xlm_rtos_out/results/mutations"))
     args = ap.parse_args()
     if args.list_runs:
-        for mutation, make_args, _ in RUNS + CONTROLS:
+        for mutation, make_args, _ in RUNS + CONTROLS + MONITORS:
             print(f"{mutation}|{make_args}")
     if args.check:
         sys.exit(0 if check(args.results) else 1)

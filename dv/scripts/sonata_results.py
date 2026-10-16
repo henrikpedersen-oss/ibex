@@ -86,7 +86,7 @@ EXIT_CODE_LINE = re.compile(r"^Simulation exit code: (?P<code>\d+)$")
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 RTOS_LINE = re.compile(r"^Test runner: (?P<name>.+?) (?P<verdict>finished in \d+ cycles|failed)$")
-REVOCATION_LINE = re.compile(r"^Revocation barrier: (?P<verdict>PASS|FAIL) (?P<what>phase [123]|sweep)\b")
+REVOCATION_LINE = re.compile(r"^Revocation barrier: (?P<verdict>PASS|FAIL) (?P<what>phase [123]|sweep|random)\b")
 # TRBE: the engine's name in firmware built before the upstream rename
 TBRE_INVAL_LINE = re.compile(
     r"^Revocation barrier: (?P<verdict>PASS|FAIL) T(?:BR|RB)E invalidate-only:")
@@ -111,7 +111,8 @@ def parse_log(path):
         m = REVOCATION_LINE.match(line)
         if m:
             what = m["what"].replace(" ", "")
-            name = "revocation_sweep" if what == "sweep" else "revocation_barrier_" + what
+            name = ("revocation_" + what if what in ("sweep", "random")
+                    else "revocation_barrier_" + what)
             yield name, m["verdict"] == "PASS"
             continue
         m = TBRE_INVAL_LINE.match(line)
