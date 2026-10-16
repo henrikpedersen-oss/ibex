@@ -184,6 +184,31 @@ maxperf-pmp-bmfull-icache:
 # * EXPERIMENTAL CONFIGURATIONS *
 # ===============================
 
+# Smallest CHERIoT core that keeps SecureIbex: a control processor that leaves data movement to an
+# external DMA. Two-stage pipeline, slow multiplier (keeps M so rv32emc binaries run), no B, Zca
+# only, no cache, PMP, debug triggers or performance counters. RV32E is the CHERIoT register set;
+# with dummy instructions on it does not change the register file's storage.
+cheriot-min:
+  BaseIsa                  : "ibex_pkg::BaseIsaRV32IorCHERIoT"
+  RV32E                    : 1
+  RV32M                    : "ibex_pkg::RV32MSlow"
+  RV32B                    : "ibex_pkg::RV32BNone"
+  RV32ZC                   : "ibex_pkg::RV32Zca"
+  RegFile                  : "ibex_pkg::RegFileLatch"
+  BranchTargetALU          : 0
+  WritebackStage           : 0
+  ICache                   : 0
+  ICacheECC                : 0
+  ICacheScramble           : 0
+  BranchPredictor          : 0
+  DbgTriggerEn             : 0
+  SecureIbex               : 1
+  PMPEnable                : 0
+  PMPGranularity           : 0
+  PMPNumRegions            : 4
+  MHPMCounterNum           : 0
+  MHPMCounterWidth         : 40
+
 # Configurations using experimental features that aren't yet verified and/or
 # known to have issues.
 

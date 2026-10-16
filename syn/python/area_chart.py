@@ -147,12 +147,23 @@ def read_config(report_path):
     try:
         with open(log) as f:
             for line in f:
-                for key, prefix in (('base_isa', 'Base ISA'), ('flatten', 'flatten:')):
+                for key, prefix in (('base_isa', 'Base ISA'), ('flatten', 'flatten:'),
+                                    ('config', 'Ibex configuration ('),
+                                    ('overrides', 'Ibex configuration overrides:')):
                     if line.startswith(prefix):
-                        cfg[key] = line.rsplit(':', 1)[1].strip()
+                        val = line.rsplit(':', 1)[1].strip()
+                        cfg[key] = '' if val.endswith('(default)') or not val else val
     except OSError:
         pass
     return cfg
+
+
+def config_label(cfg):
+    """'cheriot-min', 'opentitan (ICache=0 ...)', or the Base ISA of an unnamed configuration."""
+    if cfg.get('config'):
+        ov = cfg.get('overrides')
+        return cfg['config'] + (' ({})'.format(ov) if ov else '')
+    return {'0': 'RV32I', '1': 'RV32I or CHERIoT'}.get(cfg.get('base_isa'))
 
 
 def pie_paths(slices, total, cx, cy, r):
@@ -317,7 +328,7 @@ def main():
     modules, order, top_area = parse_report(args.report)
     top = find_top(modules, order)
     cfg = read_config(args.report)
-    isa = {'0': 'RV32I', '1': 'RV32I or CHERIoT'}.get(cfg.get('base_isa'), None)
+    isa = config_label(cfg)
     hierarchical = any(m['children'] for m in modules.values())
 
     notes = []
@@ -357,7 +368,7 @@ def main():
                                                      label if label == path else '{}  ({})'.format(label, path)))
     for n in notes:
         print('Note: ' + n)
-    print('Chart: ' + out)
+    print('Chart: ' + os.path.abspath(out))
 
 
 if __name__ == '__main__':

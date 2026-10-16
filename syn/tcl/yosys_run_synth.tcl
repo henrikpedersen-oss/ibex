@@ -16,21 +16,29 @@ if { $lr_synth_timing_run } {
 
 yosys "read_verilog -defer -sv ./rtl/prim_clock_gating.v $lr_synth_out_dir/generated/*.v"
 
-if { $lr_synth_ibex_branch_target_alu } {
-  yosys "chparam -set BranchTargetALU 1 $lr_synth_top_module"
+if { $lr_synth_ibex_config ne "" } {
+  # Written by syn_yosys.sh (python/ibex_config_chparam.py): every parameter of the configuration.
+  source $lr_synth_out_dir/generated/ibex_config_params.tcl
+  foreach param $lr_synth_ibex_params {
+    yosys "chparam -set [lindex $param 0] [lindex $param 1] $lr_synth_top_module"
+  }
+} else {
+  if { $lr_synth_ibex_branch_target_alu } {
+    yosys "chparam -set BranchTargetALU 1 $lr_synth_top_module"
+  }
+
+  if { $lr_synth_ibex_writeback_stage } {
+    yosys "chparam -set WritebackStage 1 $lr_synth_top_module"
+  }
+
+  yosys "chparam -set BaseIsa $lr_synth_ibex_base_isa $lr_synth_top_module"
+
+  yosys "chparam -set RV32B $lr_synth_ibex_bitmanip $lr_synth_top_module"
+
+  yosys "chparam -set RV32M $lr_synth_ibex_multiplier $lr_synth_top_module"
+
+  yosys "chparam -set RegFile $lr_synth_ibex_regfile $lr_synth_top_module"
 }
-
-if { $lr_synth_ibex_writeback_stage } {
-  yosys "chparam -set WritebackStage 1 $lr_synth_top_module"
-}
-
-yosys "chparam -set BaseIsa $lr_synth_ibex_base_isa $lr_synth_top_module"
-
-yosys "chparam -set RV32B $lr_synth_ibex_bitmanip $lr_synth_top_module"
-
-yosys "chparam -set RV32M $lr_synth_ibex_multiplier $lr_synth_top_module"
-
-yosys "chparam -set RegFile $lr_synth_ibex_regfile $lr_synth_top_module"
 
 if { $lr_synth_ibex_secure_ibex } {
   yosys "chparam -set SecureIbex 1 $lr_synth_top_module"

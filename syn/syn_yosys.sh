@@ -38,12 +38,20 @@ mkdir -p "$LR_SYNTH_OUT_DIR/reports/timing"
 
 ./sv2v_convert.sh "$LR_SYNTH_OUT_DIR/generated"
 
+# A named configuration (LR_SYNTH_IBEX_CONFIG, ibex_configs.yaml) sets every Ibex parameter;
+# LR_SYNTH_IBEX_CONFIG_OVERRIDES="Name=value ..." changes individual ones.
+if [ -n "${LR_SYNTH_IBEX_CONFIG:-}" ]; then
+    overrides=()
+    for o in ${LR_SYNTH_IBEX_CONFIG_OVERRIDES:-}; do overrides+=(--override "$o"); done
+    python/ibex_config_chparam.py "$LR_SYNTH_IBEX_CONFIG" "${overrides[@]}" \
+        > "$LR_SYNTH_OUT_DIR/generated/ibex_config_params.tcl"
+fi
+
 # remove tracer (not needed for synthesis)
 rm -f "$LR_SYNTH_OUT_DIR"/generated/ibex_tracer.v
 
-# remove the FPGA & register-based register file (because we will use the
-# latch-based one instead)
-rm -f "$LR_SYNTH_OUT_DIR"/generated/ibex_register_file_ff.v
+# remove the FPGA register file. The flip-flop one stays: configurations such as opentitan select
+# it, and with read_verilog -defer an unused module is never elaborated.
 rm -f "$LR_SYNTH_OUT_DIR"/generated/ibex_register_file_fpga.v
 
 yosys -c ./tcl/yosys_run_synth.tcl |& teelog syn || {

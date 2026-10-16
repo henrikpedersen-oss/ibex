@@ -6,8 +6,10 @@
 
 if [ $# -eq 1 ]; then
   export LR_SYNTH_OUT_DIR=$1
+elif [ -n "${LR_SYNTH_OUT_DIR:-}" ]; then
+  export LR_SYNTH_OUT_DIR
 elif [ $# -eq 0 ]; then
-  export LR_SYNTH_OUT_DIR_PREFIX="syn_out/ibex"
+  export LR_SYNTH_OUT_DIR_PREFIX="syn_out/ibex${LR_SYNTH_IBEX_CONFIG:+_$LR_SYNTH_IBEX_CONFIG}"
   LR_SYNTH_OUT_DIR=$(date +"${LR_SYNTH_OUT_DIR_PREFIX}_%d_%m_%Y_%H_%M_%S")
   export LR_SYNTH_OUT_DIR
 else
