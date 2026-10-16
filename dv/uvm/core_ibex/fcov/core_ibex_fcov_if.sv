@@ -3410,9 +3410,10 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
   //                     above mshwm, or an empty window (mshwmb >= mshwm); crossed with the
   //                     store kind and with whether the store faults (a faulting store must not
   //                     update) and whether the core updated mshwm
-  //   cp_hwm_split      the second half of a misaligned store, which the ISA does not count
-  //                     (only the lowest byte's address is compared); an update on it is an
-  //                     illegal bin
+  //   cp_hwm_split      the second half of a misaligned store: the ISA compares only the lowest
+  //                     byte's address, CHERIoT-Ibex counts the second half too (the conservative
+  //                     choice, lowRISC/earlgrey-internal-tracker#952, REQ_SCR_09), so inside the
+  //                     window it must update and outside it must not
   logic        fcov_hwm_csr, fcov_hwm_csr_is_b, fcov_hwm_csr_wr;
   logic        fcov_hwm_store, fcov_hwm_split, fcov_hwm_store_err, fcov_hwm_set;
   logic [1:0]  fcov_hwm_pos;      // 0 below mshwmb, 1 inside, 2 at/above mshwm, 3 empty window
@@ -3503,11 +3504,12 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
     }
     cp_hwm_split: coverpoint {(fcov_hwm_pos == 2'd1), fcov_hwm_set} iff (fcov_hwm_split) {
       bins outside_no_update = {2'b00};
-      bins inside_no_update  = {2'b10};
-      // Only a store's start address counts (ISA stack high-water mark, Sail cheri_addr_checks.sail
-      // ext_check_phys_mem_write): csr_mshwm_set_o is gated with ~addr_incr_req_i
-      // (ibex_cheriot_ex.sv), so the second half never updates
-      illegal_bins inside_update = {2'b11};
+      bins inside_update     = {2'b11};
+      // The second half counts like any store (#952, REQ_SCR_09; our CHERIoT-Sail is configured
+      // the same way): csr_mshwm_set_o has no ~addr_incr_req_i term, and the second half is not
+      // bounds-checked, so it cannot fault. Inside the window it updates, outside it does not.
+      illegal_bins inside_no_update = {2'b10};
+      illegal_bins outside_update   = {2'b01};
     }
   endgroup
 

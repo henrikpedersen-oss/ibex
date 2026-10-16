@@ -53081,6 +53081,16 @@ void zext_check_phys_mem_write(struct zExt_PhysAddr_Check *z6zE570, enum zwrite_
     zMSHWM = zpaddr16;
     z3zE2137 = UNIT;
   } else {  z3zE2137 = UNIT;  }
+  /* Local change, hand-written until the C is regenerated from src/cheri_addr_checks.sail
+   * (lowRISC/earlgrey-internal-tracker#952): a store that crosses a 4-byte boundary also
+   * updates MSHWM from the first byte of its second part, after the first part, as CHERIoT-Ibex
+   * does. 32-bit address arithmetic, as in the core. */
+  if ((zpaddr & UINT64_C(3)) + (uint64_t)zsizze > UINT64_C(4)) {
+    uint64_t zpaddr2 = ((zpaddr & ~UINT64_C(3)) + UINT64_C(4)) & UINT64_C(0xFFFFFFFF);
+    if (zpaddr2 >= zMSHWMB && zpaddr2 < zMSHWM) {
+      zMSHWM = zlegalizze_mshwm(zpaddr2);
+    }
+  }
   zExt_PhysAddr_OK((*(&z6zE570)), UNIT);
 end_function_2993: ;
   goto end_function_5663;

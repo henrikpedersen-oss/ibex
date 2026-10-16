@@ -219,14 +219,25 @@ function ext_handle_data_check_error(err : ext_data_addr_error) -> unit = {
 function ext_check_phys_mem_read (access_type, paddr, size, aquire, release, reserved, read_meta) =
   Ext_PhysAddr_OK()
 
-function ext_check_phys_mem_write(write_kind, paddr, size, data, metadata) = {
-  if ((paddr >=_u MSHWMB) & (paddr <_u MSHWM)) then {
+function mshwm_update(addr : xlenbits) -> unit = {
+  if ((addr >=_u MSHWMB) & (addr <_u MSHWM)) then {
     /* align down MSHWM to 16 bytes */
-    paddr16 = legalize_mshwm(paddr);
+    addr16 = legalize_mshwm(addr);
     if get_config_print_reg()
-    then print_reg("MSHWM <- " ^ BitStr(paddr16));
-    MSHWM = paddr16;
-  };
+    then print_reg("MSHWM <- " ^ BitStr(addr16));
+    MSHWM = addr16;
+  }
+}
+
+/* Local change (ibex_cheriot_verification, lowRISC/earlgrey-internal-tracker#952): the CHERIoT
+ * ISA updates MSHWM from the lowest byte written only. CHERIoT-Ibex also counts the second part
+ * of a store that crosses a 4-byte boundary, from its first byte, after the first part: a store
+ * starting below MSHWMB that writes into [MSHWMB, MSHWM) lowers MSHWM too. The RTL owners keep
+ * this conservative behaviour; the verification specification records it (REQ_SCR_09). */
+function ext_check_phys_mem_write(write_kind, paddr, size, data, metadata) = {
+  mshwm_update(paddr);
+  if unsigned(paddr[1 .. 0]) + size > 4
+  then mshwm_update((paddr & ~(zero_extend(0b11))) + 4);
   Ext_PhysAddr_OK()
 }
 

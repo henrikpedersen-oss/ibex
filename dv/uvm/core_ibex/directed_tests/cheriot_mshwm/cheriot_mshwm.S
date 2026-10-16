@@ -72,9 +72,12 @@
 #   70-74  sw at B+0x30 (below mshwmb)       75-79  sw at B+0x100 (at mshwm)
 #   36  inverted window (mshwmb = B+0x80 > mshwm = B+0x40), sw at B+0x60 -> unchanged
 #   37  misaligned sw at B+0x3E with mshwmb = B+0x40 (starts below, writes into the
-#       window)                       -> unchanged B+0x100 (ISA 787-791, Sail: start
-#       address only). Everything from here on runs only if 37 passes; 64-68 and 70-79
-#       are placed before it so they do not depend on the misaligned-store split.
+#       window)                       -> B+0x40: the store's second request (the word at
+#       B+0x40) updates mshwm too. The CHERIoT ISA counts only the lowest byte written
+#       (unchanged B+0x100); the core counts every request, the conservative choice agreed
+#       in lowRISC/earlgrey-internal-tracker#952 (REQ_SCR_09), and our CHERIoT-Sail is
+#       configured the same way. Everything from here on runs only if 37 passes; 64-68
+#       and 70-79 are placed before it so they do not depend on the misaligned-store split.
 #   38  misaligned sw at B+0x7E       -> B+0x70
 #   39  sw at B+0xF0 from a PCC without SR (the update is not SR-gated) -> B+0xF0
 #   Faulting store inside the window [B, B+0x100), the same ca4:
@@ -276,8 +279,9 @@ main:
     sw        a2, 0x60(a1)
     EXPECT_HWM 0x40, 36
     WINDOW    0x40, 0x100
-    sw        a2, 0x3E(a1)                  # misaligned, starts below mshwmb
-    EXPECT_HWM 0x100, 37
+    sw        a2, 0x3E(a1)                  # misaligned, starts below mshwmb, writes B+0x40
+    EXPECT_HWM 0x40, 37                     # #952: the second request counts
+    WINDOW    0x40, 0x100                   # 37 emptied the window
     sw        a2, 0x7E(a1)                  # misaligned, starts inside
     EXPECT_HWM 0x70, 38
 

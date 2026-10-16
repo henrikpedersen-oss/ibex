@@ -1919,7 +1919,9 @@
               start address is in [mshwmb, mshwm) sets mshwm to it rounded down to 16 -- sb, sh,
               sw, c.sw, CSC (tagged and untagged), c.csc -- and nothing else does: loads, CLC,
               stores below mshwmb or at/above mshwm, an empty window, a store that takes a CHERI
-              bounds fault, a misaligned store starting below mshwmb; the update also happens
+              bounds fault; a misaligned store starting below mshwmb that writes into the
+              window lowers mshwm from its second half (the conservative choice of
+              lowRISC/earlgrey-internal-tracker#952, REQ_SCR_09); the update also happens
               from a PCC without SR. Without PCC.SR, csrr/csrw/csrrs of the CSRs raise capcause
               0x18 against PCC (mtval 0x418) and change nothing; every store kind (sb/sh/csc)
               below and at/above the window, faulting stores below and at mshwm, and csrw mshwm /
@@ -3525,7 +3527,8 @@
             - cp_hwm_store_pos x cp_hwm_store_kind / cp_hwm_store_err / cp_hwm_store_set: each
               store kind below, inside and above the window and with an empty window; faulting
               stores; whether the core updated mshwm
-            - cp_hwm_split: the second half of a misaligned store, which the ISA does not count
+            - cp_hwm_split: the second half of a misaligned store, which updates mshwm inside the
+              window and only there (#952)
 
             From the verification spec (Functional Coverage):
 
