@@ -20,7 +20,7 @@ else
 fi
 
 export LR_SYNTH_TIMING_RUN=1
-export LR_SYNTH_FLATTEN=1
+export LR_SYNTH_FLATTEN=${LR_SYNTH_FLATTEN:-1}
 
 # Select the CHERIoT base ISA and matching IO-constraint config file.
 export LR_SYNTH_IBEX_BASE_ISA=1

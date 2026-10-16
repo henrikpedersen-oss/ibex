@@ -46,18 +46,29 @@ def read_lib(lib_file_path, ref_cell):
 def get_kge(report_path, weighted_dict):
     with open(report_path, 'r') as f:
         report = f.readlines()
+    # A hierarchical report lists each module's own cells once, however often it is instantiated;
+    # its "design hierarchy" section has the whole design's cell counts.
+    for idx, line in enumerate(report):
+        if line.strip() == '=== design hierarchy ===':
+            report = report[idx:]
+            break
     ge = 0.0
     for line_idx, line in enumerate(report):
         data = line.split()
         if not data:
             continue
-        weight = weighted_dict.get(data[0])
-        if weight is not None:
-            try:
-                ge += float(data[1]) * weight
-            except (IndexError, ValueError):
-                raise RuntimeError('{}:{} Cell {} matched but was misformatted'
-                                   .format(report_path, line_idx + 1, data[0]))
+        # Older Yosys prints "<cell> <count>", Yosys 0.62 "<count> <area> <cell>".
+        if data[0] in weighted_dict:
+            cell, count_idx = data[0], 1
+        elif data[-1] in weighted_dict:
+            cell, count_idx = data[-1], 0
+        else:
+            continue
+        try:
+            ge += float(data[count_idx]) * weighted_dict[cell]
+        except (IndexError, ValueError):
+            raise RuntimeError('{}:{} Cell {} matched but was misformatted'
+                               .format(report_path, line_idx + 1, cell))
     print("Area in kGE = ", round(ge/1000, 2))
 
 

@@ -16,7 +16,7 @@ else
 fi
 
 export LR_SYNTH_TIMING_RUN=1
-export LR_SYNTH_FLATTEN=1
+export LR_SYNTH_FLATTEN=${LR_SYNTH_FLATTEN:-1}
 
 # When using `nix develop .#syn_shell`, the following are set automatically by
 # the shell hook (via nix/syn.nix):
