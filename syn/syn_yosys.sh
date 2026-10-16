@@ -34,6 +34,8 @@ source syn_setup.sh
 
 LR_DEP_SOURCES=(
     "../vendor/lowrisc_ip/ip/prim/rtl/prim_count.sv"
+    "../vendor/lowrisc_ip/ip/prim/rtl/prim_fifo_sync.sv"
+    "../vendor/lowrisc_ip/ip/prim/rtl/prim_fifo_sync_cnt.sv"
     "../vendor/lowrisc_ip/ip/prim/rtl/prim_secded_inv_39_32_dec.sv"
     "../vendor/lowrisc_ip/ip/prim/rtl/prim_secded_inv_39_32_enc.sv"
     "../vendor/lowrisc_ip/ip/prim/rtl/prim_lfsr.sv"
@@ -55,6 +57,7 @@ for file in "${LR_DEP_SOURCES[@]}"; do
         --define=SYNTHESIS --define=YOSYS \
         ../vendor/lowrisc_ip/ip/prim/rtl/prim_count_pkg.sv \
         ../vendor/lowrisc_ip/ip/prim/rtl/prim_cipher_pkg.sv \
+        ../vendor/lowrisc_ip/ip/prim/rtl/prim_util_pkg.sv \
         -I../vendor/lowrisc_ip/ip/prim/rtl \
         "$file" \
         > "$LR_SYNTH_OUT_DIR"/generated/"${module}".v
