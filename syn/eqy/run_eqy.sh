@@ -12,7 +12,7 @@
 #
 #   EQY_CHERIOT=1|0   BaseIsa RV32IorCHERIoT (default) or RV32I
 #   EQY_MUTATE=1      break the gate's ALU adder first: the run must then report a difference
-#   EQY_JOBS=<n>      parallel partitions (default: nproc)
+#   EQY_JOBS=<n>      parallel partitions (default: half of nproc; each sby runs 2 jobs)
 #   EQY_DEPTH=<n>     k-induction depth per partition (default 5)
 #   EQY_TIMEOUT=<s>   per-partition limit of the smtbmc strategy (default 300), then ABC PDR
 #   EQY_ABC_TIMEOUT=<s>  per-partition limit of the ABC strategy (default 1800); a partition that
@@ -94,6 +94,14 @@ memory_map
 rename -hide t:\$*ff* %co x:* %% w:* %D
 opt_clean
 
+# sv2v names unnamed generate blocks genblk<n> (u_fifo_cnt under genblk1.gen_normal_fifo,
+# genblk3.gen_multdiv_fast); slang leaves them out of the hierarchy. Without this the 17 gate
+# registers under one matched nothing, stayed inside the partitions with a start value of their own
+# on each side, and gave false failures (2026-10-17: if_stage_i.instr_rdata_id_o, a c.addi16sp
+# immediate of -96 against +96 from two different instructions).
+[match ibex_top]
+gate-match /(.*)genblk[0-9]+\.(.*)/ \1\2
+
 [strategy sby]
 use sby
 depth ${EQY_DEPTH:-5}
@@ -108,18 +116,68 @@ engine abc pdr
 timeout ${EQY_ABC_TIMEOUT:-1800}
 EOF
 
+# sby 0.61 does not exit after a timeout: it writes its verdict (<workdir>/status, TIMEOUT), then
+# waits in poll() for a job slot of its jobserver that the killed engine never gave back. EQY's
+# make never gets that slot back either, so every partition that times out takes one for good,
+# and the run stops once they are all gone (2026-10-16: 254 of 461 partitions proved, then no
+# progress for 13 h on nyx at -j 32; the same on the laptop at -j 12). EQY calls sby through
+# PATH, so this wrapper watches for the verdict and stops an sby still running 30 s after it; the
+# strategy then reads the verdict as usual (TIMEOUT: on to the next strategy). It also gives each
+# sby a jobserver of its own (2 jobs: base case and induction) instead of make's, which a killed
+# sby would leave a token short.
+real_sby=$(command -v sby)
+mkdir -p "$out/bin"
+cat > "$out/bin/sby" <<EOF
+#!/usr/bin/env bash
+unset MAKEFLAGS MFLAGS
+workdir= prev=
+for a in "\$@"; do [ "\$prev" = -f ] && workdir=\${a%.sby}; prev=\$a; done
+set -m   # sby in a process group of its own, so that stopping it stops its children too
+"$real_sby" -j 2 "\$@" &
+pid=\$!
+while kill -0 \$pid 2>/dev/null; do
+    if [ -n "\$workdir" ] && [ -f "\$workdir/status" ]; then
+        for _ in \$(seq 30); do kill -0 \$pid 2>/dev/null || break; sleep 1; done
+        if kill -0 \$pid 2>/dev/null; then
+            echo "sby wrapper: \$workdir: verdict \$(cat "\$workdir/status") written, sby still running after 30 s: stopped" >&2
+            kill -KILL -- -\$pid
+            wait \$pid 2>/dev/null
+            exit 0
+        fi
+        break
+    fi
+    sleep 1
+done
+wait \$pid
+EOF
+chmod +x "$out/bin/sby"
+export PATH="$out/bin:$PATH"
+
 echo "EQY config: $out/ibex_top.eqy"
 set +e
-eqy -j "${EQY_JOBS:-$(nproc)}" -f "$out/ibex_top.eqy" -d "$out/eqy" 2>&1 | tee "$out/eqy.log"
+eqy -j "${EQY_JOBS:-$(( ($(nproc) + 1) / 2 ))}" -f "$out/ibex_top.eqy" -d "$out/eqy" 2>&1 | tee "$out/eqy.log"
 rc=${PIPESTATUS[0]}
 set -e
 
-# EQY leaves a file named after its verdict in the work directory.
-status="NO VERDICT"
-for s in PASS FAIL UNKNOWN TIMEOUT ERROR; do [ -f "$out/eqy/$s" ] && status=$s; done
-echo "EQY ${tag}: ${status} (exit ${rc}); log: $out/eqy.log"
+# EQY leaves a file named after its verdict in the work directory, but its FAIL means only "not
+# every partition proved": a partition every strategy timed out on fails the run as a proven
+# difference does (2026-10-17: 0 differences, 74 timeouts, FAIL). So the verdict here is from the
+# partitions: FAIL = a strategy proved a partition not equivalent; UNKNOWN = none did, but some
+# partition was not proved; PASS = EQY's own PASS, every partition proved.
+eqy_status="NO VERDICT"
+for s in PASS FAIL UNKNOWN TIMEOUT ERROR; do [ -f "$out/eqy/$s" ] && eqy_status=$s; done
+n_proved=$(grep -c "Proved equivalence of partition" "$out/eqy.log" || true)
+n_diff=$(grep -c "partitions not equivalent" "$out/eqy.log" || true)
+n_parts=$(ls "$out"/eqy/partitions/*.il 2>/dev/null | wc -l)
+case "$eqy_status" in
+    PASS)  status=PASS ;;
+    FAIL)  if [ "$n_diff" -gt 0 ]; then status=FAIL; else status=UNKNOWN; fi ;;
+    *)     status=$eqy_status ;;
+esac
+echo "EQY ${tag}: ${status} (EQY: ${eqy_status}, exit ${rc}): ${n_parts} partitions, ${n_proved} proved, ${n_diff} proved different; log: $out/eqy.log"
+[ "$n_diff" -gt 0 ] && grep "partitions not equivalent" "$out/eqy.log" | sed "s/.*of partition /  different: /; s/ using strategy.*//" | sort -u
 if [ "${EQY_MUTATE:-0}" = 1 ]; then
-    # Only a proven difference counts: an ERROR or a crash is not a caught mutation.
+    # Only a proven difference counts: a timeout, an ERROR or a crash is not a caught mutation.
     [ "$status" = FAIL ] && { echo "EQY_MUTATE: CAUGHT, the mutated gate was proven different"; exit 0; }
     echo "EQY_MUTATE: MISSED, verdict ${status} instead of FAIL" >&2
     exit 1
