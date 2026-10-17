@@ -101,9 +101,12 @@ def yosys_metrics(run, info):
         walk(top, 1)
         m['cells'], m['flops'] = cells, seq
     worst = None
+    m['groups'] = {}
     for g in STA_GROUPS:
         text = read(os.path.join(run, 'reports', 'timing', g + '.rpt'))
         s = STA_SLACK.search(text)
+        if s:
+            m['groups'][g] = float(s.group(1))
         if s and (worst is None or float(s.group(1)) < worst[0]):
             st, en = START.search(text), END.search(text)
             worst = (float(s.group(1)), g, st.group(1) if st else '', en.group(1) if en else '')
@@ -121,7 +124,8 @@ def genus_metrics(run, info):
     qor = read(os.path.join(run, 'reports', 'qor.rpt'))
     for line in area_txt.splitlines():
         tok = line.split()
-        if tok and tok[0] == 'ibex_top':
+        # The top row is the elaborated name, ibex_top_<parameters>.
+        if tok and tok[0].startswith('ibex_top'):
             nums = [t for t in tok[1:] if re.fullmatch(r'-?\d+(?:\.\d+)?', t)]
             if len(nums) >= 2:
                 m['cells'], m['area'] = int(float(nums[0])), float(nums[1])
@@ -137,6 +141,11 @@ def genus_metrics(run, info):
         c = re.search(r'Leaf Instance Count\s+(\d+)', qor)
         if c:
             m['cells'] = int(c.group(1))
+    m['groups'] = {}
+    for g in STA_GROUPS:
+        gs = genus_slack(read(os.path.join(run, 'reports', 'timing_{}.rpt'.format(g))))
+        if gs is not None:
+            m['groups'][g] = gs
     timing = read(os.path.join(run, 'reports', 'timing.rpt'))
     for rx in GENUS_SLACK:
         s = rx.search(timing)
@@ -150,6 +159,15 @@ def genus_metrics(run, info):
         if k not in m:
             m['notes'].append('{} not found in its reports (format?)'.format(what))
     return m
+
+
+def genus_slack(text):
+    """Worst slack in ns of a Genus report_timing, or None."""
+    for rx in GENUS_SLACK:
+        s = rx.search(text)
+        if s:
+            return float(s.group(1)) / 1000.0
+    return None
 
 
 def bars(rows, value, fmt, series_labels, unit, target=None):
@@ -190,9 +208,10 @@ def bars(rows, value, fmt, series_labels, unit, target=None):
 
 
 def fmax_mhz(m, period_ns):
-    if m.get('wns') is None:
+    slack = m.get('groups', {}).get('reg2reg', m.get('wns'))
+    if slack is None:
         return None
-    t = period_ns - m['wns']
+    t = period_ns - slack
     return 1000.0 / t if t > 0 else None
 
 
@@ -212,12 +231,12 @@ def write_html(out, rows, corner, period, ge):
     for cfg, a, b in rows:
         for m, (flow, label) in zip((a, b), FLOWS):
             if not m.get('run'):
-                trs.append('<tr><td>{}</td><td>{}</td><td colspan="7">no run</td></tr>'.format(
+                trs.append('<tr><td>{}</td><td>{}</td><td colspan="8">no run</td></tr>'.format(
                     html.escape(cfg), label))
                 continue
             f = fmax_mhz(m, period_ns)
             path = '{} → {}'.format(m.get('start', ''), m.get('end', '')) if m.get('start') else ''
-            trs.append('<tr><td>{}</td><td>{}</td>{}{}{}{}{}<td class="num">{}</td>'
+            trs.append('<tr><td>{}</td><td>{}</td>{}{}{}{}{}{}<td class="num">{}</td>'
                        '<td class="path">{}</td></tr>'.format(
                            html.escape(cfg), label,
                            cell(m, 'area', lambda v: '{:,.0f}'.format(v)),
@@ -225,6 +244,9 @@ def write_html(out, rows, corner, period, ge):
                            cell(m, 'cells', lambda v: '{:,}'.format(v)),
                            cell(m, 'flops', lambda v: '{:,}'.format(v)),
                            cell(m, 'wns', lambda v: '{:+.2f}'.format(v)),
+                           '<td class="num">{}</td>'.format(
+                               '—' if m.get('groups', {}).get('reg2reg') is None
+                               else '{:+.2f}'.format(m['groups']['reg2reg'])),
                            '—' if f is None else '{:.0f}'.format(f),
                            html.escape(path + (' ({})'.format(m['group']) if m.get('group') else ''))))
             notes += ['{} / {}: {}'.format(cfg, label, n) for n in m['notes']]
@@ -277,15 +299,16 @@ th {{ color:var(--muted); font-weight:500; }}
 <div class="legend"><span><i class="sw" style="background:var(--series-1)"></i>{l1}</span><span><i class="sw" style="background:var(--series-2)"></i>{l2}</span></div>
 <h2>Area (kGE)</h2>
 {area_svg}
-<h2>Clock frequency the worst slack allows (MHz)</h2>
+<h2>Clock frequency the register-to-register slack allows (MHz)</h2>
 {fmax_svg}
-<p class="note">1 / (period &minus; worst slack), over all path groups. Yosys + OpenSTA does no buffering or
+<p class="note">1 / (period &minus; reg2reg slack): the core's own speed, without the IO budgets of
+the input and output paths (the overall worst slack when a run has no reg2reg group). Yosys + OpenSTA does no buffering or
 sizing of high-fanout nets (no placement either), so its worst path is often an unbuffered net and its
 frequency a lower bound; Genus maps with timing-driven optimisation. Genus area is cell area, without the
 wire-load net area, as Yosys reports it.</p>
 <h2>All numbers</h2>
 <table><thead><tr><th>Configuration</th><th>Flow</th><th class="num">Area &micro;m&sup2;</th>
-<th class="num">kGE</th><th class="num">Cells</th><th class="num">Flops</th><th class="num">Worst slack ns</th>
+<th class="num">kGE</th><th class="num">Cells</th><th class="num">Flops</th><th class="num">Worst slack ns</th><th class="num">reg2reg ns</th>
 <th class="num">MHz</th><th>Worst path</th></tr></thead>
 <tbody>{rows}</tbody></table>
 {notes}

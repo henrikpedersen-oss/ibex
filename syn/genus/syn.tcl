@@ -84,6 +84,19 @@ set_load 10.0 [all_outputs]
 # The reset is asynchronous; its timing is not a single-cycle path from the inputs.
 set_false_path -from [get_ports $lr_synth_rst_input]
 
+# Path groups as the OpenSTA reports split them (reg2reg, in2reg, reg2out, in2out). Each is optimised
+# on its own: with the one default group, Genus worked on its worst path only, an input-to-output
+# path the IO budgets leave almost no time for (2026-10-17: data_rvalid_i -> instr_addr_o, -2312 ps),
+# and reported no register-to-register slack to compare with the Yosys flow.
+set design [get_db designs]
+foreach {grp from to} [list reg2reg [all_registers] [all_registers] \
+                            in2reg  [all_inputs]    [all_registers] \
+                            reg2out [all_registers] [all_outputs]   \
+                            in2out  [all_inputs]    [all_outputs]] {
+  define_cost_group -name $grp -design $design
+  path_group -from $from -to $to -group $grp -name $grp
+}
+
 #-------------------------------------------------------------------------
 # Synthesis
 #-------------------------------------------------------------------------
@@ -112,6 +125,9 @@ report_area               > $out/reports/area.rpt
 report_area -depth 4      > $out/reports/area_hier.rpt
 report_gates              > $out/reports/gates.rpt
 report_timing -max_paths 20 > $out/reports/timing.rpt
+foreach grp {reg2reg in2reg reg2out in2out} {
+  report_timing -group $grp -max_paths 10 > $out/reports/timing_$grp.rpt
+}
 report_timing -lint       > $out/reports/timing_lint.rpt
 check_design -all         > $out/reports/check_design.rpt
 report_messages           > $out/reports/messages.rpt
