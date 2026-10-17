@@ -42,6 +42,7 @@ SIMS = ("xlm",)
 COMPARED = re.compile(r"(\w+): (\d+) instructions compared, (?:\d+ interrupts taken, )?(\d+) mismatches")
 INJECTED = re.compile(r"\+dii_sb_corrupt: corrupted (\w+) of pc=0x([0-9a-fA-F]{8})")
 MISMATCH = re.compile(r"UVM_ERROR .*pc=0x([0-9a-fA-F]{8}) insn=0x[0-9a-fA-F]{8}: ")
+IRQ_MUTATED = re.compile(r"\+dii_irq_mutate: (\w+) request (\d+), channel (\d+):")
 FULL_SIZE_N = 100
 SAIL_FIELDS = ("sail_model", "sail_source", "sail_tree", "sail_lib_sha256")
 PCT = re.compile(r"(n/a|\d+(?:\.\d+)?%)(?:\s*\(([\d/]+)\))?")
@@ -81,6 +82,29 @@ def judge(result, log_text):
             return False, (f"first mismatch at pc=0x{first.group(1)}, "
                            f"corruption at pc=0x{inj.group(2)}")
         return True, f"corrupted {field} at pc=0x{inj.group(2)} was the first mismatch"
+    mi = re.search(r"_irqmut_(\w+)$", name)
+    if mi:
+        # Interrupt mutation (ibex_dii_driver.sv +dii_irq_mutate): the model was told other lines
+        # than the core got, from some request on. Caught = the scoreboard reported a mismatch, and
+        # none before the first mutated request (a genuine one must not stand in). A hang is not a
+        # detection: the model diverging cannot stop the core, so "No dii_ack" means something else.
+        kind = mi.group(1)
+        if result.get("status") != "FAIL":
+            return False, "interrupt-mutation run did not fail"
+        if "never applied" in log_text:
+            return False, "mutation never applied"
+        first_mut = IRQ_MUTATED.search(log_text)
+        if not first_mut or first_mut.group(1) != kind:
+            return False, f"no '+dii_irq_mutate: {kind}' line"
+        if "No dii_ack" in log_text:
+            return False, "the core hung (No dii_ack), not a scoreboard mismatch"
+        first = MISMATCH.search(log_text)
+        if not first:
+            return False, "no scoreboard mismatch reported"
+        if first.start() < first_mut.start():
+            return False, f"a mismatch (pc=0x{first.group(1)}) before the first mutated request"
+        return True, (f"{kind} from request {first_mut.group(2)} (channel {first_mut.group(3)}): "
+                      f"first mismatch at pc=0x{first.group(1)}")
     if result.get("status") != "PASS":
         return False, f"run failed (rc {result.get('rc', '?')})"
     if not compared or max(n for _, n, _ in compared) == 0:

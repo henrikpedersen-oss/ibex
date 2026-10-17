@@ -46,5 +46,6 @@ set lr_synth_inputs [list {test_en_i             0.0} \
 set lr_synth_clk_input  clk_i
 set lr_synth_rst_input  rst_ni
 
-set lr_synth_clk_period    4000.0
+# Clock period in ps; LR_SYNTH_CLK_PERIOD overrides it (e.g. 6667 for 150 MHz).
+set lr_synth_clk_period [expr {[info exists ::env(LR_SYNTH_CLK_PERIOD)] ? double($::env(LR_SYNTH_CLK_PERIOD)) : 4000.0}]
 set lr_synth_abc_clk_uprate 2000.0

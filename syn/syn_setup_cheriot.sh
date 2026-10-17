@@ -22,6 +22,15 @@ fi
 export LR_SYNTH_TIMING_RUN=1
 export LR_SYNTH_FLATTEN=${LR_SYNTH_FLATTEN:-1}
 
+# Library corner: typical (default) or slow (LR_SYNTH_CORNER=slow; nix/syn.nix provides both).
+export LR_SYNTH_CORNER=${LR_SYNTH_CORNER:-typical}
+case "$LR_SYNTH_CORNER" in
+  typical) [ -n "${LR_SYNTH_CELL_LIBRARY_PATH_TYPICAL:-}" ] && export LR_SYNTH_CELL_LIBRARY_PATH=$LR_SYNTH_CELL_LIBRARY_PATH_TYPICAL ;;
+  slow)    export LR_SYNTH_CELL_LIBRARY_PATH=${LR_SYNTH_CELL_LIBRARY_PATH_SLOW:?LR_SYNTH_CORNER=slow needs LR_SYNTH_CELL_LIBRARY_PATH_SLOW (nix develop .#syn_shell)} ;;
+  *)       echo "LR_SYNTH_CORNER must be typical or slow, got '$LR_SYNTH_CORNER'" >&2; exit 1 ;;
+esac
+echo "Cell library ($LR_SYNTH_CORNER corner): $LR_SYNTH_CELL_LIBRARY_PATH"
+
 # Select the CHERIoT base ISA and matching IO-constraint config file.
 export LR_SYNTH_IBEX_BASE_ISA=1
 export LR_SYNTH_CONFIG_FILE=ibex_top_cheriot_lr_synth_conf.tcl

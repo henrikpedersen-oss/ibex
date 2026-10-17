@@ -39,9 +39,15 @@
       '';
   };
 
+  # The slow corner (0.95 V, 125 C) of the same library, NangateOpenCellLibrary_slow of 2011, as
+  # OpenROAD ships it for its multi-corner tests; the flow scripts' platform has the typical corner
+  # (1.10 V, 25 C) only. Same cells and cell areas (apart from the physical-only TAPCELL_X1), so
+  # areas compare across corners. syn_setup.sh selects it with LR_SYNTH_CORNER=slow.
   ibex_syn_profile = ''
     export LR_SYNTH_CELL_LIBRARY_NAME=nangate
     export LR_SYNTH_CELL_LIBRARY_PATH=${nangate45}/lib/NangateOpenCellLibrary_typical.lib
+    export LR_SYNTH_CELL_LIBRARY_PATH_TYPICAL=${nangate45}/lib/NangateOpenCellLibrary_typical.lib
+    export LR_SYNTH_CELL_LIBRARY_PATH_SLOW=${pkgs.openroad.src}/test/Nangate45/Nangate45_slow.lib
   '';
 
 in {
