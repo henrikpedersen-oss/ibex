@@ -16,11 +16,16 @@ set -e
 set -o pipefail
 cd "$(dirname "$0")/.."
 
-run=${1:-$(ls -1dt genus_out/*/ 2>/dev/null | head -1)}
-run=${run%/}
-[ -d "$run" ] || { echo "No Genus run directory (run make genus-synth first): ${run:-none}" >&2; exit 1; }
-command -v lec >/dev/null || { echo "lec is not on PATH: run inside the eda_shell" >&2; exit 1; }
 stage=${LEC_STAGE:-final}
+# Default: the newest run that got as far as writing its dofile (a failed run leaves a directory).
+if [ -n "${1:-}" ]; then
+    run=${1%/}
+else
+    newest=$(ls -1t genus_out/*/lec/rtl2${stage}.lec.do 2>/dev/null | head -1)
+    run=${newest%/lec/*}
+fi
+[ -d "$run" ] || { echo "No Genus run with a dofile (run make genus-synth first): ${run:-none}" >&2; exit 1; }
+command -v lec >/dev/null || { echo "lec is not on PATH: run inside the eda_shell" >&2; exit 1; }
 do_file=$run/lec/rtl2${stage}.lec.do
 [ -f "$do_file" ] || { echo "No dofile $do_file" >&2; exit 1; }
 
