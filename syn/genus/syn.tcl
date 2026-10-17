@@ -35,27 +35,37 @@ source $env(GENUS_PARAMS)
 elaborate ibex_top -parameters $lr_synth_ibex_params
 check_design -unresolved > $out/reports/check_design_unresolved.rpt
 
+# Module boundaries that no optimisation crosses: the module stays (ungroup_ok false) and nothing is
+# propagated or shared through its ports (boundary_opto false). This is what the Yosys flow's
+# keep_hierarchy does. Not 'preserve': Genus allows that only on a module that is already mapped
+# (TUI-209 on every prim_buf right after elaborate, 2026-10-17).
+proc keep_boundary {mods} {
+  if {[llength $mods] > 0} {
+    set_db $mods .ungroup_ok false
+    set_db $mods .boundary_opto false
+  }
+}
+
 # SecureIbex: the redundancy the security countermeasures rely on (the duplicated buffers, AND
-# gates, flops and clock muxes of the hardened paths) must survive optimisation, as the Yosys flow's
-# keep_hierarchy on these modules ensures.
+# gates, flops and clock muxes of the hardened paths) must survive optimisation.
 if {$lr_synth_ibex_secure_ibex} {
   foreach pattern {*prim_and2* *prim_buf* *prim_flop* *prim_clock_mux2*} {
-    set mods [get_db modules $pattern]
-    if {[llength $mods] > 0} { set_db $mods .preserve true }
+    keep_boundary [get_db modules $pattern]
   }
 }
 
 # The iCache's RAM arrays (prim_ram_1p, rtl/prim_ram_1p_blackbox.sv: an empty body) are SRAM macros:
 # kept as instances, and no constant from their undriven outputs propagated into the logic around
 # them, so that logic is synthesised and counted as with real macros.
+set ram_mods {}
 foreach m [get_db modules *prim_ram_1p*] {
   set n [get_db $m .name]
   # The ECC and scrambling wrappers around the array are logic, synthesised as usual.
   if {[string match *prim_ram_1p_adv* $n] || [string match *prim_ram_1p_scr* $n]} continue
-  set_db $m .preserve true
-  set_db $m .boundary_opto false
+  lappend ram_mods $m
   puts "GENUS: SRAM black box $n"
 }
+keep_boundary $ram_mods
 
 #-------------------------------------------------------------------------
 # Constraints: as the Yosys flow's write_sdc_out (flow_utils.tcl), from the same conf file
