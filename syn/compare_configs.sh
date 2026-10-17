@@ -5,7 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Synthesise two ibex_configs.yaml configurations with the module hierarchy kept and compare their
-# area block by block (python/area_compare.py). Run from ibex/syn inside `nix develop .#syn_shell`.
+# area block by block (scripts/area_compare.py). Run from ibex/syn inside `nix develop .#syn_shell`.
 #
 #   ./compare_configs.sh [config_a [config_b]]     default: opentitan cheriot-min
 #   SYN_A_OVERRIDES / SYN_B_OVERRIDES="Name=value ..."  parameter overrides per side
@@ -36,4 +36,4 @@ synth () {
 
 rpt_a=$(synth "$cfg_a" "${SYN_A_OVERRIDES:-}")
 rpt_b=$(synth "$cfg_b" "${SYN_B_OVERRIDES:-}")
-python/area_compare.py "$rpt_a" "$rpt_b" -o "syn_out/compare_${cfg_a}_vs_${cfg_b}_${ts}.html"
+scripts/area_compare.py "$rpt_a" "$rpt_b" -o "syn_out/compare_${cfg_a}_vs_${cfg_b}_${ts}.html"

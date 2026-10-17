@@ -22,7 +22,7 @@ foreach lib_file [glob -nocomplain $lr_synth_out_dir/generated/lib/*.v] {
 yosys "read_verilog -defer -sv ./rtl/prim_clock_gating.v $lr_synth_out_dir/generated/*.v"
 
 if { $lr_synth_ibex_config ne "" } {
-  # Written by syn_yosys.sh (python/ibex_config_chparam.py): every parameter of the configuration.
+  # Written by syn_yosys.sh (scripts/ibex_config_chparam.py): every parameter of the configuration.
   source $lr_synth_out_dir/generated/ibex_config_params.tcl
   foreach param $lr_synth_ibex_params {
     yosys "chparam -set [lindex $param 0] [lindex $param 1] $lr_synth_top_module"

@@ -36,6 +36,18 @@ mkdir -p "$LR_SYNTH_OUT_DIR/generated"
 mkdir -p "$LR_SYNTH_OUT_DIR/log"
 mkdir -p "$LR_SYNTH_OUT_DIR/reports/timing"
 
+# What this run was, in the same form as genus/run_genus.sh's (scripts/compare_flows.py matches the
+# two flows' runs on it). The period is the conf file's default when LR_SYNTH_CLK_PERIOD is unset.
+{
+    echo "flow=yosys"
+    echo "config=${LR_SYNTH_IBEX_CONFIG:-}"
+    echo "overrides=${LR_SYNTH_IBEX_CONFIG_OVERRIDES:-}"
+    echo "corner=${LR_SYNTH_CORNER:-}"
+    echo "library=$LR_SYNTH_CELL_LIBRARY_PATH"
+    echo "clk_period_ps=${LR_SYNTH_CLK_PERIOD:-4000}"
+    echo "flatten=$LR_SYNTH_FLATTEN"
+} > "$LR_SYNTH_OUT_DIR/run_info.txt"
+
 ./sv2v_convert.sh "$LR_SYNTH_OUT_DIR/generated"
 
 # A named configuration (LR_SYNTH_IBEX_CONFIG, ibex_configs.yaml) sets every Ibex parameter;
@@ -43,7 +55,7 @@ mkdir -p "$LR_SYNTH_OUT_DIR/reports/timing"
 if [ -n "${LR_SYNTH_IBEX_CONFIG:-}" ]; then
     overrides=()
     for o in ${LR_SYNTH_IBEX_CONFIG_OVERRIDES:-}; do overrides+=(--override "$o"); done
-    python/ibex_config_chparam.py "$LR_SYNTH_IBEX_CONFIG" "${overrides[@]}" \
+    scripts/ibex_config_chparam.py "$LR_SYNTH_IBEX_CONFIG" "${overrides[@]}" \
         > "$LR_SYNTH_OUT_DIR/generated/ibex_config_params.tcl"
 fi
 
@@ -66,4 +78,4 @@ sta ./tcl/sta_run_reports.tcl |& teelog sta || {
 
 python/get_kge.py "$LR_SYNTH_CELL_LIBRARY_PATH" "$LR_SYNTH_OUT_DIR"/reports/area.rpt
 
-python/area_chart.py "$LR_SYNTH_OUT_DIR"/reports/area.rpt || echo "WARNING: area chart not written" >&2
+scripts/area_chart.py "$LR_SYNTH_OUT_DIR"/reports/area.rpt || echo "WARNING: area chart not written" >&2

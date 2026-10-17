@@ -48,9 +48,10 @@ for d in "${LR_INCDIRS[@]}" ../rtl; do incdirs+=("$(realpath "$d")"); done
 
 overrides=()
 for o in ${GENUS_OVERRIDES:-}; do overrides+=(--override "$o"); done
-python3 python/ibex_config_chparam.py "$cfg" "${overrides[@]}" > "$out/params.tcl"
+python3 scripts/ibex_config_chparam.py "$cfg" "${overrides[@]}" > "$out/params.tcl"
 
 {
+    echo "flow=genus"
     echo "config=$cfg"
     echo "overrides=${GENUS_OVERRIDES:-}"
     echo "corner=$corner"
