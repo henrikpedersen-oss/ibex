@@ -37,6 +37,7 @@ module ibex_core import ibex_pkg::*; import ibex_cheriot_pkg::*; #(
   parameter int unsigned            TagSizeECC                  = IC_TAG_SIZE,
   parameter int unsigned            LineSizeECC                 = IC_LINE_SIZE,
   parameter bit                     BranchPredictor             = 1'b0,
+  parameter bit                     FetchOutputReg              = 1'b0,
   parameter bit                     DbgTriggerEn                = 1'b0,
   parameter int unsigned            DbgHwBreakNum               = 1,
   parameter bit                     ResetAll                    = 1'b0,
@@ -545,6 +546,7 @@ module ibex_core import ibex_pkg::*; import ibex_cheriot_pkg::*; #(
     .RndCnstLfsrSeed      (RndCnstLfsrSeed),
     .RndCnstLfsrPerm      (RndCnstLfsrPerm),
     .BranchPredictor      (BranchPredictor),
+    .FetchOutputReg       (FetchOutputReg),
     .MemECC               (MemECC),
     .MemDataWidth         (MemDataWidth),
     .BaseIsa              (BaseIsa)

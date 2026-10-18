@@ -121,6 +121,12 @@ parameters:
     default: 0
     description: "Enables static branch prediction (EXPERIMENTAL)"
 
+  FetchOutputReg:
+    datatype: int
+    paramtype: vlogparam
+    default: 0
+    description: "Registers the instruction request outputs (if ICache == 0) [0/1]"
+
   DbgTriggerEn:
     datatype: int
     default: 0

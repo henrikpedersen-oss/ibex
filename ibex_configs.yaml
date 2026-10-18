@@ -29,6 +29,7 @@ small:
   ICacheECC                : 0
   ICacheScramble           : 0
   BranchPredictor          : 0
+  FetchOutputReg           : 0
   DbgTriggerEn             : 0
   SecureIbex               : 0
   PMPEnable                : 0
@@ -51,6 +52,7 @@ opentitan:
   ICacheECC                : 1
   ICacheScramble           : 1
   BranchPredictor          : 0
+  FetchOutputReg           : 0
   DbgTriggerEn             : 1
   SecureIbex               : 1
   PMPEnable                : 1
@@ -76,6 +78,7 @@ maxperf:
   ICacheECC                : 0
   ICacheScramble           : 0
   BranchPredictor          : 0
+  FetchOutputReg           : 0
   DbgTriggerEn             : 0
   SecureIbex               : 0
   PMPEnable                : 0
@@ -98,6 +101,7 @@ maxperf-pmp-bmbalanced:
   ICacheECC                : 0
   ICacheScramble           : 0
   BranchPredictor          : 0
+  FetchOutputReg           : 0
   DbgTriggerEn             : 0
   SecureIbex               : 0
   PMPEnable                : 1
@@ -126,6 +130,7 @@ maxperf-pmp:
   ICacheECC                : 0
   ICacheScramble           : 0
   BranchPredictor          : 0
+  FetchOutputReg           : 0
   DbgTriggerEn             : 0
   SecureIbex               : 0
   PMPEnable                : 1
@@ -149,6 +154,7 @@ maxperf-pmp-bmfull:
   ICacheECC                : 0
   ICacheScramble           : 0
   BranchPredictor          : 0
+  FetchOutputReg           : 0
   DbgTriggerEn             : 0
   SecureIbex               : 0
   PMPEnable                : 1
@@ -171,6 +177,7 @@ maxperf-pmp-bmfull-icache:
   ICacheECC                : 1
   ICacheScramble           : 0
   BranchPredictor          : 0
+  FetchOutputReg           : 0
   DbgTriggerEn             : 0
   SecureIbex               : 0
   PMPEnable                : 1
@@ -204,6 +211,7 @@ cheriot-min:
   ICacheECC                : 0
   ICacheScramble           : 0
   BranchPredictor          : 0
+  FetchOutputReg           : 1
   DbgTriggerEn             : 0
   SecureIbex               : 1
   PMPEnable                : 0
@@ -228,6 +236,7 @@ experimental-branch-predictor:
   ICacheECC                : 0
   ICacheScramble           : 0
   BranchPredictor          : 1
+  FetchOutputReg           : 0
   DbgTriggerEn             : 0
   SecureIbex               : 0
   PMPEnable                : 0

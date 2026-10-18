@@ -26,6 +26,20 @@ The interfaces of the icache module are the same as the prefetch buffer with two
 Firstly, a signal to enable the cache which is driven from a custom CSR.
 Secondly a signal to the flush the cache which is set every time a ``fence.i`` instruction is executed.
 
+.. _fetch-output-reg:
+
+Fetch Output Register
+---------------------
+
+Without the instruction cache, the prefetch buffer puts a new request on the bus in the cycle it is made: on a branch, jump or trap ``instr_req_o`` and ``instr_addr_o`` follow the new PC combinationally.
+Any core input that decides a branch or a trap in that cycle therefore has a combinational path to the instruction request, for example ``data_rvalid_i`` through the LSU's response and the ID stage's memory stall.
+In a system where the data response and the instruction request share an interconnect without a register between them, this is a long path through both, or a combinational loop.
+
+Setting the ``FetchOutputReg`` parameter to 1 drives ``instr_req_o`` and ``instr_addr_o`` from flops: every request is registered first and is on the bus from the following cycle until it is granted.
+The prefetch buffer then tracks three outstanding requests instead of two, so that it still fetches one word per cycle from a memory with a single cycle of latency.
+Each taken branch, jump and trap costs one more cycle.
+The parameter has no effect with ``ICache`` = 1, whose bus requests already come from its fill buffers.
+
 .. _branch-prediction:
 
 Branch Prediction

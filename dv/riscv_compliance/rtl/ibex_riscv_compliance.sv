@@ -50,6 +50,7 @@ module ibex_riscv_compliance (
   parameter bit ICacheECC                 = 1'b0;
   parameter bit ICacheTweakInfection      = 1'b0;
   parameter bit BranchPredictor           = 1'b0;
+  parameter bit FetchOutputReg            = 1'b0;
   parameter bit SecureIbex                = 1'b0;
   parameter int unsigned LockstepOffset   = 1;
   parameter bit ICacheScramble            = 1'b0;
@@ -186,6 +187,7 @@ module ibex_riscv_compliance (
       .ICacheECC                 (ICacheECC           ),
       .ICacheTweakInfection      (ICacheTweakInfection),
       .BranchPredictor           (BranchPredictor     ),
+      .FetchOutputReg            (FetchOutputReg      ),
       .DbgTriggerEn              (DbgTriggerEn        ),
       .SecureIbex                (SecureIbex          ),
       .LockstepOffset            (LockstepOffset      ),

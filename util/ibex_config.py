@@ -33,6 +33,7 @@ class Config:
         ('ICacheECC', bool),
         ('ICacheScramble', bool),
         ('BranchPredictor', bool),
+        ('FetchOutputReg', bool),
         ('DbgTriggerEn', bool),
         ('SecureIbex', bool),
         ('PMPEnable', bool),
@@ -73,6 +74,7 @@ class Config:
         self.icache_ecc = Config.read_bool('ICacheECC', yml)
         self.icache_scramble = Config.read_bool('ICacheScramble', yml)
         self.branch_predictor = Config.read_bool('BranchPredictor', yml)
+        self.fetch_output_reg = Config.read_bool('FetchOutputReg', yml)
         self.dbg_trigger_en = Config.read_bool('DbgTriggerEn', yml)
         self.secure_ibex = Config.read_bool('SecureIbex', yml)
         self.pmp_enable = Config.read_bool('PMPEnable', yml)

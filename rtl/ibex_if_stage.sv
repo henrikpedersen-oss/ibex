@@ -31,6 +31,7 @@ module ibex_if_stage import ibex_pkg::*; import ibex_cheriot_pkg::*; #(
   parameter lfsr_seed_t  RndCnstLfsrSeed      = RndCnstLfsrSeedDefault,
   parameter lfsr_perm_t  RndCnstLfsrPerm      = RndCnstLfsrPermDefault,
   parameter bit          BranchPredictor      = 1'b0,
+  parameter bit          FetchOutputReg       = 1'b0,
   parameter bit          MemECC               = 1'b0,
   parameter int unsigned MemDataWidth         = MemECC ? 32 + 7 : 32
 ) (
@@ -348,7 +349,8 @@ module ibex_if_stage import ibex_pkg::*; import ibex_cheriot_pkg::*; #(
   end else begin : gen_prefetch_buffer
     // prefetch buffer, caches a fixed number of instructions
     ibex_prefetch_buffer #(
-      .ResetAll        (ResetAll)
+      .ResetAll        (ResetAll),
+      .OutputReg       (FetchOutputReg)
     ) prefetch_buffer_i (
         .clk_i               ( clk_i                      ),
         .rst_ni              ( rst_ni                     ),

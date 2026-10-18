@@ -9,6 +9,9 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
     // The fetch FIFO coverpoints probe ibex_prefetch_buffer, which ibex_if_stage only
     // instantiates when ICache == 0. The bind passes ibex_core's ICache through.
     parameter bit ICache = 1'b0,
+    // With FetchOutputReg the prefetch buffer tracks three requests and its fetch FIFO has four
+    // entries instead of three; the bind passes ibex_core's value through.
+    parameter bit FetchOutputReg = 1'b0,
     // With the branch target ALU jumps never stall in ID; the bind passes ibex_core's value
     parameter bit BranchTargetALU = 1'b0,
     // Which configuration this core is: with BaseIsaRV32IorCHERIoT ibex_top puts TRVK between
@@ -481,8 +484,10 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
 
   // Fetch FIFO probes (ibex_fetch_fifo inside ibex_prefetch_buffer). The prefetch buffer only
   // exists when ICache == 0; with the icache these probes read 0 and the cp_fetch_* coverpoints
-  // below stay unhit. valid_q is [NUM_REQS:0] with the prefetch buffer's NUM_REQS = 2.
-  logic [2:0] fcov_fifo_valid_q;           // entry occupancy, thermometer from entry 0
+  // below stay unhit. valid_q is [NUM_REQS:0], with the prefetch buffer's NUM_REQS = 2, or 3 with
+  // FetchOutputReg.
+  localparam int unsigned FetchFifoDepth = FetchOutputReg ? 4 : 3;
+  logic [FetchFifoDepth-1:0] fcov_fifo_valid_q;  // entry occupancy, thermometer from entry 0
   logic       fcov_fifo_in_valid;          // fetch response pushed/bypassed this cycle
   logic       fcov_fifo_clear;             // FIFO flushed (IF redirect)
   logic       fcov_fifo_pop;               // entry 0 shifted out
@@ -769,8 +774,8 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
       bins bypass_active = {1'b1};
     }
 
-    // REQ_BRA_07, REQ_IFE_04, REQ_IFE_06: IF redirect (clear_i) while all three FIFO entries are
-    // occupied; every entry is invalidated in one cycle.
+    // REQ_BRA_07, REQ_IFE_04, REQ_IFE_06: IF redirect (clear_i) while every FIFO entry (three, or
+    // four with FetchOutputReg) is occupied; every entry is invalidated in one cycle.
     cp_fetch_fifo_clear_while_full: coverpoint (&fcov_fifo_valid_q) iff (fcov_fifo_clear) {
       bins clear_full = {1'b1};
     }
@@ -780,8 +785,15 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
     // push never lands in an entry); the full case cannot push (IbexFetchFifoPushPopFull).
     cp_fetch_push_during_pop: coverpoint fcov_fifo_valid_q
       iff (fcov_fifo_in_valid & fcov_fifo_pop & ~fcov_fifo_clear) {
-      bins simultaneous_one_entry   = {3'b001};
-      bins simultaneous_two_entries = {3'b011};
+      bins simultaneous_one_entry   = {FetchFifoDepth'(1)};
+      bins simultaneous_two_entries = {FetchFifoDepth'(3)};
+    }
+    // With FetchOutputReg the FIFO has a fourth entry, so a push and pop can also happen with three
+    // entries occupied. Weight 0 without it: the fill level does not exist.
+    cp_fetch_push_during_pop_three: coverpoint fcov_fifo_valid_q
+      iff (fcov_fifo_in_valid & fcov_fifo_pop & ~fcov_fifo_clear) {
+      option.weight = FetchOutputReg ? 1 : 0;
+      bins simultaneous_three_entries = {FetchFifoDepth'(7)};
     }
 
     // REQ_BRA_03, REQ_IFE_02: 16-bit instruction at PC[1] == 1, taken from the upper half-word

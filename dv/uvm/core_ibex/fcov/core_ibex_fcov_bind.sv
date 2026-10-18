@@ -5,6 +5,7 @@
 module core_ibex_fcov_bind;
   bind ibex_core core_ibex_fcov_if
   #(.ICache(ICache),
+    .FetchOutputReg(FetchOutputReg),
     .BranchTargetALU(BranchTargetALU),
     .BaseIsa(BaseIsa)
   ) u_fcov_bind (
