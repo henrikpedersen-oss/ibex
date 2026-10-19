@@ -1,0 +1,24 @@
+# Copyright lowRISC contributors.
+# Licensed under the Apache License, Version 2.0, see LICENSE for details.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Counter tests that check the counted values against the RISC-V specifications, with no reference
+# model. Configs are shared across all directed_testlist*.yaml files (directed_test_schema.py):
+# riscv-tests is defined in directed_testlist.yaml.
+
+- test: minstret_exact
+  desc: >
+    minstret counts exactly the instructions retired. Each check brackets a short sequence
+    between two minstret reads and compares the difference with the instructions that retire in
+    between (plus the first read): plain, branches and jumps, loads and stores (a read right
+    behind the access), multiply and divide, fences and CSR writes, compressed, cm.push / cm.pop
+    (one each), traps (the trapping instruction does not retire, the handler's do). A write
+    replaces the writing instruction's increment: csrw minstret, X then csrr reads X, also with a
+    divide or a load in flight. Setting and clearing mcountinhibit.IR: the writing
+    instruction counts by the IR value it writes (Ibex manual), after a load, after a divide and in
+    every one of the four passes. Written for the TestRIG riscv minstret mismatches of 2026-10-19. Cosim off;
+    TEST_FAIL code in gp, the measured value in s9 (test header).
+  iterations: 1
+  test_srcs: minstret_exact/minstret_exact.S
+  config: riscv-tests
+  sim_opts: "+disable_cosim=1 +disable_spurious_dside_responses=1"

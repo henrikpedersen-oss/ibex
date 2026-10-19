@@ -53072,9 +53072,34 @@ void startup_zext_check_phys_mem_write(void)
   CREATE(lbits)(&zghz32910);
 }
 
+/* Local change, hand-written until the C is regenerated from src/cheri_addr_checks.sail
+ * (mshwm_store_issued) and sail-riscv/model/riscv_mem.sail (checked_mem_write): MSHWM is updated
+ * when a store is issued, i.e. once it has passed the capability checks, before the memory map is
+ * consulted, as the CHERIoT-Ibex documentation states ("whenever a store is issued to an address
+ * within [mshwmb, mshwm)", cs_registers.rst) and the RTL does (ibex_cheriot_ex.sv
+ * csr_mshwm_set_o: lsu_req_o without lsu_cheriot_err_o). A store that then faults on the bus or
+ * goes to MMIO lowers MSHWM too; before this change only stores to RAM did (TestRIG cheriot
+ * 2026-10-19: csw to 0x1, outside RAM, lowered the core's mshwm and not the model's). A store that
+ * crosses a 4-byte boundary also counts the first byte of its second part
+ * (lowRISC/earlgrey-internal-tracker#952). 32-bit address arithmetic, as in the core. */
+static void ibex_mshwm_store_issued(uint64_t zpaddr, int64_t zsizze)
+{
+  if (zpaddr >= zMSHWMB && zpaddr < zMSHWM) zMSHWM = zlegalizze_mshwm(zpaddr);
+  if ((zpaddr & UINT64_C(3)) + (uint64_t)zsizze > UINT64_C(4)) {
+    uint64_t zpaddr2 = ((zpaddr & ~UINT64_C(3)) + UINT64_C(4)) & UINT64_C(0xFFFFFFFF);
+    if (zpaddr2 >= zMSHWMB && zpaddr2 < zMSHWM) zMSHWM = zlegalizze_mshwm(zpaddr2);
+  }
+}
+
 void zext_check_phys_mem_write(struct zExt_PhysAddr_Check *z6zE570, enum zwrite_kind zwrite_kind, uint64_t zpaddr, int64_t zsizze, lbits zdata, bool zmetadata)
 {
   __label__ end_function_2993, end_block_exception_2994, end_function_5663;
+
+  /* Local change: the MSHWM update moved to ibex_mshwm_store_issued(), called from
+   * zchecked_mem_write; this hook now only permits the access. The generated body below is
+   * skipped. */
+  zExt_PhysAddr_OK((*(&z6zE570)), UNIT);
+  goto end_function_2993;
 
   bool z2zE1745;
   {
@@ -59322,6 +59347,10 @@ void startup_zchecked_mem_write(void)
 void zchecked_mem_write(struct zMemoryOpResultzIozK *z6zE617, enum zwrite_kind zwk, uint64_t zpaddr, int64_t zwidth, lbits zdata, bool zmeta)
 {
   __label__ end_function_3227, end_block_exception_3228, end_function_5644;
+
+  /* Local change: the store is issued; MSHWM follows before the memory map decides where it goes
+   * (see ibex_mshwm_store_issued). */
+  ibex_mshwm_store_issued(zpaddr, zwidth);
 
   bool z2zE2227;
   z2zE2227 = zwithin_mmio_writable(zpaddr, zwidth);
@@ -69415,7 +69444,14 @@ unit zwriteCSR(uint64_t zcsr, uint64_t zvalue)
   // Local patch (GAP-CS-3), mirrors riscv_insts_zicsr.sail writeCSR: Ibex's platform CSRs. The
   // model's own mcountinhibit (bits 0 and 2, gating its minstret) follows the same write.
   if (ibex_csr_defined(zcsr)) {
-    if (zcsr == UINT64_C(0x320)) zmcountinhibit = zlegalizze_mcountinhibit(zmcountinhibit, zvalue);
+    if (zcsr == UINT64_C(0x320)) {
+      zmcountinhibit = zlegalizze_mcountinhibit(zmcountinhibit, zvalue);
+      /* Local patch (VENDORED_FROM 2026-10-19): the writing instruction is counted in minstret
+       * according to the IR value it writes, as Ibex does (doc/03_reference/performance_counters.rst):
+       * setting IR stops the count from the writing instruction on, clearing it counts the writing
+       * instruction. The step decided minstret_increment from the old value. */
+      zminstret_increment = z_get_Counterin_IR(zmcountinhibit) == UINT64_C(0);
+    }
     return ibex_csr_write(zcsr, zvalue);
   }
 

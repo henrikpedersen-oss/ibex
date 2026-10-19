@@ -276,11 +276,17 @@ class ibex_sail_rvfi_cmp extends uvm_object;
     return insn[1:0] inside {2'b00, 2'b10} && insn[15:13] inside {3'b010, 3'b011, 3'b110, 3'b111};
   endfunction
 
-  // mcycle/minstret/mhpmcounter* and their U-mode shadows (SYSTEM opcode, funct3 != 0).
+  // Reads of the counters whose values depend on timing the model does not have: mcycle(h) and
+  // mhpmcounter3-31(h), and their U-mode shadows cycle(h) and hpmcounter3-31(h) (SYSTEM opcode,
+  // funct3 != 0). The bench pushes their values into the model before each step. minstret(h) and
+  // instret(h) are not here: retired instructions are architectural, the model counts them itself,
+  // and their reads are compared. (Until 2026-10-19 they were excluded too: in TestRIG riscv a
+  // minstret read one higher in the model went unflagged, reached pmpaddr11 through a register,
+  // and surfaced 100 instructions later as a "PMP" mismatch.)
   static function bit is_counter_csr_read(bit [31:0] insn);
     bit [11:0] csr = insn[31:20];
     if (insn[6:0] != 7'h73 || insn[14:12] == 3'b000) return 1'b0;
-    return csr inside {[12'hB00:12'hB1F], [12'hB80:12'hB9F], [12'hC00:12'hC1F],
-                       [12'hC80:12'hC9F]};
+    return csr inside {12'hB00, [12'hB03:12'hB1F], 12'hB80, [12'hB83:12'hB9F],
+                       12'hC00, [12'hC03:12'hC1F], 12'hC80, [12'hC83:12'hC9F]};
   endfunction
 endclass : ibex_sail_rvfi_cmp

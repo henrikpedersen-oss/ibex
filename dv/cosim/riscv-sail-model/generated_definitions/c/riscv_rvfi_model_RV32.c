@@ -69997,7 +69997,14 @@ unit zwriteCSR(uint64_t zcsr, uint64_t zvalue)
       for (size_t i = 0; i < zpmpcfg_n.len; i++) any_locked |= (zpmpcfg_n.data[i].zbits >> 7) & 1;
       ibex_mseccfg_set_any_locked(any_locked);
     }
-    if (zcsr == UINT64_C(0x320)) zmcountinhibit = zlegalizze_mcountinhibit(zmcountinhibit, zvalue);
+    if (zcsr == UINT64_C(0x320)) {
+      zmcountinhibit = zlegalizze_mcountinhibit(zmcountinhibit, zvalue);
+      /* Local patch (VENDORED_FROM 2026-10-19): the writing instruction is counted in minstret
+       * according to the IR value it writes, as Ibex does (doc/03_reference/performance_counters.rst):
+       * setting IR stops the count from the writing instruction on, clearing it counts the writing
+       * instruction. The step decided minstret_increment from the old value. */
+      zminstret_increment = z_get_Counterin_IR(zmcountinhibit) == UINT64_C(0);
+    }
     if (zcsr == UINT64_C(0x306)) zmcounteren = zlegalizze_mcounteren(zmcounteren, zvalue & ~UINT64_C(0x2));
     return ibex_csr_write(zcsr, zvalue);
   }

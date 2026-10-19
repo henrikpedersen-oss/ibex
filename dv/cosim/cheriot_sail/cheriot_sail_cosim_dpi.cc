@@ -185,9 +185,9 @@ void cheriot_sail_cosim_init(const svBitVecVal *boot_addr_p) {
   // Machine Architecture ID). The model's init leaves it 0 (TestRIG csr generator 2026-10-18).
   zmarchid = UINT64_C(0xCE1);
   // mshwm and mshwmb: "Reset Value: 0x0000_0000" (cs_registers.rst, Machine Stack High Watermark
-  // and its Base). CHERIoT-Sail's init never writes them, so a re-initialisation kept the previous
-  // test's watermark (TestRIG cheriot 2026-10-19: 24 reads of mshwm at the start of a test, rtl 0,
-  // model 0x10).
+  // and its Base). CHERIoT-Sail's init never writes them, so a re-initialisation would keep the
+  // previous test's watermark. (The TestRIG mshwm mismatches of 2026-10-19 were a different cause:
+  // the model lowered MSHWM only on stores to RAM; see VENDORED_FROM.)
   zMSHWM  = UINT64_C(0);
   zMSHWMB = UINT64_C(0);
 

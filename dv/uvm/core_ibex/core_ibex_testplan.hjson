@@ -2251,6 +2251,33 @@
     }
 
     {
+      name: minstret_exact
+      desc: '''minstret counts exactly the instructions retired
+
+            A read of minstret returns the number of instructions retired before it; an
+            instruction that takes an exception does not retire, mret does; compressed and Zcmp
+            instructions count once; a write to minstret is done instead of the writing
+            instruction's increment, so csrw minstret, X followed by csrr reads X (RISC-V
+            Unprivileged ISA, Zicsr). A CSR instruction that writes mcountinhibit is counted
+            according to the value it writes: setting IR is not counted, clearing it is (Ibex
+            manual, performance_counters.rst; the RISC-V specifications leave it open), whatever
+            else is in the pipeline.
+
+            - minstret_exact: Brackets short sequences between two minstret reads (plain,
+              branches and jumps, loads and stores with the read right behind the access,
+              multiply and divide, fences, CSR writes, c.nop, cm.push / cm.pop, ecall and an
+              illegal CSR with a 5-instruction handler) and checks the difference; writes
+              minstret, also with a divide or a load in flight, and checks the value read; sets
+              and clears mcountinhibit.IR after a load, after a divide and with nothing before:
+              exactly 1 and 6 each time, in each of four passes. Cosim off,
+              self-checking: TEST_FAIL code in gp, the measured value in s9. Written for the
+              TestRIG riscv minstret mismatches of 2026-10-19.'''
+      stage: V2
+      tags: ["directed"]
+      tests: ["minstret_exact"]
+    }
+
+    {
       name: cheriot_fatal_err_mtcc
       desc: '''A trap through an untagged MTCC raises a sticky major alert
 

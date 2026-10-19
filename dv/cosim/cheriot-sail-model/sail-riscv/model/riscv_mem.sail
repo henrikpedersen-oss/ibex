@@ -198,7 +198,10 @@ function phys_mem_write forall 'n, 0 < 'n <= max_mem_access . (wk : write_kind, 
 }
 
 /* dispatches to MMIO regions or physical memory regions depending on physical memory map */
-function checked_mem_write forall 'n, 0 < 'n <= max_mem_access . (wk : write_kind, paddr : xlenbits, width : atom('n), data: bits(8 * 'n), meta: mem_meta) -> MemoryOpResult(bool) =
+function checked_mem_write forall 'n, 0 < 'n <= max_mem_access . (wk : write_kind, paddr : xlenbits, width : atom('n), data: bits(8 * 'n), meta: mem_meta) -> MemoryOpResult(bool) = {
+  /* Local change (ibex_cheriot_verification, 2026-10-19): the store is issued; CHERIoT's MSHWM
+   * follows before the memory map decides where it goes (cheri_addr_checks.sail). */
+  mshwm_store_issued(paddr, width);
   if   within_mmio_writable(paddr, width)
   then mmio_write(paddr, width, data)
   else if within_phys_mem(paddr, width)
@@ -207,6 +210,7 @@ function checked_mem_write forall 'n, 0 < 'n <= max_mem_access . (wk : write_kin
     Ext_PhysAddr_Error(e)  => MemException(e)
   }
   else MemException(E_SAMO_Access_Fault())
+}
 
 /* PMP checks if enabled */
 function pmp_mem_write forall 'n, 0 < 'n <= max_mem_access . (wk: write_kind, paddr : xlenbits, width : atom('n), data: bits(8 * 'n), typ: AccessType(ext_access_type), priv: Privilege, meta: mem_meta) -> MemoryOpResult(bool) =

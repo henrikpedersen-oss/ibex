@@ -233,13 +233,20 @@ function mshwm_update(addr : xlenbits) -> unit = {
  * ISA updates MSHWM from the lowest byte written only. CHERIoT-Ibex also counts the second part
  * of a store that crosses a 4-byte boundary, from its first byte, after the first part: a store
  * starting below MSHWMB that writes into [MSHWMB, MSHWM) lowers MSHWM too. The RTL owners keep
- * this conservative behaviour; the verification specification records it (REQ_SCR_09). */
-function ext_check_phys_mem_write(write_kind, paddr, size, data, metadata) = {
+ * this conservative behaviour; the verification specification records it (REQ_SCR_09).
+ *
+ * Local change (2026-10-19): called from checked_mem_write (sail-riscv/model/riscv_mem.sail) for
+ * every store that has passed the capability checks, before the memory map decides where it goes,
+ * not from ext_check_phys_mem_write, which only RAM writes reach. The CHERIoT-Ibex documentation
+ * updates MSHWM "whenever a store is issued to an address within [mshwmb, mshwm)", and the core
+ * does so on issue, so a store that then faults on the bus or goes to MMIO lowers it too. */
+function mshwm_store_issued(paddr : xlenbits, size : int) -> unit = {
   mshwm_update(paddr);
   if unsigned(paddr[1 .. 0]) + size > 4
   then mshwm_update((paddr & ~(zero_extend(0b11))) + 4);
-  Ext_PhysAddr_OK()
 }
+
+function ext_check_phys_mem_write(write_kind, paddr, size, data, metadata) = Ext_PhysAddr_OK()
 
 /* Is XRET from given mode permitted by extension? */
 function ext_check_xret_priv (p : Privilege) : Privilege -> bool =

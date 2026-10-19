@@ -134,7 +134,8 @@ function writeCSR (csr : csreg, value : xlenbits) -> unit = {
     (0x30A, 64) => { menvcfg = legalize_envcfg(menvcfg, value); Some(menvcfg.bits) },
     (0x310, 32) => { Some(mstatush.bits) }, // ignore writes for now
     (0x31A, 32) => { menvcfg = legalize_envcfg(menvcfg, value @ menvcfg.bits[31 .. 0]); Some(menvcfg.bits[63 .. 32]) },
-    (0x320,  _) => { mcountinhibit = legalize_mcountinhibit(mcountinhibit, value); Some(zero_extend(mcountinhibit.bits)) },
+    /* Local change (2026-10-19): Ibex counts the writing instruction by the IR value it writes */
+    (0x320,  _) => { mcountinhibit = legalize_mcountinhibit(mcountinhibit, value); minstret_increment = mcountinhibit[IR] == 0b0; Some(zero_extend(mcountinhibit.bits)) },
     (0x340,  _) => { mscratch = value; Some(mscratch) },
     (0x341,  _) => { Some(set_xret_target(Machine, value)) },
     (0x342,  _) => { mcause.bits = legalize_mcause(value); Some(mcause.bits) }, /* Ibex (local change) */
