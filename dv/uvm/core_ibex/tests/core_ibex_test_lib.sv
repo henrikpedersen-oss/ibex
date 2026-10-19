@@ -2429,7 +2429,9 @@ endclass
 //                               the bits of its offset from lo, which the program chooses:
 //                               0x10 debug_req from the cycle after the grant (the first cycle of
 //                               the next instruction in ID); 0x20 an NMI from the second cycle after
-//                               it, held until the core takes it (IRQ_TAKEN), then dropped; 0x40
+//                               it, held until the core takes it (IRQ_TAKEN), then dropped (with
+//                               0x04 as well, from +gnt_nmi_late_cycles, default 2, cycles later:
+//                               an NMI a few cycles after an empty ID's first capture); 0x40
 //                               fetch_enable_i off from the second cycle after it for
 //                               +gnt_fetch_off_cycles (default 40); 0x08 irq_external_i from the
 //                               second cycle after it, held until the core takes an interrupt
@@ -2491,6 +2493,7 @@ class core_ibex_stall_events_test extends core_ibex_base_test;
   bit [31:0]   gnt_trig_lo, gnt_trig_hi;
   bit          gnt_trig_en;
   int unsigned gnt_fetch_off_cycles = 40;
+  int unsigned gnt_nmi_late_cycles = 2;
   bit [31:0]   mem_mode_on_write;
   int unsigned bus_alerts_min;
 
@@ -2544,6 +2547,7 @@ class core_ibex_stall_events_test extends core_ibex_base_test;
     gnt_trig_en = $value$plusargs("gnt_trig_lo=%h", gnt_trig_lo) &&
                   $value$plusargs("gnt_trig_hi=%h", gnt_trig_hi);
     void'($value$plusargs("gnt_fetch_off_cycles=%0d", gnt_fetch_off_cycles));
+    void'($value$plusargs("gnt_nmi_late_cycles=%0d", gnt_nmi_late_cycles));
     void'($value$plusargs("mem_mode_on_write=%h", mem_mode_on_write));
     void'($value$plusargs("stall_events_bus_alerts=%0d", bus_alerts_min));
     if (dbg_gap_max < dbg_gap_min) dbg_gap_max = dbg_gap_min;
@@ -2678,11 +2682,13 @@ class core_ibex_stall_events_test extends core_ibex_base_test;
   // on the falling edge after its next clock event), held until the core takes it, so it is taken
   // at the first point it can be: with the triggering access's instruction or a later one waiting
   // in ID, after they leave (the ID stage is empty when an interrupt is taken).
-  task automatic nmi_until_taken();
+  // \late: start it that many cycles later (offset bit 0x04, +gnt_nmi_late_cycles).
+  task automatic nmi_until_taken(int unsigned late = 0);
     nmi_level_seq nmi_h;
     int unsigned  waited = 0;
     nmi_busy = 1'b1;
     n_gnt_nmi++;
+    repeat (late) @(dut_vif.dut_cb);
     nmi_h = nmi_level_seq::type_id::create("nmi_gnt_raise_h");
     nmi_h.raise = 1'b1;
     nmi_h.start(env.vseqr.irq_seqr);
@@ -2822,7 +2828,8 @@ class core_ibex_stall_events_test extends core_ibex_base_test;
           `uvm_error(`gfn, $sformatf("+gnt_trig: grant of 0x%08h asks for an NMI, but one is still held",
                                      txn.addr))
         end else begin
-          fork nmi_until_taken(); join_none
+          automatic int unsigned late = off[2] ? gnt_nmi_late_cycles : 0;
+          fork nmi_until_taken(late); join_none
         end
       end
       if (off[3]) begin

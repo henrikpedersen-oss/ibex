@@ -95,6 +95,7 @@ ${LOWRISC_IP_DIR}/ip/prim/rtl/prim_secded_inv_hamming_76_68_enc.sv
 ${PRJ_DIR}/vendor/pulp_common_cells/rtl/stream_fork.sv
 ${PRJ_DIR}/vendor/pulp_common_cells/rtl/stream_join_dynamic.sv
 ${PRJ_DIR}/rtl/ibex_trvk.sv
+${PRJ_DIR}/rtl/ibex_mem_if_reg.sv
 ${PRJ_DIR}/rtl/ibex_tracer_pkg.sv
 ${PRJ_DIR}/rtl/ibex_tracer.sv
 ${PRJ_DIR}/rtl/ibex_alu.sv

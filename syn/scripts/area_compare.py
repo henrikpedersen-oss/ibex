@@ -18,8 +18,9 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from area_chart import (NANGATE45_NAND2_X1_AREA, clean_name, config_label,  # noqa: E402
-                        find_top, inclusive, parse_report, read_config, uncounted_notes)
+from area_chart import (clean_name, config_label, find_top, inclusive,  # noqa: E402
+                        parse_report, read_config, uncounted_notes)
+import syn_lib  # noqa: E402
 
 COLORS_LIGHT = ['#2a78d6', '#eb6834']
 COLORS_DARK = ['#3987e5', '#d95926']
@@ -72,7 +73,7 @@ def common_split(designs, max_share):
         expand |= grow
 
 
-def write_html(out, a, b, rows, ge, notes):
+def write_html(out, a, b, rows, ge, notes, lib):
     kge = lambda x: x / ge / 1000  # noqa: E731
     saving = a.total - b.total
     shown = [r for r in rows if max(r[1], r[3]) >= 0.01 * max(a.total, b.total)]
@@ -167,7 +168,7 @@ tr.tot td {{ font-weight:600; border-top:1px solid var(--axis); }}
 </style></head>
 <body><div class="viz-root"><div class="card">
 <h1>Area: {a} vs {b}</h1>
-<p class="sub">NanGate45, 1 GE = NAND2_X1 = {ge} &micro;m&sup2; &middot; hierarchical synthesis (no optimisation across module boundaries)</p>
+<p class="sub">{lib}, 1 GE = {ge_cell} = {ge} &micro;m&sup2; &middot; hierarchical synthesis (no optimisation across module boundaries)</p>
 <div class="tiles">
 <div class="tile"><div class="k"><span class="sw" style="background:var(--series-1)"></span>{a}</div><div class="v">{ka:.1f}<small>kGE</small></div></div>
 <div class="tile"><div class="k"><span class="sw" style="background:var(--series-2)"></span>{b}</div><div class="v">{kb:.1f}<small>kGE</small></div></div>
@@ -197,7 +198,8 @@ document.querySelectorAll('.bar').forEach(r => {{
 }});
 </script></body></html>
 """.format(a=html.escape(a.label), b=html.escape(b.label), c1=COLORS_LIGHT[0], c2=COLORS_LIGHT[1],
-           dark=dark, ge=ge, ka=kge(a.total), kb=kge(b.total), kd=kge(-saving),
+           dark=dark, ge=ge, lib=html.escape(lib['title']), ge_cell=html.escape(lib['ge_cell']),
+           ka=kge(a.total), kb=kge(b.total), kd=kge(-saving),
            pd=-100 * saving / a.total, notes=''.join('<p class="note">{}</p>'.format(html.escape(n))
                                                      for n in notes),
            svg=svg_html, rows=''.join(trs), ra=html.escape(os.path.abspath(a.report)),
@@ -215,17 +217,25 @@ def main():
     ap.add_argument('--label-a')
     ap.add_argument('--label-b')
     ap.add_argument('--max-share', type=float, default=0.30)
-    ap.add_argument('--ge-area', type=float, default=NANGATE45_NAND2_X1_AREA)
+    ap.add_argument('--ge-area', type=float,
+                    help='um^2 (default: the library of report_a\'s run, its run_info.txt)')
     args = ap.parse_args()
 
     a, b = Design(args.report_a, args.label_a), Design(args.report_b, args.label_b)
+    lib, lib_b = syn_lib.for_report(args.report_a), syn_lib.for_report(args.report_b)
+    if args.ge_area is None:
+        args.ge_area = lib['ge_area']
     expand = common_split([a, b], args.max_share)
     ba, bb = a.blocks(expand), b.blocks(expand)
     rows = sorted(((lab, ba.get(lab, [0, 0])[0], ba.get(lab, [0, 0])[1],
                     bb.get(lab, [0, 0])[0], bb.get(lab, [0, 0])[1]) for lab in set(ba) | set(bb)),
                   key=lambda r: -max(r[1], r[3]))
     notes = a.notes + b.notes
-    write_html(args.out, a, b, rows, args.ge_area, notes)
+    if lib_b['name'] != lib['name']:
+        notes.append('The two runs used different cell libraries ({}: {}, {}: {}); both are in {} '
+                     'gate equivalents.'.format(a.label, lib['title'], b.label, lib_b['title'],
+                                                lib['title']))
+    write_html(args.out, a, b, rows, args.ge_area, notes, lib)
 
     g = args.ge_area * 1000
     print('{:<34} {:>12} {:>12} {:>9}'.format('Block', a.label[:12], b.label[:12], 'delta'))

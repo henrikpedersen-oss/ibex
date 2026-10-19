@@ -7,9 +7,9 @@ subsystem's NVM region to give it tags, and the cheriot-rtos loader stores capab
 import tables there, so boot would fail. This adds a top-level parameter NvmCapStores, default
 1'b1 (upstream behaviour unchanged), which that SoC sets to 0. To be proposed upstream.
 
-diff -ru a/hw/ip/cheriot/rtl/cheriot.sv b/hw/ip/cheriot/rtl/cheriot.sv
---- a/hw/ip/cheriot/rtl/cheriot.sv
-+++ b/hw/ip/cheriot/rtl/cheriot.sv
+diff -ru a/hw/ip/cheriot_mem_sys/rtl/cheriot_mem_sys.sv b/hw/ip/cheriot_mem_sys/rtl/cheriot_mem_sys.sv
+--- a/hw/ip/cheriot_mem_sys/rtl/cheriot_mem_sys.sv
++++ b/hw/ip/cheriot_mem_sys/rtl/cheriot_mem_sys.sv
 @@ -20,7 +20,10 @@
    parameter addr_t                MetaSramBaseAddr = 'h1100_0000,
    parameter int unsigned          MemSizeRevbm     = 3072,

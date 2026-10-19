@@ -142,6 +142,9 @@ module core_ibex_tb_top;
   `ifndef IBEX_CFG_FetchOutputReg
     `define IBEX_CFG_FetchOutputReg 0
   `endif
+  `ifndef IBEX_CFG_DataIfReg
+    `define IBEX_CFG_DataIfReg 0
+  `endif
   `ifndef IBEX_CFG_SecureIbex
     `define IBEX_CFG_SecureIbex 0
   `endif
@@ -171,6 +174,7 @@ module core_ibex_tb_top;
   parameter bit ICacheTweakInfection      = 1'b0;
   parameter bit BranchPredictor           = `IBEX_CFG_BranchPredictor;
   parameter bit FetchOutputReg            = `IBEX_CFG_FetchOutputReg;
+  parameter bit DataIfReg                 = `IBEX_CFG_DataIfReg;
   parameter bit SecureIbex                = `IBEX_CFG_SecureIbex;
   parameter int unsigned LockstepOffset   = 1;
   parameter bit ICacheScramble            = `IBEX_CFG_ICacheScramble;
@@ -274,6 +278,7 @@ module core_ibex_tb_top;
     .ICacheScramble       (ICacheScramble      ),
     .BranchPredictor      (BranchPredictor     ),
     .FetchOutputReg       (FetchOutputReg      ),
+    .DataIfReg            (DataIfReg           ),
     .DbgTriggerEn         (DbgTriggerEn        ),
     .DmBaseAddr           (DmBaseAddr          ),
     .DmAddrMask           (DmAddrMask          ),

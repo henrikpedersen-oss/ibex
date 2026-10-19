@@ -14,7 +14,8 @@
 # branch (a write to mcycleh / minstreth / mhpmcounterNh):
 #   counter_load[31:0] = counter_inc_i ? counter[31:0] + 32'd1 : counter[31:0];
 #   row "0 | 0 - 0"  counter_inc_i = 0 with the low half 0: mcycle_counter_i, minstret_counter_i,
-#                    gen_cntrs[1] (mhpmcounter4, iside_wait), [7] (mhpmcounter10, compressed
+#                    gen_cntrs[1] (mhpmcounter4, iside_wait), [4] (mhpmcounter7, added 2026-10-18:
+#                    the only one left unhit in the 2026-10-15 merge), [7] (mhpmcounter10, compressed
 #                    instructions retired), [8] (mhpmcounter11, mul_wait), [9] (mhpmcounter12,
 #                    div_wait). Section Z: every counter inhibited, low halves written 0, then the
 #                    upper halves written.
@@ -64,6 +65,7 @@
 #   2/3    mcycle != 0 / mcycleh != HZ after the inhibited writes
 #   4/5    minstret != 0 / minstreth != HZ
 #   6-9    mhpmcounter4 / 10 / 11 / 12 != 0      10-13  mhpmcounter4h / 10h / 11h / 12h != 0
+#   14/15  mhpmcounter7 / mhpmcounter7h != 0
 #   20/21  M: mcycle low half not below 0x10000 / mcycleh neither HW nor HW + 1 (s3 = s)
 #   22/23  M: HW / HW + 1 never seen in the second pass
 #   24/25  I: minstret low half not below 0x1000 / minstreth neither HW nor HW + 1 (s3 = s)
@@ -116,6 +118,7 @@ RVTEST_CODE_BEGIN
   csrw  mcycle, zero
   csrw  minstret, zero
   csrw  mhpmcounter4, zero
+  csrw  mhpmcounter7, zero
   csrw  mhpmcounter10, zero
   csrw  mhpmcounter11, zero
   csrw  mhpmcounter12, zero
@@ -123,6 +126,7 @@ RVTEST_CODE_BEGIN
   csrw  mcycleh, t1
   csrw  minstreth, t1
   csrw  mhpmcounter4h, t1
+  csrw  mhpmcounter7h, t1
   csrw  mhpmcounter10h, t1
   csrw  mhpmcounter11h, t1
   csrw  mhpmcounter12h, t1
@@ -139,6 +143,8 @@ RVTEST_CODE_BEGIN
   CHK_CSR mhpmcounter10h, 0, 11
   CHK_CSR mhpmcounter11h, 0, 12
   CHK_CSR mhpmcounter12h, 0, 13
+  CHK_CSR mhpmcounter7, 0, 14
+  CHK_CSR mhpmcounter7h, 0, 15
   csrw  mcountinhibit, zero
 
   # Fetches hit in the icache from the second pass of each loop on.

@@ -15,6 +15,7 @@ from typing import Optional, Union, List, Tuple
 from enum import Enum
 import argparse
 import shlex
+import shutil
 import dataclasses
 from dataclasses import field
 from typeguard import typechecked
@@ -399,10 +400,20 @@ def _main():
         # constructed above, so we can easily find and import them later, and
         # give each test object a link back to this top-level object that
         # defines the wider regression.
+        # A fresh plan owns its test directories. One left by an earlier run with the same test.seed
+        # holds that run's test.bin and rtl_sim.log, which make takes as up to date: the test is not
+        # run, the trr.yaml written below is never filled in, and collect_results.py counts it
+        # FAILED. Seeds are consecutive from one base, so a test with many iterations overlaps an
+        # earlier run's range easily: on 2026-10-18 338 riscv_pmp_full_random_test seeds of a full
+        # regression were never run this way (16042 old directories of that test were on disk).
+        stale_dirs = 0
         for tctt, obj in tests_and_counts:
             test, count, testtype = tctt
             for testseed in range(md.seed, md.seed + count):
                 tds_str = f"{test}.{testseed}"
+                if (md.dir_tests/tds_str).exists():
+                    shutil.rmtree(str(md.dir_tests/tds_str))
+                    stale_dirs += 1
 
                 # Initialize TestRunResult object
                 trr = TestRunResult(
@@ -444,6 +455,10 @@ def _main():
                 md.tests_pickle_files.append(trr.pickle_file)
                 # Export the trr structure to disk.
                 trr.export(write_yaml=True)
+
+        if stale_dirs:
+            logger.warning(f"Removed {stale_dirs} test directories an earlier run left under "
+                           f"{md.dir_tests} with this plan's test.seed names.")
 
         # Export here to commit new RegressionMetadata object to disk.
         md.export(write_yaml=True)

@@ -77,8 +77,8 @@
     A load with bad integrity raises the internal NMI (mcause 0xFFFFFFE0, mtval its address, rd
     unwritten); the NMI handler loads it again, so a second internal NMI is pending while
     nmi_mode blocks it, and it is taken right after the handler's mret (same mepc); the
-    instructions after the first load each execute once. Then five Zcmp encodings (cm.push
-    rlist 4 and 5, cm.pop rlist 4 and 5, cm.mvsa01) fetched with bad integrity each raise an
+    instructions after the first load each execute once. Then six Zcmp encodings (cm.push
+    rlist 4 and 5, cm.pop rlist 4 and 5, cm.mvsa01, cm.mva01s) fetched with bad integrity each raise an
     instruction access fault at their address and change nothing. Integrity errors are injected
     by address (+dside/iside_intg_err_lo/hi). Targets ibex_core.sv RVFI rvfi_ext_stage_nmi_int
     (irq_nm_int pending without a capture) and ibex_compressed_decoder.sv CmIdle
@@ -91,8 +91,8 @@
   sim_opts: >-
     +disable_cosim=1 +disable_spurious_dside_responses=1 +enable_bad_intg_on_uninit_access=0
     +dside_intg_err_lo=80002000 +dside_intg_err_hi=80002003
-    +iside_intg_err_lo=80001000 +iside_intg_err_hi=80001013
-    +cheriot_mem_err_min_bus_alerts=7
+    +iside_intg_err_lo=80001000 +iside_intg_err_hi=80001017
+    +cheriot_mem_err_min_bus_alerts=8
 
 - test: cov_expr_step_irq
   desc: >
@@ -132,7 +132,7 @@
   desc: >
     Upper-half counter writes with the low half 0 or all-ones. With every counter inhibited
     (mcountinhibit) and its low half 0, mcycleh / minstreth read back the value written and the
-    low halves stay 0, mhpmcounter4h/10h/11h/12h read 0 (MHPMCounterWidth = 32). Then, icache on,
+    low halves stay 0, mhpmcounter4h/7h/10h/11h/12h read 0 (MHPMCounterWidth = 32). Then, icache on,
     two passes of sweeps: mcycle := -s (s = 32..1) then mcycleh := HW, and minstret := -s
     (s = 8..0), nop, minstreth := HW, put the upper-half write at a low half of 0xFFFFFFFF for one
     s; every iteration must read HW or HW + 1 with a small low half, and both values must occur.

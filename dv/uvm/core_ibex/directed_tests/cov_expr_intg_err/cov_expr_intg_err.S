@@ -9,7 +9,7 @@
 # NoAlertsTriggered off, a bus alert required per integrity error, no other alert). Cosim off:
 # the program checks itself. The bench injects bad integrity by address:
 #   +dside_intg_err_lo/hi = INTG_ADDR (every load of it), +iside_intg_err_lo/hi = ZC_BLOCK
-#   (every fetch of its five words).
+#   (every fetch of its six words).
 #
 # Expression-coverage targets (merged regression after UNR, 2026-10-09):
 #   ibex_core.sv (RVFI) `~use_capture ? id_stage_i.controller_i.irq_nm_int : captured_nmi_int`,
@@ -23,6 +23,8 @@
 #     Added after regression 26231 (2026-10-11): the same row for cm.push with rlist > 4 (line 654
 #     since the upstream merge, `cm_rlist_d > 4` arm of CmIdle), cm.push {ra, s0} = 0xB852, the
 #     fifth word. It was hit by random stimulus before and not by seed base 26231.
+#     Added 2026-10-18: the same row for cm.mva01s (line 830, CmIdle of the 2'b11 arm), the sixth
+#     word; the only Zcmp CmIdle with valid_i = 0 left unhit in the 2026-10-15 merge.
 #
 # Expected behaviour (not taken from the RTL):
 #   - Ibex doc/03_reference/exception_interrupts.rst / security.rst: a load response with bad
@@ -38,7 +40,7 @@
 #   1  NMIs taken != 2          2/3  NMI mcause not 0xFFFFFFE0 (first / second)
 #   4/5  NMI mtval not INTG_ADDR (first / second)      6  second NMI mepc != first NMI mepc
 #   7  the faulting load wrote t0      8  the instructions after the load did not run once each
-#   10 fetch faults != 5      11 fetch fault mcause not 1      12 fetch fault mepc/mtval not the
+#   10 fetch faults != 6      11 fetch fault mcause not 1      12 fetch fault mepc/mtval not the
 #      next ZC_BLOCK word      13 sp changed across the Zcmp block
 #   0x100 | code  an unexpected exception
 
@@ -46,7 +48,7 @@
 #include "test_macros.h"
 
 #define INTG_ADDR     0x80002000      /* +dside_intg_err_lo=80002000 +dside_intg_err_hi=80002003 */
-#define ZC_BLOCK      0x80001000      /* +iside_intg_err_lo=80001000 +iside_intg_err_hi=80001013 */
+#define ZC_BLOCK      0x80001000      /* +iside_intg_err_lo=80001000 +iside_intg_err_hi=80001017 */
 #define NMI_CAUSE     0xFFFFFFE0
 #define POISON        0x0BADF00D
 
@@ -98,14 +100,14 @@ RVTEST_CODE_BEGIN
   li    TESTNUM, 6
   bne   s7, s8, fail
 
-  # ---- Zcmp encodings fetched with bad integrity: five instruction access faults ----
+  # ---- Zcmp encodings fetched with bad integrity: six instruction access faults ----
   li    s10, ZC_BLOCK
   mv    s11, sp
   li    t0, ZC_BLOCK
   jr    t0
 zc_back:
   li    TESTNUM, 10
-  li    t1, 5
+  li    t1, 6
   bne   s9, t1, fail
   li    TESTNUM, 13
   bne   sp, s11, fail
@@ -165,8 +167,8 @@ nmi_handler:
 
 # ---- Zcmp encodings at a fixed address, inside the i-side integrity window ----
 # cm.push {ra}, -16 = 0xB842; cm.pop {ra}, 16 = 0xBA42; cm.pop {ra, s0}, 16 = 0xBA52;
-# cm.mvsa01 s0, s1 = 0xAC26 (zcmp_push_pop_mv ENC_*); cm.push {ra, s0}, -16 = 0xB852 (rlist 5).
-# Each in its own word, then c.nop.
+# cm.mvsa01 s0, s1 = 0xAC26 (zcmp_push_pop_mv ENC_*); cm.push {ra, s0}, -16 = 0xB852 (rlist 5);
+# cm.mva01s s0, s1 = 0xAC66 (cm.mvsa01 with bits 6:5 = 11). Each in its own word, then c.nop.
   .org  ZC_BLOCK - 0x80000000
 zc_block:
   .hword 0xB842
@@ -178,6 +180,8 @@ zc_block:
   .hword 0xAC26
   .hword 0x0001
   .hword 0xB852
+  .hword 0x0001
+  .hword 0xAC66
   .hword 0x0001
   j     zc_back
 

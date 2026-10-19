@@ -9,7 +9,7 @@
 #   fetch_rtl.sh <source> <dir>
 #
 # Sources:
-#   opentitan-cheriot  lowRISC/opentitan: the CHERIoT memory subsystem (hw/ip/cheriot: tag filter, RMW
+#   opentitan-cheriot  lowRISC/opentitan: the CHERIoT memory subsystem (hw/ip/cheriot_mem_sys: tag filter, RMW
 #                      filter, TRVK filter, revocation engine TBRE) and the TL-UL RTL, top_pkg and
 #                      pulp cell it needs. Used by ibex/dv/cheriot-mem-ss and the CHERIoT RTOS test
 #                      SoC, through fetch_rtl/cheriot_rtl.f ($OT_CHERIOT_DIR = <dir>).
@@ -39,12 +39,14 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PATHS=()
 case "${SOURCE}" in
   opentitan-cheriot)
-    # lowRISC/opentitan PR #31515 "[cheriot] Allow capability stores to read-only locations"
-    # (Thomas Benz), merged 2026-10-07; it was stacked on PR #31470, the revocation engine.
+    # lowRISC/opentitan b578b9d8 "[cheriot,rtl] Pipeline TBRE read responses", 2026-10-17: the
+    # newest commit on the subsystem. Since the previous pin (5df8c6e6, PR #31515, 2026-10-07)
+    # upstream renamed hw/ip/cheriot to hw/ip/cheriot_mem_sys (1ed24ec6, 2026-10-08: module
+    # cheriot_mem_sys, package cheriot_mem_sys_reg_pkg); b578b9d8 is the one RTL change besides.
     URL=https://github.com/lowRISC/opentitan.git
-    SHA=5df8c6e6f08536d36a51a77afc6bef84192498a2
+    SHA=b578b9d81991abd27e9586d54805811cd1691d39
     PATHS=(
-      /hw/ip/cheriot/ '!/hw/ip/cheriot/**/*.svg'
+      /hw/ip/cheriot_mem_sys/ '!/hw/ip/cheriot_mem_sys/**/*.svg'
       /hw/ip/tlul/rtl/ '/hw/ip/tlul/*.core'
       /hw/top_earlgrey/rtl/top_pkg.sv
       # The one pulp common cell ibex/vendor lacks (stream_fork and stream_join_dynamic are the

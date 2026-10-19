@@ -68,6 +68,10 @@ extern bool     rv_enable_fdext;
 extern bool     rv_enable_zfinx;
 extern bool     rv_enable_misaligned;
 extern bool     rv_enable_vext;
+extern bool     rv_enable_writable_misa;
+extern uint64_t zmarchid;
+extern uint64_t zMSHWM;
+extern uint64_t zMSHWMB;
 }  // extern "C"
 
 // ---------------------------------------------------------------------------
@@ -162,6 +166,10 @@ void cheriot_sail_cosim_init(const svBitVecVal *boot_addr_p) {
   // ibex performs misaligned loads/stores in hardware (split into two bus accesses); the
   // model must not trap on them. The sail-riscv platform default is false.
   rv_enable_misaligned = true;
+  // "On Ibex, misa is hard-wired, i.e. it will remain unchanged after any write" (cs_registers.rst).
+  // The platform default (true) let a csrw clear misa.C (TestRIG csr generator 2026-10-18: rtl
+  // 0x40801016, model 0x40801012). The RISC-V bridge already sets it.
+  rv_enable_writable_misa = false;
   if (trace_enabled()) fprintf(stderr, "[cheriot-sail] init: calling model_init\n");
   model_init();
   if (trace_enabled()) fprintf(stderr, "[cheriot-sail] init: calling zinit_model\n");
@@ -173,6 +181,15 @@ void cheriot_sail_cosim_init(const svBitVecVal *boot_addr_p) {
   if (trace_enabled()) fprintf(stderr, "[cheriot-sail] init: calling zext_rvfi_init\n");
   zext_rvfi_init(UNIT);
   if (trace_enabled()) fprintf(stderr, "[cheriot-sail] init: zext_rvfi_init done\n");
+  // marchid "reads as 0xCE1 to indicate the CHERIoT architecture" in CHERIoT mode (cs_registers.rst,
+  // Machine Architecture ID). The model's init leaves it 0 (TestRIG csr generator 2026-10-18).
+  zmarchid = UINT64_C(0xCE1);
+  // mshwm and mshwmb: "Reset Value: 0x0000_0000" (cs_registers.rst, Machine Stack High Watermark
+  // and its Base). CHERIoT-Sail's init never writes them, so a re-initialisation kept the previous
+  // test's watermark (TestRIG cheriot 2026-10-19: 24 reads of mshwm at the start of a test, rtl 0,
+  // model 0x10).
+  zMSHWM  = UINT64_C(0);
+  zMSHWMB = UINT64_C(0);
 
   // CHERIoT-Ibex RVFI-DII mode: RAM starts at 0x80000000, no ROM unless set_rom() asked for one.
   // These globals are in riscv_platform_impl.c, linked into our .so.

@@ -302,7 +302,8 @@ module ibex_prefetch_buffer #(
     assign instr_addr_o = {stored_addr_q[31:2], 2'b00};
 
     logic unused_instr_addr_w_aligned;
-    assign unused_instr_addr_w_aligned = ^{instr_addr_w_aligned, discard_req_q, valid_req};
+    assign unused_instr_addr_w_aligned = ^{instr_addr_w_aligned, instr_addr[1:0], discard_req_q,
+                                           valid_req};
   end else begin : g_no_out_reg
     assign instr_req_o  = valid_req;
     assign instr_addr_o = instr_addr_w_aligned;

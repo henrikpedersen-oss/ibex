@@ -4,7 +4,12 @@
 #
 # Genus synthesis of ibex_top, run by genus/run_genus.sh, which sets (environment):
 #   GENUS_OUT         output directory (reports/, netlist/, lec/)
-#   GENUS_LIB         the liberty file (NanGate45, the corner run_genus.sh chose)
+#   GENUS_LIB         the liberty file (lib/syn_lib.sh's, for the library and corner run_genus.sh chose)
+#   GENUS_TIME_UNIT_PS   its time unit in ps: SDC times are in it (default 1000, ns; ASAP7 1)
+#   GENUS_DRIVING_CELL   cell driving the inputs (default BUF_X2, NanGate45's)
+#   GENUS_OUTPUT_LOAD    load on the outputs in its capacitance unit (default 10.0, NanGate45's fF)
+#   GENUS_ICG_CELL       the clock gate genus/run_genus.sh instantiated in prim_clock_gating, if not
+#                        NanGate45's: its dont_use (IHP's liberty sets it) is cleared
 #   GENUS_CLK_PERIOD  clock period in ps
 #   GENUS_FILES       SystemVerilog/Verilog sources in read order, packages first
 #   GENUS_INCDIRS     include directories
@@ -14,8 +19,14 @@
 # The same configuration and IO constraints as the Yosys flow, from the SystemVerilog directly
 # (no sv2v). Hierarchy is kept (auto_ungroup none) so the area splits by block as in area_compare.
 
+proc env_or {name default} {
+  if {[info exists ::env($name)] && $::env($name) ne ""} { return $::env($name) }
+  return $default
+}
+
 set out    $env(GENUS_OUT)
-set period [expr {$env(GENUS_CLK_PERIOD) / 1000.0}]
+# The SDC commands below take the library's units (ns and fF for NanGate45, ps and fF for ASAP7).
+set period [expr {$env(GENUS_CLK_PERIOD) / double([env_or GENUS_TIME_UNIT_PS 1000])}]
 file mkdir $out/reports $out/netlist $out/lec
 
 set_db information_level 7
@@ -27,6 +38,15 @@ set_db auto_ungroup none
 #-------------------------------------------------------------------------
 
 read_libs $env(GENUS_LIB)
+set icg [env_or GENUS_ICG_CELL ""]
+if {$icg ne ""} {
+  set icg_cells [get_db lib_cells */$icg]
+  if {[llength $icg_cells] == 0} {
+    puts "GENUS: ERROR: no clock gate $icg in $env(GENUS_LIB)"
+    exit 1
+  }
+  set_db $icg_cells .dont_use false
+}
 
 set_db init_hdl_search_path $env(GENUS_INCDIRS)
 read_hdl -language sv -define {SYNTHESIS} $env(GENUS_FILES)
@@ -79,8 +99,8 @@ foreach o $lr_synth_outputs {
 foreach i $lr_synth_inputs {
   set_input_delay -clock $lr_synth_clk_input [expr {[lindex $i 1] / 100.0 * $period}] [get_ports [lindex $i 0]]
 }
-set_driving_cell -lib_cell BUF_X2 [all_inputs]
-set_load 10.0 [all_outputs]
+set_driving_cell -lib_cell [env_or GENUS_DRIVING_CELL BUF_X2] [all_inputs]
+set_load [env_or GENUS_OUTPUT_LOAD 10.0] [all_outputs]
 # The reset is asynchronous; its timing is not a single-cycle path from the inputs.
 set_false_path -from [get_ports $lr_synth_rst_input]
 

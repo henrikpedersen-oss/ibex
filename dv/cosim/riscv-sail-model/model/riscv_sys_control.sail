@@ -79,11 +79,11 @@ function is_CSR_defined (csr : csreg, p : Privilege) -> bool =
 
     /* user mode: counters */
     0xC00 => haveUsrMode(),    // cycle
-    0xC01 => haveUsrMode(),    // time
+    0xC01 => false,            // time: not implemented in Ibex (cs_registers.rst; local change)
     0xC02 => haveUsrMode(),    // instret
 
     0xC80 => haveUsrMode() & (sizeof(xlen) == 32),     // cycleh
-    0xC81 => haveUsrMode() & (sizeof(xlen) == 32),     // timeh
+    0xC81 => false,                                    // timeh: as time (local change)
     0xC82 => haveUsrMode() & (sizeof(xlen) == 32),     // instreth
 
     /* user mode: Zkr */

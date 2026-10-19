@@ -6,11 +6,13 @@
 several ibex_configs.yaml configurations, as one self-contained HTML page: area (um^2 and kGE),
 cells, flops, worst slack and the clock frequency it implies.
 
-For each configuration and flow the newest run with the given corner and clock period is used (its
-run_info.txt, which both flows write). A flattened Yosys run is preferred, as Genus optimises across
-the whole design; a hierarchical one is used, and flagged, only if there is no flattened run.
+For each configuration and flow the newest run with the given library, corner and clock period is
+used (its run_info.txt, which both flows write; a run that names no library is a NanGate45 one). A
+flattened Yosys run is preferred, as Genus optimises across the whole design; a hierarchical one is
+used, and flagged, only if there is no flattened run.
 
-  scripts/compare_flows.py [--configs opentitan small] [--corner slow] [--period 6667] [-o out.html]
+  scripts/compare_flows.py [--configs opentitan small] [--lib nangate45] [--corner slow]
+                           [--period 6667] [-o out.html]
 """
 
 import argparse
@@ -22,14 +24,13 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from area_chart import (NANGATE45_NAND2_X1_AREA, find_top, inclusive,  # noqa: E402
-                        parse_report)
+from area_chart import cell_class, find_top, inclusive, parse_report  # noqa: E402
 from area_compare import COLORS_DARK, COLORS_LIGHT  # noqa: E402
+import syn_lib  # noqa: E402
 
 SYN = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 FLOWS = (('yosys', 'Yosys + OpenSTA'), ('genus', 'Genus'))
 STA_GROUPS = ('reg2reg', 'in2reg', 'reg2out', 'in2out')
-SEQ_CELL = re.compile(r'^(DFF|SDFF|DLL|DLH)')
 STA_SLACK = re.compile(r'^\s*(-?\d+(?:\.\d+)?)\s+slack \((?:VIOLATED|MET)\)', re.M)
 # Genus report_timing (ps), in the forms its versions print.
 GENUS_SLACK = (re.compile(r'Path 1:\s*(?:VIOLATED|MET)\s*\((-?\d+(?:\.\d+)?)\s*ps\)'),
@@ -51,8 +52,9 @@ def read_info(run):
     return info
 
 
-def find_run(root, flow, cfg, corner, period):
-    """The newest run of `flow` for this configuration, corner and period: (dir, info) or None."""
+def find_run(root, flow, cfg, lib, corner, period):
+    """The newest run of `flow` for this configuration, library, corner and period: (dir, info) or
+    None."""
     found = []
     if not os.path.isdir(root):
         return None
@@ -60,7 +62,8 @@ def find_run(root, flow, cfg, corner, period):
         run = os.path.join(root, d)
         info = read_info(run)
         if (info.get('flow', 'yosys' if root.endswith('syn_out') else 'genus') == flow and
-                info.get('config') == cfg and info.get('corner') == corner and
+                info.get('config') == cfg and (info.get('lib') or syn_lib.DEFAULT) == lib and
+                info.get('corner') == corner and
                 info.get('clk_period_ps', '').split('.')[0] == str(period) and
                 not info.get('overrides')):
             flat = info.get('flatten', '1') == '1'
@@ -94,7 +97,7 @@ def yosys_metrics(run, info):
             for typ, (c, area) in modules[name]['cells'].items():
                 if area is not None:
                     cells += mult * c
-                    if SEQ_CELL.match(typ):
+                    if cell_class(typ) in ('Flip-flops', 'Latches'):
                         seq += mult * c
             for ch, c in modules[name]['children'].items():
                 walk(ch, mult * c)
@@ -102,14 +105,17 @@ def yosys_metrics(run, info):
         m['cells'], m['flops'] = cells, seq
     worst = None
     m['groups'] = {}
+    # OpenSTA reports in the library's time unit (ns, or ps for ASAP7); the page is in ns.
+    to_ns = float(info.get('time_unit_ps') or 1000) / 1000.0
     for g in STA_GROUPS:
         text = read(os.path.join(run, 'reports', 'timing', g + '.rpt'))
         s = STA_SLACK.search(text)
+        slack = float(s.group(1)) * to_ns if s else None
         if s:
-            m['groups'][g] = float(s.group(1))
-        if s and (worst is None or float(s.group(1)) < worst[0]):
+            m['groups'][g] = slack
+        if s and (worst is None or slack < worst[0]):
             st, en = START.search(text), END.search(text)
-            worst = (float(s.group(1)), g, st.group(1) if st else '', en.group(1) if en else '')
+            worst = (slack, g, st.group(1) if st else '', en.group(1) if en else '')
     if worst:
         m['wns'], m['group'], m['start'], m['end'] = worst
     if info.get('flatten') == '0':
@@ -215,7 +221,7 @@ def fmax_mhz(m, period_ns):
     return 1000.0 / t if t > 0 else None
 
 
-def write_html(out, rows, corner, period, ge):
+def write_html(out, rows, lib, corner, period, ge):
     period_ns = period / 1000.0
     kge = lambda m: m['area'] / ge / 1000 if m.get('area') is not None else None  # noqa: E731
     labels = [lab for _, lab in FLOWS]
@@ -295,7 +301,7 @@ th {{ color:var(--muted); font-weight:500; }}
 </style></head>
 <body><div class="viz-root"><div class="card">
 <h1>Synthesis flows: Yosys + OpenSTA vs Genus</h1>
-<p class="sub">NanGate45 {corner} corner, clock {period_ns:.3f} ns ({target:.0f} MHz) &middot; 1 GE = NAND2_X1 = {ge} &micro;m&sup2; &middot; generated {when}</p>
+<p class="sub">{lib} {corner} corner, clock {period_ns:.3f} ns ({target:.0f} MHz) &middot; 1 GE = {ge_cell} = {ge} &micro;m&sup2; &middot; generated {when}</p>
 <div class="legend"><span><i class="sw" style="background:var(--series-1)"></i>{l1}</span><span><i class="sw" style="background:var(--series-2)"></i>{l2}</span></div>
 <h2>Area (kGE)</h2>
 {area_svg}
@@ -312,8 +318,7 @@ wire-load net area, as Yosys reports it.</p>
 <th class="num">MHz</th><th>Worst path</th></tr></thead>
 <tbody>{rows}</tbody></table>
 {notes}
-<p class="note">NanGate45 is a generic library: compare the flows and the configurations with each
-other, not with a production node.</p>
+<p class="note">{lib_note}</p>
 <p class="note">Runs: {runs}</p>
 </div><div id="tip"></div></div>
 <script>
@@ -329,6 +334,8 @@ document.querySelectorAll('.bar').forEach(r => {{
 }});
 </script></body></html>
 """.format(c1=COLORS_LIGHT[0], c2=COLORS_LIGHT[1], dark=dark, corner=html.escape(corner),
+           lib=html.escape(lib['title']), ge_cell=html.escape(lib['ge_cell']),
+           lib_note=html.escape(lib_note(lib)),
            period_ns=period_ns, target=1000.0 / period_ns, ge=ge,
            when=datetime.datetime.now().strftime('%Y-%m-%d %H:%M'), l1=labels[0], l2=labels[1],
            area_svg=area_svg, fmax_svg=fmax_svg, rows=''.join(trs),
@@ -338,23 +345,38 @@ document.querySelectorAll('.bar').forEach(r => {{
         f.write(doc)
 
 
+def lib_note(lib):
+    if lib['name'] == 'nangate45':
+        return ('NanGate45 is a generic library: compare the flows and the configurations with each '
+                'other, not with a production node.')
+    return ('{} is an open library: compare the flows and the configurations with each other, not '
+            'with a production node.'.format(lib['title']))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument('--configs', nargs='+', default=['opentitan', 'small'])
+    ap.add_argument('--lib', default=syn_lib.DEFAULT, help='cell library (lib/<name>.cfg)')
     ap.add_argument('--corner', default='slow')
     ap.add_argument('--period', type=int, default=6667, help='clock period in ps')
     ap.add_argument('--syn-out', default=os.path.join(SYN, 'syn_out'))
     ap.add_argument('--genus-out', default=os.path.join(SYN, 'genus_out'))
-    ap.add_argument('--ge-area', type=float, default=NANGATE45_NAND2_X1_AREA)
+    ap.add_argument('--ge-area', type=float, help='um^2 (default: the library\'s ge_area)')
     ap.add_argument('-o', '--out')
     args = ap.parse_args()
+    lib = syn_lib.load(args.lib)
+    lib.setdefault('name', args.lib)
+    lib.setdefault('title', args.lib)
+    lib.setdefault('ge_cell', '?')
+    if args.ge_area is None:
+        args.ge_area = float(lib['ge_area'])
 
     rows, missing = [], []
     for cfg in args.configs:
         ms = []
         for (flow, label), root, fn in zip(FLOWS, (args.syn_out, args.genus_out),
                                            (yosys_metrics, genus_metrics)):
-            r = find_run(root, flow, cfg, args.corner, args.period)
+            r = find_run(root, flow, cfg, args.lib, args.corner, args.period)
             if r:
                 ms.append(fn(*r))
             else:
@@ -362,11 +384,14 @@ def main():
                 missing.append('{} / {}'.format(cfg, label))
         rows.append((cfg, ms[0], ms[1]))
     if len(missing) == 2 * len(args.configs):
-        sys.exit('No runs for {} at the {} corner and {} ps (run_info.txt in {} and {})'.format(
-            ', '.join(args.configs), args.corner, args.period, args.syn_out, args.genus_out))
-    out = args.out or os.path.join(args.syn_out, 'compare_flows_{}_{}ps_{}.html'.format(
-        args.corner, args.period, datetime.datetime.now().strftime('%Y%m%d_%H%M%S')))
-    write_html(out, rows, args.corner, args.period, args.ge_area)
+        sys.exit('No runs for {} with {} at the {} corner and {} ps (run_info.txt in {} and {})'
+                 .format(', '.join(args.configs), args.lib, args.corner, args.period, args.syn_out,
+                         args.genus_out))
+    # NanGate45 pages keep the names they had before there was a choice of library.
+    lib_part = '' if args.lib == syn_lib.DEFAULT else args.lib + '_'
+    out = args.out or os.path.join(args.syn_out, 'compare_flows_{}{}_{}ps_{}.html'.format(
+        lib_part, args.corner, args.period, datetime.datetime.now().strftime('%Y%m%d_%H%M%S')))
+    write_html(out, rows, lib, args.corner, args.period, args.ge_area)
     for cfg, a, b in rows:
         for m, (_, label) in zip((a, b), FLOWS):
             if m.get('area') is not None:

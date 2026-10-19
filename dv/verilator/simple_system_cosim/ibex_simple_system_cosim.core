@@ -99,6 +99,11 @@ parameters:
     paramtype: vlogparam
     default: 0
     description: "Registers the instruction request outputs (if ICache == 0) [0/1]"
+  DataIfReg:
+    datatype: int
+    paramtype: vlogparam
+    default: 0
+    description: "Registers the data and revocation bitmap ports: requests from flops, responses registered [0/1]"
 
   DbgTriggerEn:
     datatype: int
@@ -161,6 +166,7 @@ targets:
       - SecureIbex
       - BranchPredictor
       - FetchOutputReg
+      - DataIfReg
       - DbgTriggerEn
       - PMPEnable
       - PMPGranularity

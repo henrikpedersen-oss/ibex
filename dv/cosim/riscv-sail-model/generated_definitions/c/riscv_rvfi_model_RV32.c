@@ -22434,7 +22434,28 @@ void startup_zlegalizze_mstatus(void)
   CREATE(lbits)(&zghz3876);
   CREATE(lbits)(&zghz3877);
 }
+/* Ibex: mstatus fields as cs_registers.rst "Machine Status (mstatus)" documents them (local change
+ * 2026-10-18, VENDORED_FROM). Ibex implements TW (21), MPRV (17), MPP (12:11), MPIE (7) and MIE (3);
+ * every other field of the low word reads zero, the S-mode ones (SIE, SPIE, SPP, SUM, MXR, TVM,
+ * TSR) included, which this Sail lets software write whatever misa.S says. "Any write to
+ * mstatus.MPP of an unsupported value will be interpreted as Machine Mode": M stays M, U stays U
+ * only where U-mode exists (not in CHERIoT mode, which is M-only), anything else becomes M. The
+ * upper word (mstatush, SXL/UXL) is left as the generated code computes it. */
+static struct zMstatus zlegalizze_mstatus_sail(struct zMstatus zo, uint64_t zv);
 struct zMstatus zlegalizze_mstatus(struct zMstatus zo, uint64_t zv)
+{
+  struct zMstatus m = zlegalizze_mstatus_sail(zo, zv);
+  const uint64_t ibex_fields = (UINT64_C(1) << 21) | (UINT64_C(1) << 17) | (UINT64_C(3) << 11) |
+                               (UINT64_C(1) << 7) | (UINT64_C(1) << 3);
+  uint64_t bits = (m.zbits & ~UINT64_C(0xFFFFFFFF)) | (m.zbits & ibex_fields);
+  uint64_t mpp  = (bits >> 11) & 3;
+  if (mpp != 3 && !(mpp == 0 && zhaveUsrMode(UNIT))) {
+    bits |= UINT64_C(3) << 11;
+  }
+  m.zbits = bits;
+  return m;
+}
+static struct zMstatus zlegalizze_mstatus_sail(struct zMstatus zo, uint64_t zv)
 {
   __label__ end_function_1305, end_block_exception_1306;
   struct zMstatus zghz3857;
@@ -23580,7 +23601,18 @@ struct zMinterrupts zghz3968;
 void startup_zlegalizze_mip(void)
 {
 }
+/* Ibex: "mip is a read-only register" (cs_registers.rst "Machine Interrupt Pending Register (mip)";
+ * local change 2026-10-18, VENDORED_FROM), so a CSR write changes nothing. This Sail lets software
+ * set the S-mode pending bits (SSIP, STIP, SEIP), after which it takes interrupts the core cannot.
+ * The model's own pending bits are set by the platform, not through this function. */
+static struct zMinterrupts zlegalizze_mip_sail(struct zMinterrupts zo, uint64_t zv);
 struct zMinterrupts zlegalizze_mip(struct zMinterrupts zo, uint64_t zv)
+{
+  (void)zlegalizze_mip_sail;
+  (void)zv;
+  return zo;
+}
+static struct zMinterrupts zlegalizze_mip_sail(struct zMinterrupts zo, uint64_t zv)
 {
   __label__ end_function_1402, end_block_exception_1403;
   struct zMinterrupts zghz3962;
@@ -23651,7 +23683,19 @@ struct zMinterrupts zghz3978;
 void startup_zlegalizze_mie(void)
 {
 }
+/* Ibex: mie as cs_registers.rst "Machine Interrupt Enable Register (mie)" documents it (local
+ * change 2026-10-18, VENDORED_FROM): MEIE (11), MTIE (7), MSIE (3) and the fast-interrupt enables
+ * (30:16), nothing else. This Sail also stores the S-mode enables and drops bits 30:16. */
+static struct zMinterrupts zlegalizze_mie_sail(struct zMinterrupts zo, uint64_t zv);
 struct zMinterrupts zlegalizze_mie(struct zMinterrupts zo, uint64_t zv)
+{
+  struct zMinterrupts m = zlegalizze_mie_sail(zo, zv);
+  const uint64_t m_bits = (UINT64_C(1) << 11) | (UINT64_C(1) << 7) | (UINT64_C(1) << 3);
+  const uint64_t fast   = UINT64_C(0x7FFF0000);
+  m.zbits = (m.zbits & m_bits) | (zv & fast);
+  return m;
+}
+static struct zMinterrupts zlegalizze_mie_sail(struct zMinterrupts zo, uint64_t zv)
 {
   __label__ end_function_1405, end_block_exception_1406;
   struct zMinterrupts zghz3969;
@@ -49193,6 +49237,9 @@ bool zis_CSR_defined(uint64_t zcsr, enum zPrivilege zp)
   // Local patch (VENDORED_FROM 2026-10-12), mirrors riscv_sys_control.sail is_CSR_defined:
   // Ibex's CSRs (c_emulator/ibex_platform_csrs.c); only hpmcounterX(h) exist below M-mode.
   if (ibex_csr_defined(zcsr)) return zp == zMachine || (zcsr & UINT64_C(0xF00)) == UINT64_C(0xC00);
+  // Local patch (VENDORED_FROM 2026-10-18), mirrors riscv_sys_control.sail is_CSR_defined: "The User
+  // Mode time(h) registers are not implemented in Ibex" (cs_registers.rst), so an access is illegal.
+  if (zcsr == UINT64_C(0xC01) || zcsr == UINT64_C(0xC81)) return false;
   bool z6zE601;
   bool z3zE1981;
   {
@@ -70274,7 +70321,12 @@ unit zwriteCSR(uint64_t zcsr, uint64_t zvalue)
       bool z3zE3237;
       z3zE3237 = (zuz31092 == UINT64_C(0x342));
       if (!(z3zE3237)) {  goto case_4256;  }
-      zmcause.zbits = zvalue;
+      /* Ibex mcause (local change 2026-10-18, VENDORED_FROM): bit 31 and bits 4:0 (cs_registers.rst
+       * "Machine Cause"), and the internal-interrupt encoding 0xFFFFFFE0 (exception_interrupts.rst):
+       * bits 30:5 read as ones when bits 31 and 30 are written 1. */
+      zmcause.zbits = (zvalue & UINT64_C(0x1F)) |
+                      (((zvalue >> 31) & 1) ? UINT64_C(0x80000000) : 0) |
+                      ((((zvalue >> 31) & 1) && ((zvalue >> 30) & 1)) ? UINT64_C(0x7FFFFFE0) : 0);
       unit z3zE3236;
       z3zE3236 = UNIT;
       uint64_t z2zE2473;

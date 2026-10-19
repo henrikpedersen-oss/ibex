@@ -2672,7 +2672,11 @@
             timer pending; wfi waiting in ID behind a load with IF empty and idle. And
             (cov_fcov3_cheri_irq) a maskable interrupt timed from a grant (+gnt_trig offset 0x08)
             taken right behind a CHERI instruction, unstalled or just unstalled from a load
-            hazard.
+            hazard. And (cov_fcov4_rv_hazard, cov_fcov4_cheri_hazard): ebreak into debug mode and
+            wfi unstalling with a debug request and the timer pending; ebreak and fence in their
+            first ID cycle on a bus error with a debug request; dret outside debug mode and a CHERI
+            instruction in ID with IF empty and idle; an NMI raised in debug mode, taken right
+            after dret.
 
             - cov_fcov2_cheri_hazard: CHERIoT mode (pin raised by +cheriot_enable_on_write): a
               CHERI instruction (CIncAddrImm independent of the access, CIncAddr reading the
@@ -2738,11 +2742,29 @@
               Fence}, and pipe_cross {WFI / UncompressedIllegal, IF EmptyAndIdle, ID
               FullAndStalled, WB FullAndStalled} and {FetchError, IF EmptyAndIdle, ID
               FullAndStalled, WB FullAndUnstalled}. Self-checking (trap, NMI and debug-entry
-              counts, causes, NMI mstatus / mepc; codes in the header), Spike cosim on.'''
+              counts, causes, NMI mstatus / mepc; codes in the header), Spike cosim on.
+            - cov_fcov4_rv_hazard: RISC-V mode: ebreak (dcsr.ebreakm) and wfi unstalling on a
+              slow access's response with debug_req and a masked timer pending; ebreak
+              (EBreakExc, timer pending) and fence (nothing pending) in their first ID cycle on a
+              bus-error response with debug_req; dret outside debug mode (PrivIllegal) in ID behind
+              a waiting load with IF empty and idle (cov_fcov3_rv_hazard's alignment, 5
+              positions); an NMI raised from debug mode by the debug handler's access, taken in the
+              DECODE cycle after its dret. Targets uarch_cg exception_stall_instr_cross
+              (0,0,EBreakDbg,None,1,1,1), (0,0,WFI,None,1,1,1), (0,1,EBreakExc,None,0,1,1),
+              (0,1,Fence,None,0,0,1), pipe_cross {PrivIllegal, IF EmptyAndIdle, ID FullAndStalled,
+              WB FullAndUnstalled} and interrupt_taken_instr_cross {nmi 1, unstalled 0, DRet}.
+              Self-checking (trap, NMI and debug-entry counts, causes; codes in the header), Spike
+              cosim on.
+            - cov_fcov4_cheri_hazard: CHERIoT mode: a CHERI instruction (CIncAddrImm independent
+              of the load, CIncAddr reading its destination) in ID behind a load that turns
+              fetch_enable_i off, nothing fetched behind it (cov_fcov3_rv_hazard's alignment, 5
+              positions each). Targets uarch_cg pipe_cross {Cheri, IF EmptyAndIdle, ID
+              FullAndStalled, WB FullAndStalled}. Self-checking (trap count, cases run), cosim
+              off. Exit code in a0 (test header).'''
       stage: V2
       tags: ["directed", "cheriot"]
       tests: ["cov_fcov2_cheri_hazard", "cov_fcov2_rv_hazard", "cov_fcov3_cheri_irq",
-              "cov_fcov3_rv_hazard"]
+              "cov_fcov3_rv_hazard", "cov_fcov4_rv_hazard", "cov_fcov4_cheri_hazard"]
     }
 
     {

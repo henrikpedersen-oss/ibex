@@ -137,7 +137,7 @@ function writeCSR (csr : csreg, value : xlenbits) -> unit = {
     (0x320,  _) => { mcountinhibit = legalize_mcountinhibit(mcountinhibit, value); Some(zero_extend(mcountinhibit.bits)) },
     (0x340,  _) => { mscratch = value; Some(mscratch) },
     (0x341,  _) => { Some(set_xret_target(Machine, value)) },
-    (0x342,  _) => { mcause.bits = value; Some(mcause.bits) },
+    (0x342,  _) => { mcause.bits = legalize_mcause(value); Some(mcause.bits) }, /* Ibex (local change) */
     (0x343,  _) => { mtval = value; Some(mtval) },
     (0x344,  _) => { mip = legalize_mip(mip, value); Some(mip.bits) },
 

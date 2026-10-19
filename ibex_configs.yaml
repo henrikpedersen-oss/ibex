@@ -30,6 +30,7 @@ small:
   ICacheScramble           : 0
   BranchPredictor          : 0
   FetchOutputReg           : 0
+  DataIfReg                : 0
   DbgTriggerEn             : 0
   SecureIbex               : 0
   PMPEnable                : 0
@@ -53,6 +54,7 @@ opentitan:
   ICacheScramble           : 1
   BranchPredictor          : 0
   FetchOutputReg           : 0
+  DataIfReg                : 0
   DbgTriggerEn             : 1
   SecureIbex               : 1
   PMPEnable                : 1
@@ -79,6 +81,7 @@ maxperf:
   ICacheScramble           : 0
   BranchPredictor          : 0
   FetchOutputReg           : 0
+  DataIfReg                : 0
   DbgTriggerEn             : 0
   SecureIbex               : 0
   PMPEnable                : 0
@@ -102,6 +105,7 @@ maxperf-pmp-bmbalanced:
   ICacheScramble           : 0
   BranchPredictor          : 0
   FetchOutputReg           : 0
+  DataIfReg                : 0
   DbgTriggerEn             : 0
   SecureIbex               : 0
   PMPEnable                : 1
@@ -131,6 +135,7 @@ maxperf-pmp:
   ICacheScramble           : 0
   BranchPredictor          : 0
   FetchOutputReg           : 0
+  DataIfReg                : 0
   DbgTriggerEn             : 0
   SecureIbex               : 0
   PMPEnable                : 1
@@ -155,6 +160,7 @@ maxperf-pmp-bmfull:
   ICacheScramble           : 0
   BranchPredictor          : 0
   FetchOutputReg           : 0
+  DataIfReg                : 0
   DbgTriggerEn             : 0
   SecureIbex               : 0
   PMPEnable                : 1
@@ -178,6 +184,7 @@ maxperf-pmp-bmfull-icache:
   ICacheScramble           : 0
   BranchPredictor          : 0
   FetchOutputReg           : 0
+  DataIfReg                : 0
   DbgTriggerEn             : 0
   SecureIbex               : 0
   PMPEnable                : 1
@@ -211,7 +218,35 @@ cheriot-min:
   ICacheECC                : 0
   ICacheScramble           : 0
   BranchPredictor          : 0
+  FetchOutputReg           : 0
+  DataIfReg                : 0
+  DbgTriggerEn             : 0
+  SecureIbex               : 1
+  PMPEnable                : 0
+  PMPGranularity           : 0
+  PMPNumRegions            : 4
+  MHPMCounterNum           : 0
+  MHPMCounterWidth         : 40
+
+# cheriot-min with the core's bus requests from flops (FetchOutputReg, DataIfReg): for timing
+# evaluation in synthesis only (make genus-synth SYN_CONFIG=cheriot-min-outreg). Not simulated by
+# the verification plan: on the RTOS test SoC it does not boot (2026-10-19: first fetch from 0 after
+# the loader). Making it work, and closing timing, is the RTL team's (status/rtl_tickets.md).
+cheriot-min-outreg:
+  BaseIsa                  : "ibex_pkg::BaseIsaRV32IorCHERIoT"
+  RV32E                    : 1
+  RV32M                    : "ibex_pkg::RV32MSlow"
+  RV32B                    : "ibex_pkg::RV32BNone"
+  RV32ZC                   : "ibex_pkg::RV32Zca"
+  RegFile                  : "ibex_pkg::RegFileFF"
+  BranchTargetALU          : 0
+  WritebackStage           : 1
+  ICache                   : 0
+  ICacheECC                : 0
+  ICacheScramble           : 0
+  BranchPredictor          : 0
   FetchOutputReg           : 1
+  DataIfReg                : 1
   DbgTriggerEn             : 0
   SecureIbex               : 1
   PMPEnable                : 0
@@ -237,6 +272,7 @@ experimental-branch-predictor:
   ICacheScramble           : 0
   BranchPredictor          : 1
   FetchOutputReg           : 0
+  DataIfReg                : 0
   DbgTriggerEn             : 0
   SecureIbex               : 0
   PMPEnable                : 0

@@ -40,7 +40,7 @@ BENCH = Path(__file__).resolve().parent.parent / "cheriot-mem-ss"
 # seed, not from a run.
 SEED = 1
 
-# (mutation, RTL it replaces (opentitan-cheriot/hw/ip/cheriot/rtl/), bug it models,
+# (mutation, RTL it replaces (opentitan-cheriot/hw/ip/cheriot_mem_sys/rtl/), bug it models,
 #  [cms_regress.list result names that must FAIL with it])
 RUNS = [
     # ─── Tag store ───────────────────────────────────────────────────────────────────────────────
@@ -58,24 +58,24 @@ RUNS = [
      "the engine's bitmap lookup reads the next granule's revocation bit",
      ["cms_tbre_base_decode", "cms_tbre_sweep"]),
     # ─── Revocation engine ───────────────────────────────────────────────────────────────────────
-    ("tbre_skip_last", "cheriot.sv:545 tbre_num_words",
+    ("tbre_skip_last", "cheriot_mem_sys.sv:548 tbre_num_words",
      "a sweep of more than one capability stops one capability early",
      ["cms_tbre_sweep", "cms_tbre_base_decode", "cms_tbre_epoch"]),
-    ("tbre_no_inval", "cheriot_tbre_mover.sv:326 write_a_valid",
+    ("tbre_no_inval", "cheriot_tbre_mover.sv:329 write_a_valid",
      "the engine reads and looks up every capability but never clears a revoked one's tag",
      ["cms_tbre_sweep", "cms_tbre_base_decode", "cms_rmw_core_tbre_same_word",
       "cms_tbre_snoop_window"]),
-    ("tbre_epoch_stuck", "cheriot.sv:600 tbre_epoch_en",
+    ("tbre_epoch_stuck", "cheriot_mem_sys.sv:603 tbre_epoch_en",
      "TBRE_EPOCH never counts a sweep",
      ["cms_tbre_epoch", "cms_tbre_csr", "cms_random"]),
     # Timing-dependent: the bench sees it only when a busy poll or the interrupt lands between the
     # last read and the last clear of a sweep whose last capability is revoked (a few per test).
-    ("tbre_done_early", "cheriot_tbre_mover.sv:501 busy_o",
+    ("tbre_done_early", "cheriot_tbre_mover.sv:504 busy_o",
      "busy, and with it tbre_done and the interrupt, drops when the last word is read, before the "
      "clears are answered",
      ["cms_tbre_sweep", "cms_tbre_intr"]),
     # ─── Core store racing a sweep ───────────────────────────────────────────────────────────────
-    ("snoop_off", "cheriot.sv:427 tbre_snoop_valid",
+    ("snoop_off", "cheriot_mem_sys.sv:430 tbre_snoop_valid",
      "the engine does not watch core writes: a clear overwrites the tag of a capability the core "
      "stored after the engine read it",
      ["cms_tbre_store_race", "cms_tbre_snoop_window"]),
@@ -86,11 +86,11 @@ RUNS = [
     ("data_err_dropped", "cheriot_tag_filter.sv:392 tl_d_o",
      "the core's tag filter drops d_error from the data path (cored_tl_h) on its way to the core",
      ["cms_err_data_path", "cms_nvm_cap_store", "cms_tag_store_load"]),
-    ("alert_dropped", "cheriot.sv:705 alert_req_i",
+    ("alert_dropped", "cheriot_mem_sys.sv:708 alert_req_i",
      "no fatal error raises fatal_fault (ALERT_TEST still does)",
      ["cms_err_tag_path", "cms_err_csr_intg", "cms_err_tbre_read", "cms_nvm_cap_store"]),
     # The next two are the RTL before PR #31515 was merged: each test must tell the two apart.
-    ("tbre_read_err_fatal", "cheriot_tbre_mover.sv:546 err_o",
+    ("tbre_read_err_fatal", "cheriot_tbre_mover.sv:549 err_o",
      "an error response to a read of the swept memory counts as a mover fault, so a "
      "read-protected page raises fatal_fault",
      ["cms_err_tbre_read", "cms_tbre_epoch", "cms_tbre_intr"]),
@@ -98,7 +98,7 @@ RUNS = [
      "a request presented between W1 and its tag write is not flagged; only a capability store "
      "taken out of sequence raises fatal_fault",
      ["cms_nvm_cap_store"]),
-    ("alert_test_unlocked", "cheriot_regs_reg_top.sv:239 alert_test_gated_we",
+    ("alert_test_unlocked", "cheriot_mem_sys_regs_reg_top.sv:239 alert_test_gated_we",
      "ALERT_TEST.regwen is ignored, so alert testing cannot be disabled",
      ["cms_alert_test"]),
     # ─── Mode gating ─────────────────────────────────────────────────────────────────────────────

@@ -95,6 +95,7 @@ proc write_sdc_out {sdc_file_in sdc_file_out} {
   global lr_synth_clk_input
   global lr_synth_outputs
   global lr_synth_inputs
+  global lr_synth_time_unit_ps
 
   set sdc_out [open $sdc_file_out "w"]
   set sdc_in  [open $sdc_file_in "r"]
@@ -104,7 +105,8 @@ proc write_sdc_out {sdc_file_in sdc_file_out} {
 
   puts $sdc_out "#============ Auto-generated from config ============"
 
-  set clk_period_ns [expr $lr_synth_clk_period / 1000.0]
+  # In the library's time unit (OpenSTA reads SDC in it): ns for NanGate45, ps for ASAP7.
+  set clk_period_ns [expr $lr_synth_clk_period / double($lr_synth_time_unit_ps)]
   puts $sdc_out "create_clock -name $lr_synth_clk_input -period $clk_period_ns {$lr_synth_clk_input}"
 
   foreach output $lr_synth_outputs {

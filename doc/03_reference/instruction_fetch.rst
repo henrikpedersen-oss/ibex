@@ -38,7 +38,7 @@ In a system where the data response and the instruction request share an interco
 Setting the ``FetchOutputReg`` parameter to 1 drives ``instr_req_o`` and ``instr_addr_o`` from flops: every request is registered first and is on the bus from the following cycle until it is granted.
 The prefetch buffer then tracks three outstanding requests instead of two, so that it still fetches one word per cycle from a memory with a single cycle of latency.
 Each taken branch, jump and trap costs one more cycle.
-The parameter has no effect with ``ICache`` = 1, whose bus requests already come from its fill buffers.
+The parameter has no effect with ``ICache`` = 1. The instruction cache has the same path: on a branch it puts the request on the bus in its lookup cycle (``instr_req_o`` follows ``branch_i``, ``instr_addr_o`` the lookup address), and registering that is not part of this parameter.
 
 .. _branch-prediction:
 

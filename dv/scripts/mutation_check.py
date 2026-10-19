@@ -56,12 +56,16 @@ RUNS = [
     ("exec_off", "sonata-cheri-c-xlm", [("cheri_c_noexec_call", "cheriot_mem")]),
     ("datastore_tag", "sonata-cheri-c-xlm", [("cheri_c_union", "cheriot_mem")]),
     ("barrier_none", "sonata-revocation-xlm", [("revocation_barrier_phase2", "cheriot_mem"),
-                                               ("revocation_random", "cheriot_mem")]),
+                                               ("revocation_random", "cheriot_mem"),
+                                               ("revocation_base", "cheriot_mem"),
+                                               ("revocation_preempt", "cheriot_mem"),
+                                               ("revocation_sweep_race", "cheriot_mem")]),
     # Not bus_master_tbre_invalidate_only: it checks that the sweep writes nothing but tag
     # clears, which a TBRE that writes nothing at all satisfies. revocation_sweep checks that the
     # revoked capability was cleared.
     ("tbre_no_inval", "sonata-revocation-xlm", [("revocation_sweep", "cheriot_mem"),
-                                                ("revocation_random", "cheriot_mem")]),
+                                                ("revocation_random", "cheriot_mem"),
+                                                ("revocation_sweep_race", "cheriot_mem")]),
     # Not juliet_cwe190_int_overflow: its wrapped cursor is unrepresentable, so the tag is
     # cleared and the store faults on the tag before it reaches the bounds check.
     ("bounds_off", "sonata-juliet-xlm", [("juliet_cwe121_bof", "cheriot_mem"),

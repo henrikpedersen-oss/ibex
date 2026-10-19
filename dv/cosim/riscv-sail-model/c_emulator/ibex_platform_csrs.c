@@ -233,9 +233,11 @@ uint64_t ibex_smepmp_write_cfg(uint64_t old_cfg, uint64_t v, uint64_t grain) {
   const bool rlb = (s_mseccfg & IBEX_MSECCFG_RLB) != 0;
   if ((old_cfg & 0x80) && !rlb) return old_cfg;  // locked (2a: RLB bypasses the lock)
   uint64_t cfg = v & 0x9f;
-  // R=0 W=1 is reserved without MML (cleared to RWX=0, as the model's own pmpWriteCfg; ibex's doc
-  // says "treated as Read/Write permission = 0"); with MML it encodes a Shared-Region (4a).
-  if (!mml && (cfg & 0x3) == 0x2) cfg &= ~UINT64_C(0x7);
+  // R=0 W=1 is reserved without MML: "will be treated by the core as Read/Write permission = 0"
+  // (cs_registers.rst, PMP Configuration Register). R and W are cleared and X kept as written: the
+  // model's own pmpWriteCfg cleared X too, which the manual does not say (TestRIG csr generator
+  // 2026-10-18: pmpcfg rtl 0x04 / model 0x00). With MML it encodes a Shared-Region (4a).
+  if (!mml && (cfg & 0x3) == 0x2) cfg &= ~UINT64_C(0x3);
   // G >= 1: NA4 is not selectable (set to OFF, as the model's own pmpWriteCfg).
   if (grain >= 1 && ((cfg >> 3) & 0x3) == 0x2) cfg &= ~UINT64_C(0x18);
   // 4b: with MML, a new executable M-mode-only rule (LRWX 1001, 1101) or locked Shared-Region

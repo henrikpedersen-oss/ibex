@@ -61,8 +61,8 @@ yosys "opt -purge"
 
 yosys "write_verilog $lr_synth_pre_map_out"
 
-# Map latch primitives onto latch cells
-yosys "techmap -map rtl/latch_map.v"
+# Map latch primitives onto latch cells (rtl/latch_map.v for NanGate45, else lib/syn_lib.sh's)
+yosys "techmap -map $lr_synth_latch_map"
 
 yosys "dfflibmap -liberty $lr_synth_cell_library_path"
 yosys "opt"
@@ -94,6 +94,12 @@ yosys "write_verilog $lr_synth_netlist_out"
 
 if { $lr_synth_timing_run } {
   # Produce netlist that OpenSTA can use
+  # The SRAM black boxes (prim_ram_1p, ICache=1) carry their parameters into the netlist, among
+  # them an empty string written as ".MemInitFile()", which OpenSTA's Verilog reader rejects
+  # (syntax error, 2026-10-17 opentitan). It links them as black boxes and needs none of them.
+  foreach p {Width Depth DataBitsPerMask MemInitFile} {
+    yosys "setparam -unset $p t:prim_ram_1p"
+  }
   yosys "setundef -zero"
   yosys "splitnets"
   yosys "clean"

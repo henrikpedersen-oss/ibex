@@ -7,30 +7,37 @@
 # Parse a yosys area report and give a kGE equivalent
 
 import argparse
+import gzip
+import re
+
+# "cell (NAND2_X1) {" / "cell ("sky130_fd_sc_hd__nand2_1") {", and the cell's "area : 0.798;".
+CELL_RE = re.compile(r'^\s*cell\s*\(\s*"?([^")\s]+)"?\s*\)')
+AREA_RE = re.compile(r'^\s*area\s*:\s*([^;\s]+)\s*;?')  # ASAP7 INVBUF: no ";"
 
 
 def read_lib(lib_file_path, ref_cell):
-    with open(lib_file_path, 'r') as f:
+    # Any liberty layout (NanGate45's, SKY130's, ASAP7's), gzipped or not: each cell's first area.
+    opener = gzip.open if lib_file_path.endswith('.gz') else open
+    with opener(lib_file_path, 'rt', errors='replace') as f:
         lib_file = f.readlines()
 
     cell_dict = {}
     weighted_dict = {}
     cell_name = None
     for line_idx, line in enumerate(lib_file):
-        if line.startswith('  cell ('):
+        m = CELL_RE.match(line)
+        if m:
             if cell_name is not None:
                 raise RuntimeError('{}:{} Found cell while searching for area'
                                    .format(lib_file_path, line_idx + 1))
-            cell_name = line.split()[1].strip('()')
-        elif line.startswith('\tarea'):
-            if cell_name is None:
-                raise RuntimeError('{}:{} Found area while searching for cell'
-                                   .format(lib_file_path, line_idx + 1))
+            cell_name = m.group(1)
+            continue
+        m = AREA_RE.match(line)
+        if m and cell_name is not None:
             try:
-                cell_area = line.split()[2].strip(';')
-                cell_dict[cell_name] = float(cell_area)
+                cell_dict[cell_name] = float(m.group(1))
                 cell_name = None
-            except (IndexError, ValueError):
+            except ValueError:
                 raise RuntimeError('{}:{} Area declaration misformatted'
                                    .format(lib_file_path, line_idx + 1))
 

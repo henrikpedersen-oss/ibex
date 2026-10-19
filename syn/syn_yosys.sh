@@ -42,6 +42,8 @@ mkdir -p "$LR_SYNTH_OUT_DIR/reports/timing"
     echo "flow=yosys"
     echo "config=${LR_SYNTH_IBEX_CONFIG:-}"
     echo "overrides=${LR_SYNTH_IBEX_CONFIG_OVERRIDES:-}"
+    # lib/syn_lib.sh (syn_setup.sh): lib, ge_cell, ge_area, time_unit_ps
+    if declare -F syn_lib_run_info >/dev/null; then syn_lib_run_info; fi
     echo "corner=${LR_SYNTH_CORNER:-}"
     echo "library=$LR_SYNTH_CELL_LIBRARY_PATH"
     echo "clk_period_ps=${LR_SYNTH_CLK_PERIOD:-4000}"
@@ -70,12 +72,14 @@ yosys -c ./tcl/yosys_run_synth.tcl |& teelog syn || {
     error "Failed to synthesize RTL with Yosys"
 }
 
-sta ./tcl/sta_run_reports.tcl |& teelog sta || {
+# -exit and no terminal: on a script error OpenSTA otherwise drops to its prompt and waits forever.
+sta -exit ./tcl/sta_run_reports.tcl </dev/null |& teelog sta || {
     error "Failed to run static timing analysis"
 }
 
 ./translate_timing_rpts.sh
 
-python/get_kge.py "$LR_SYNTH_CELL_LIBRARY_PATH" "$LR_SYNTH_OUT_DIR"/reports/area.rpt
+python/get_kge.py "$LR_SYNTH_CELL_LIBRARY_PATH" "$LR_SYNTH_OUT_DIR"/reports/area.rpt \
+    --cell "${SYN_LIB_GE_CELL:-NAND2_X1}"
 
 scripts/area_chart.py "$LR_SYNTH_OUT_DIR"/reports/area.rpt || echo "WARNING: area chart not written" >&2

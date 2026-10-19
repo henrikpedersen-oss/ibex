@@ -132,6 +132,9 @@ fi
 # -l, xcelium echoes $display to BOTH the logfile and its own stdout.  Without the
 # redirect, run_xlm.sh's stdout would carry both the echo (36 lines) and the grep
 # output below (36 lines) = 72 lines total in the compliance signature file.
+# The instruction trace beside the test's own files (<test>.elf.trace_00000000.log for the compliance
+# Makefile): the tracer's default, ./trace_core_00000000.log, is one file for every test of an ISA,
+# which the tests run in parallel (run_all_xlm.sh) would all write at once.
 set +e
 xrun \
   -64bit \
@@ -140,6 +143,7 @@ xrun \
   -xmlibdirname "${XLM_DIR}/xcelium.d" \
   -licqueue \
   +MEMFILE="${TMP_FIXED}" \
+  +ibex_tracer_file_base="${src_file%.*}.trace" \
   ${cov_args} \
   > /dev/null
 _xrun_status=$?

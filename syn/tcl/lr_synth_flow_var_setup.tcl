@@ -5,6 +5,9 @@
 puts "=================== Flow Vars ==================="
 
 set_flow_var cell_library_path "cmos_cells.lib" "Path to cell library"
+# The library's time unit in ps: the SDC's clock period and IO delays are written in it (ASAP7: 1).
+set_flow_var time_unit_ps 1000 "Cell library time unit (ps)"
+set_flow_var latch_map "rtl/latch_map.v" "Latch map (techmap file)"
 set_flow_var top_module "ibex_top" "top module"
 set_flow_var out_dir "syn_out" "Output directory for synthesis"
 set_flow_var pre_map_out "./${lr_synth_out_dir}/generated/${lr_synth_top_module}.pre_map.v" "Pre-mapping netlist out"

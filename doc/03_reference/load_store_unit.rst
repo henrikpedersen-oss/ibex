@@ -78,6 +78,21 @@ It is recommended for write responses some fixed value is placed on ``data_rdata
 This feature is only used if the core is configured with the MemECC parameter set.
 For all other configurations, the integrity signals can be ignored.
 
+.. _data-if-reg:
+
+Data Interface Register
+-----------------------
+
+By default the data interface is combinational in both directions: a data response (``data_rvalid_i``) can decide a data request in the same cycle, because the LSU issues the next access, or the second part of a misaligned or capability access, in the cycle the previous response arrives.
+The same response also completes the load in the ID stage, which can then advance the prefetch buffer in that cycle, and in CHERIoT mode the load barrier starts its revocation bitmap lookup (``trvk_revbm_req_o``) from the returning capability.
+In a system with input and output delays on the data interface these paths do not fit one cycle.
+
+Setting the ``DataIfReg`` parameter to 1 registers both ports at the top level (``ibex_mem_if_reg``): the data interface and the revocation bitmap interface.
+Their requests go through a two-entry queue, so ``data_req_o`` and the request signals come from flops and are on the bus from the cycle after the core made the request, and their responses (``data_rvalid_i`` with its data, integrity, error and tag) reach the core one cycle after they arrive.
+The protocol on the pins is unchanged, and so is the order of the responses.
+Each data access and each bitmap lookup costs a cycle more in each direction.
+``FetchOutputReg`` is the instruction interface's counterpart (:ref:`fetch-output-reg`).
+
 Misaligned Accesses
 -------------------
 

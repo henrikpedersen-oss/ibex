@@ -898,6 +898,9 @@ module ibex_load_store_unit import ibex_pkg::*; import ibex_cheriot_pkg::*; #(
     end
   end
 
+  // A capability is 8-byte aligned in memory: a CLC or CSC at another address faults before it
+  // issues, so its first word is always at an 8-byte boundary and its second at +4 (below).
+  `ASSERT(IbexLsuCapW0Aligned, cap_w0_gnt |-> (data_addr_o[2:0] == 3'b000))
   `ASSERT(IbexLsuCapW0ThenW1, cap_w0_gnt |=> (ls_fsm_cs == CTX_WAIT_GNT2))
   `ASSERT(IbexLsuCapW1HeldUntilGnt, (ls_fsm_cs == CTX_WAIT_GNT2) && !data_gnt_i |=>
                                     (ls_fsm_cs == CTX_WAIT_GNT2))

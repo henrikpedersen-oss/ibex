@@ -9,14 +9,14 @@ tlul_err_resp do not have. None changes behaviour in Sonata:
 - tlul_err_resp ReturnBlankResp(1'b0): the default, and the only behaviour of the older module.
 Also gives cheriot_tag_filter a local copy of tlul_pkg::get_rsp_intg, which Sonata's tlul_pkg
 lacks. It is built from the same tlul_pkg and prim_secded_pkg functions as the original.
-Also drops the reinit_i(1'b0) connections of cheriot_regs_reg_top's prim_subreg instances (eight since the TBRE_STATUS.sweep_err field):
+Also drops the reinit_i(1'b0) connections of cheriot_mem_sys_regs_reg_top's prim_subreg instances (eight since the TBRE_STATUS.sweep_err field):
 neither Sonata's nor ibex/vendor's prim_subreg has the port, and tied low it does nothing.
 The patched RTL still builds, and behaves the same, against ibex/vendor's newer prim and OpenTitan's
 TL-UL (cheriot_rtl.f).
 
-diff -ru a/hw/ip/cheriot/rtl/cheriot_access_check.sv b/hw/ip/cheriot/rtl/cheriot_access_check.sv
---- a/hw/ip/cheriot/rtl/cheriot_access_check.sv	2026-10-09 21:58:45.679577645 +0100
-+++ b/hw/ip/cheriot/rtl/cheriot_access_check.sv	2026-10-09 21:58:47.016583544 +0100
+diff -ru a/hw/ip/cheriot_mem_sys/rtl/cheriot_access_check.sv b/hw/ip/cheriot_mem_sys/rtl/cheriot_access_check.sv
+--- a/hw/ip/cheriot_mem_sys/rtl/cheriot_access_check.sv	2026-10-09 21:58:45.679577645 +0100
++++ b/hw/ip/cheriot_mem_sys/rtl/cheriot_access_check.sv	2026-10-09 21:58:47.016583544 +0100
 @@ -101,9 +101,7 @@
    assign tl_demux_d2h[0] = tl_d_i;
    assign tl_demux_d2h[1] = tl_err_d2h;
@@ -28,9 +28,9 @@ diff -ru a/hw/ip/cheriot/rtl/cheriot_access_check.sv b/hw/ip/cheriot/rtl/cheriot
      .clk_i,
      .rst_ni,
      .tl_h_i(tl_err_h2d),
-diff -ru a/hw/ip/cheriot/rtl/cheriot_regs_reg_top.sv b/hw/ip/cheriot/rtl/cheriot_regs_reg_top.sv
---- a/hw/ip/cheriot/rtl/cheriot_regs_reg_top.sv	2026-10-09 21:58:47.007886061 +0100
-+++ b/hw/ip/cheriot/rtl/cheriot_regs_reg_top.sv	2026-10-09 21:58:55.369598172 +0100
+diff -ru a/hw/ip/cheriot_mem_sys/rtl/cheriot_mem_sys_regs_reg_top.sv b/hw/ip/cheriot_mem_sys/rtl/cheriot_mem_sys_regs_reg_top.sv
+--- a/hw/ip/cheriot_mem_sys/rtl/cheriot_mem_sys_regs_reg_top.sv	2026-10-09 21:58:47.007886061 +0100
++++ b/hw/ip/cheriot_mem_sys/rtl/cheriot_mem_sys_regs_reg_top.sv	2026-10-09 21:58:55.369598172 +0100
 @@ -163,7 +163,6 @@
    ) u_intr_state (
      .clk_i   (clk_i),
@@ -95,9 +95,9 @@ diff -ru a/hw/ip/cheriot/rtl/cheriot_regs_reg_top.sv b/hw/ip/cheriot/rtl/cheriot
  
      // from register interface
      .we     (tbre_status_we),
-diff -ru a/hw/ip/cheriot/rtl/cheriot.sv b/hw/ip/cheriot/rtl/cheriot.sv
---- a/hw/ip/cheriot/rtl/cheriot.sv	2026-10-09 21:58:46.047662986 +0100
-+++ b/hw/ip/cheriot/rtl/cheriot.sv	2026-10-09 21:58:47.016729559 +0100
+diff -ru a/hw/ip/cheriot_mem_sys/rtl/cheriot_mem_sys.sv b/hw/ip/cheriot_mem_sys/rtl/cheriot_mem_sys.sv
+--- a/hw/ip/cheriot_mem_sys/rtl/cheriot_mem_sys.sv	2026-10-09 21:58:46.047662986 +0100
++++ b/hw/ip/cheriot_mem_sys/rtl/cheriot_mem_sys.sv	2026-10-09 21:58:47.016729559 +0100
 @@ -694,7 +694,6 @@
  
    prim_alert_sender #(
@@ -106,9 +106,9 @@ diff -ru a/hw/ip/cheriot/rtl/cheriot.sv b/hw/ip/cheriot/rtl/cheriot.sv
      .IsFatal(1'b1)
    ) u_prim_alert_sender_fatal_fault (
      .clk_i,
-diff -ru a/hw/ip/cheriot/rtl/cheriot_tag_filter.sv b/hw/ip/cheriot/rtl/cheriot_tag_filter.sv
---- a/hw/ip/cheriot/rtl/cheriot_tag_filter.sv	2026-10-09 21:58:46.338730606 +0100
-+++ b/hw/ip/cheriot/rtl/cheriot_tag_filter.sv	2026-10-09 21:58:47.016821461 +0100
+diff -ru a/hw/ip/cheriot_mem_sys/rtl/cheriot_tag_filter.sv b/hw/ip/cheriot_mem_sys/rtl/cheriot_tag_filter.sv
+--- a/hw/ip/cheriot_mem_sys/rtl/cheriot_tag_filter.sv	2026-10-09 21:58:46.338730606 +0100
++++ b/hw/ip/cheriot_mem_sys/rtl/cheriot_tag_filter.sv	2026-10-09 21:58:47.016821461 +0100
 @@ -264,8 +264,7 @@
    prim_fifo_sync #(
      .Width(FifoWidth),
@@ -146,9 +146,9 @@ diff -ru a/hw/ip/cheriot/rtl/cheriot_tag_filter.sv b/hw/ip/cheriot/rtl/cheriot_t
      end
      if (!host_join) begin
        tl_d_o = local_rsp_intg;
-diff -ru a/hw/ip/cheriot/rtl/cheriot_trvk_core.sv b/hw/ip/cheriot/rtl/cheriot_trvk_core.sv
---- a/hw/ip/cheriot/rtl/cheriot_trvk_core.sv	2026-10-09 21:58:46.637800082 +0100
-+++ b/hw/ip/cheriot/rtl/cheriot_trvk_core.sv	2026-10-09 21:58:47.016895195 +0100
+diff -ru a/hw/ip/cheriot_mem_sys/rtl/cheriot_trvk_core.sv b/hw/ip/cheriot_mem_sys/rtl/cheriot_trvk_core.sv
+--- a/hw/ip/cheriot_mem_sys/rtl/cheriot_trvk_core.sv	2026-10-09 21:58:46.637800082 +0100
++++ b/hw/ip/cheriot_mem_sys/rtl/cheriot_trvk_core.sv	2026-10-09 21:58:47.016895195 +0100
 @@ -168,7 +168,6 @@
      .Width(32'd1),
      .Pass(1'b0),

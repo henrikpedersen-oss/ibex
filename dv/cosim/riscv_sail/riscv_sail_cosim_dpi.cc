@@ -52,6 +52,8 @@ extern bool     rv_enable_vext;
 extern bool     rv_enable_misaligned;
 extern bool     rv_enable_writable_misa;
 extern bool     rv_mtval_has_illegal_inst_bits;
+// Sail register marchid (generated C): the model's init leaves it 0.
+extern uint64_t zmarchid;
 
 // Sail runtime (rts.c): store one byte into the model's sparse memory.
 void write_mem(uint64_t addr, uint64_t byte_val);
@@ -127,6 +129,10 @@ void riscv_sail_cosim_init(const svBitVecVal *boot_addr_p) {
   zmisa.zbits &= ~((UINT64_C(1) << 18) | (UINT64_C(1) << 0));
   zmisa.zbits = s_misa_b ? (zmisa.zbits | (UINT64_C(1) << 1)) : (zmisa.zbits & ~(UINT64_C(1) << 1));
   zext_rvfi_init(UNIT);
+  // marchid "reads as 0x16, the architecture ID allocated to Ibex" in RV32I mode (cs_registers.rst,
+  // Machine Architecture ID). The model's init leaves it 0 (TestRIG csr generator 2026-10-18:
+  // csrr marchid rtl 0x16 / model 0, then every register derived from it differed).
+  zmarchid = UINT64_C(0x16);
 
   // RAM as configured (TestRIG default: 8 MiB at 0x80000000, as the CHERIoT model and
   // core_ibex_testrig_tb_top.sv). No ROM, no HTIF, and no CLINT: ibex has no core-local timer

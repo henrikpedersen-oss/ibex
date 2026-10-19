@@ -25,6 +25,8 @@ else
     run=${newest%/lec/*}
 fi
 [ -d "$run" ] || { echo "No Genus run with a dofile (run make genus-synth first): ${run:-none}" >&2; exit 1; }
+# Absolute: Conformal runs from $run/lec, and the log path below must still hold there.
+run=$(realpath "$run")
 command -v lec >/dev/null || { echo "lec is not on PATH: run inside the eda_shell" >&2; exit 1; }
 do_file=$run/lec/rtl2${stage}.lec.do
 [ -f "$do_file" ] || { echo "No dofile $do_file" >&2; exit 1; }

@@ -69,6 +69,7 @@ module ibex_simple_system (
   parameter bit                 ICacheTweakInfection     = 1'b0;
   parameter bit                 BranchPredictor          = 1'b0;
   parameter bit                 FetchOutputReg           = 1'b0;
+  parameter bit                 DataIfReg                = 1'b0;
   parameter                     SRAMInitFile             = "";
 
   logic clk_sys, rst_sys_n;
@@ -228,6 +229,7 @@ module ibex_simple_system (
       .WritebackStage       ( WritebackStage       ),
       .BranchPredictor      ( BranchPredictor      ),
       .FetchOutputReg       ( FetchOutputReg       ),
+      .DataIfReg            ( DataIfReg            ),
       .DbgTriggerEn         ( DbgTriggerEn         ),
       .DmBaseAddr           ( 32'h00100000         ),
       .DmAddrMask           ( 32'h00000003         ),

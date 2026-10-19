@@ -92,6 +92,7 @@ ${PRJ_DIR}/rtl/ibex_register_file_latch.sv
 ${PRJ_DIR}/rtl/ibex_pmp.sv
 ${PRJ_DIR}/rtl/ibex_core.sv
 ${PRJ_DIR}/rtl/ibex_trvk.sv
+${PRJ_DIR}/rtl/ibex_mem_if_reg.sv
 ${PRJ_DIR}/rtl/ibex_top.sv
 ${PRJ_DIR}/rtl/ibex_top_tracing.sv
 

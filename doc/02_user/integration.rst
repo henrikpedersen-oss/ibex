@@ -108,6 +108,7 @@ Instantiation Template
       .ICacheECC                    ( 1'b0                             ),
       .BranchPredictor              ( 1'b0                             ),
       .FetchOutputReg               ( 1'b0                             ),
+      .DataIfReg                    ( 1'b0                             ),
       .DbgTriggerEn                 ( 1'b0                             ),
       .DbgHwBreakNum                ( 1                                ),
       .SecureIbex                   ( 1'b0                             ),
@@ -340,6 +341,8 @@ Parameters
 | ``BranchPredictor``              | bit                 | 0                       | *EXPERIMENTAL* Enable :ref:`branch-prediction`                                               |
 +----------------------------------+---------------------+-------------------------+----------------------------------------------------------------------------------------------+
 | ``FetchOutputReg``               | bit                 | 0                       | Register the instruction request outputs (if ICache == 0), see :ref:`fetch-output-reg`       |
++----------------------------------+---------------------+-------------------------+----------------------------------------------------------------------------------------------+
+| ``DataIfReg``                    | bit                 | 0                       | Register the data and revocation bitmap interfaces, see :ref:`data-if-reg`                   |
 +----------------------------------+---------------------+-------------------------+----------------------------------------------------------------------------------------------+
 | ``DbgTriggerEn``                 | bit                 | 0                       | Enable :ref:`debug-support` triggers (``DbgHwBreakNum`` for count)                           |
 +----------------------------------+---------------------+-------------------------+----------------------------------------------------------------------------------------------+

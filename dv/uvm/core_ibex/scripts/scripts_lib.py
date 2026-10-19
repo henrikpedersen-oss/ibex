@@ -8,6 +8,7 @@ import shlex
 import subprocess
 import sys
 import pickle
+import portalocker
 import yaml
 import pathlib3x as pathlib
 from io import IOBase
@@ -274,7 +275,13 @@ class testdata_cls():
         trr = cls()
         logger.debug(f"Constructing object from data in {metadata_pickle}")
         with metadata_pickle.open('rb') as handle:
+            # Shared lock: metadata.py's LockedMetadata rewrites metadata.pickle in place while it
+            # holds an exclusive lock, and a reader that did not wait for it could load half a file.
+            # On 2026-10-18 (32 parallel jobs) run_instr_gen.py did, and its pickle.load failed with
+            # "UnicodeDecodeError: ... byte 0x94", so riscv_rand_instr_test.18159 was never generated.
+            portalocker.lock(handle, portalocker.LockFlags.SHARED)
             trr = pickle.load(handle)
+            portalocker.unlock(handle)
         return trr
 
     @typechecked

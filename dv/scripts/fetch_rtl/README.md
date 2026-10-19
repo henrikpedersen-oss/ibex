@@ -10,7 +10,7 @@ directory needs network access to github.com (anonymous HTTPS, no `gh`).
 
 | Source | Upstream | Used by | Named in the file lists as |
 |---|---|---|---|
-| `opentitan-cheriot` | lowRISC/opentitan `5df8c6e6` (PR #31515, merged 2026-10-07, stacked on #31470) | `dv/cheriot-mem-ss`, the CHERIoT RTOS test SoC | `${OT_CHERIOT_DIR}` |
+| `opentitan-cheriot` | lowRISC/opentitan `b578b9d8` (2026-10-17, the newest commit on `hw/ip/cheriot_mem_sys`; previously `5df8c6e6`, PR #31515) | `dv/cheriot-mem-ss`, the CHERIoT RTOS test SoC | `${OT_CHERIOT_DIR}` |
 | `sonata-system` | lowRISC/sonata-system `cdc024df` | the CHERIoT RTOS test SoC | `${SONATA_DIR}` |
 | `pulp_riscv_dbg` | SamuelRiedel/opentitan `ce6c22fb` (branch `rv-dm-cheriot`), `hw/vendor/pulp_riscv_dbg` | the UVM testbench's `DM=1` build, the RTOS test SoC | `${PULP_RISCV_DBG_DIR}` (`<dir>/hw/vendor/pulp_riscv_dbg`) |
 
@@ -32,31 +32,36 @@ subsystem as `${OT_CHERIOT_DIR}`, built against ibex's own `vendor/lowrisc_ip` p
 
 ## opentitan-cheriot
 
-The CHERIoT memory subsystem from OpenTitan (`hw/ip/cheriot`), including the background revocation
+The CHERIoT memory subsystem from OpenTitan (`hw/ip/cheriot_mem_sys`), including the background revocation
 engine (TBRE; TRBE in [lowRISC/opentitan#31470](https://github.com/lowRISC/opentitan/pull/31470),
 which introduced it) and capability stores to the NVM from
 [#31515](https://github.com/lowRISC/opentitan/pull/31515), plus the OpenTitan RTL it needs that
-`ibex/vendor` does not provide.
+`ibex/vendor` does not provide. Upstream renamed the IP from `hw/ip/cheriot` (module `cheriot`,
+package `cheriot_reg_pkg`) to `hw/ip/cheriot_mem_sys` (`cheriot_mem_sys`, `cheriot_mem_sys_reg_pkg`)
+on 2026-10-08 (1ed24ec6). The pin moved from `5df8c6e6` to `b578b9d8` on 2026-10-19; besides the
+rename, its one RTL change is that the TBRE mover registers each read response (its payload FIFO no
+longer passes through), so the engine resolves a word two cycles after its read and reads at most
+two words every three cycles.
 
 | Patch | Why |
 |---|---|
-| `0001-build-with-older-prim-and-tlul.patch` | Drops parameter overrides and ports that older `prim` and TL-UL lack: `NeverClears` on `prim_fifo_sync`, `SkewCycles`, `ReturnBlankResp`, and the `reinit_i(1'b0)` connections of the register top's `prim_subreg` (absent from both Sonata's and `ibex/vendor`'s); gives the tag filter a local `get_rsp_intg` for Sonata's `tlul_pkg`. Behaviour is unchanged on both library sets; only the `NeverClears_A` assertion is lost. `NeverClears` on `prim_fifo_sync_cnt` (`cheriot.sv`, `cheriot_tbre_mover.sv`) is kept: both library sets in use (`ibex/vendor/lowrisc_ip` with OpenTitan's or Sonata's TL-UL) have it. |
-| `0002-nvmcapstores-parameter.patch` | Makes the tag filter's `NvmCapStores` a parameter of `cheriot` (default `1'b1`, upstream behaviour), so the RTOS test SoC, which maps writable code RAM as the NVM region, can set it to 0. |
+| `0001-build-with-older-prim-and-tlul.patch` | Drops parameter overrides and ports that older `prim` and TL-UL lack: `NeverClears` on `prim_fifo_sync`, `SkewCycles`, `ReturnBlankResp`, and the `reinit_i(1'b0)` connections of the register top's `prim_subreg` (absent from both Sonata's and `ibex/vendor`'s); gives the tag filter a local `get_rsp_intg` for Sonata's `tlul_pkg`. Behaviour is unchanged on both library sets; only the `NeverClears_A` assertion is lost. `NeverClears` on `prim_fifo_sync_cnt` (`cheriot_mem_sys.sv`, `cheriot_tbre_mover.sv`) is kept: both library sets in use (`ibex/vendor/lowrisc_ip` with OpenTitan's or Sonata's TL-UL) have it. |
+| `0002-nvmcapstores-parameter.patch` | Makes the tag filter's `NvmCapStores` a parameter of `cheriot_mem_sys` (default `1'b1`, upstream behaviour), so the RTOS test SoC, which maps writable code RAM as the NVM region, can set it to 0. |
 
 | Path | What it is |
 |---|---|
-| `hw/ip/cheriot/rtl/cheriot.sv` | Subsystem top: tag filter, RMW filter, access checkers, meta SRAM arbiter, TBRE, CSRs, alert |
-| `hw/ip/cheriot/rtl/cheriot_tag_filter.sv` | Forks each core data access into data, tag lookup and metadata FIFO; clears tags on non-capability stores |
-| `hw/ip/cheriot/rtl/cheriot_wtrc.sv` | On the core's tag filter's host port: a capability store to the NVM becomes a read, compared with the store; the tag is set only if both words match, otherwise d_error |
-| `hw/ip/cheriot/rtl/cheriot_rmw_filter.sv` | Read-modify-write of the bit-granular tag words in the meta SRAM |
-| `hw/ip/cheriot/rtl/cheriot_tbre.sv` | Revocation engine: `cheriot_tbre_mover` → own TRVK filter → own tag filter (tag-only writes) |
-| `hw/ip/cheriot/rtl/cheriot_tbre_mover.sv` | Sweeps `TBRE_NUM_CAPS` capabilities from `TBRE_BASE_ADDR` (main SRAM or NVM), two words each, as capability loads, up to two in flight; does not clear a capability the core writes after its lower word was read (snooped core writes) |
-| `hw/ip/cheriot/rtl/cheriot_trvk_core.sv`, `cheriot_trvk_tlul.sv` | TRVK load barrier used by the TBRE: a tagged, non-sealing capability whose base has its revocation bit set loses its tag |
-| `hw/ip/cheriot/rtl/cheriot_socket_m1.sv` | TL-UL M:1 socket carrying the tag and bit-select sideband (core and TBRE onto the one RMW filter) |
-| `hw/ip/cheriot/rtl/cheriot_access_check.sv` | Per-requester meta SRAM region check; everything is refused unless `cheriot_ena_i` is strictly `MuBi4True` |
-| `hw/ip/cheriot/rtl/cheriot_reg_pkg.sv`, `cheriot_regs_reg_top.sv` | Generated CSRs: `INTR_STATE`/`INTR_ENABLE`/`INTR_TEST` (`tbre_done`), `ALERT_TEST`, `TBRE_REGWEN`, `TBRE_BASE_ADDR`, `TBRE_NUM_CAPS`, `TBRE_START`, `TBRE_STATUS`, `TBRE_EPOCH` |
-| `hw/ip/cheriot/doc/theory_of_operation.md`, `registers.md`, `programmers_guide.md` | Design description (meta SRAM map, WTRC, snoop window, error-handling table), registers, how software drives the engine |
-| `hw/ip/cheriot/dv/` | OpenTitan's block-level DV environment (a CSR-only smoke env at this commit) |
+| `hw/ip/cheriot_mem_sys/rtl/cheriot_mem_sys.sv` | Subsystem top: tag filter, RMW filter, access checkers, meta SRAM arbiter, TBRE, CSRs, alert |
+| `hw/ip/cheriot_mem_sys/rtl/cheriot_tag_filter.sv` | Forks each core data access into data, tag lookup and metadata FIFO; clears tags on non-capability stores |
+| `hw/ip/cheriot_mem_sys/rtl/cheriot_wtrc.sv` | On the core's tag filter's host port: a capability store to the NVM becomes a read, compared with the store; the tag is set only if both words match, otherwise d_error |
+| `hw/ip/cheriot_mem_sys/rtl/cheriot_rmw_filter.sv` | Read-modify-write of the bit-granular tag words in the meta SRAM |
+| `hw/ip/cheriot_mem_sys/rtl/cheriot_tbre.sv` | Revocation engine: `cheriot_tbre_mover` → own TRVK filter → own tag filter (tag-only writes) |
+| `hw/ip/cheriot_mem_sys/rtl/cheriot_tbre_mover.sv` | Sweeps `TBRE_NUM_CAPS` capabilities from `TBRE_BASE_ADDR` (main SRAM or NVM), two words each, as capability loads, up to two in flight; does not clear a capability the core writes after its lower word was read (snooped core writes) |
+| `hw/ip/cheriot_mem_sys/rtl/cheriot_trvk_core.sv`, `cheriot_trvk_tlul.sv` | TRVK load barrier used by the TBRE: a tagged, non-sealing capability whose base has its revocation bit set loses its tag |
+| `hw/ip/cheriot_mem_sys/rtl/cheriot_socket_m1.sv` | TL-UL M:1 socket carrying the tag and bit-select sideband (core and TBRE onto the one RMW filter) |
+| `hw/ip/cheriot_mem_sys/rtl/cheriot_access_check.sv` | Per-requester meta SRAM region check; everything is refused unless `cheriot_ena_i` is strictly `MuBi4True` |
+| `hw/ip/cheriot_mem_sys/rtl/cheriot_mem_sys_reg_pkg.sv`, `cheriot_mem_sys_regs_reg_top.sv` | Generated CSRs: `INTR_STATE`/`INTR_ENABLE`/`INTR_TEST` (`tbre_done`), `ALERT_TEST`, `TBRE_REGWEN`, `TBRE_BASE_ADDR`, `TBRE_NUM_CAPS`, `TBRE_START`, `TBRE_STATUS`, `TBRE_EPOCH` |
+| `hw/ip/cheriot_mem_sys/doc/theory_of_operation.md`, `registers.md`, `programmers_guide.md` | Design description (meta SRAM map, WTRC, snoop window, error-handling table), registers, how software drives the engine |
+| `hw/ip/cheriot_mem_sys/dv/` | OpenTitan's block-level DV environment (a CSR-only smoke env at this commit) |
 | `hw/ip/tlul/` | TL-UL package, sockets and adapters (all of `rtl/`; the RACL, `lc_gate` and JTAG files are not needed) |
 | `hw/top_earlgrey/rtl/top_pkg.sv` | `TL_AW`, `TL_DW` and the other TL-UL widths |
 | `hw/vendor/pulp_common_cells/rtl/stream_fork_dynamic.sv` | The only common cell `ibex/vendor/pulp_common_cells` lacks (same upstream revision) |
@@ -69,7 +74,7 @@ differs only for `N=1`; the sockets use `M=2`) and `prim_ram_1p_scr` (named only
 A build contains one `tlul_pkg`: in the RTOS test SoC the subsystem uses Sonata's TL-UL (patch 0001
 makes that possible); `hw/ip/tlul` here is for standalone builds (`dv/cheriot-mem-ss`). The only
 non-style lint warnings are `UNOPTFLAT` combinational-loop notices, which OpenTitan waives in
-`hw/ip/cheriot/lint/cheriot.vlt`.
+`hw/ip/cheriot_mem_sys/lint/cheriot_mem_sys.vlt`.
 
 ## sonata-system
 

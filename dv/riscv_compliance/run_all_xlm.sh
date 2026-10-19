@@ -88,11 +88,15 @@ if [[ ! -d "${XLM_DIR}/xcelium.d" ]]; then
 fi
 echo "Library: ${XLM_DIR}/xcelium.d ($(cat "${XLM_DIR}/.build_mode" 2>/dev/null || echo "mode unknown"))"
 
+# The tests of an ISA run in parallel, up to JOBS (32) at a time: each has its own vmem, stdout,
+# signature, trace and coverage test, and they share the library read-only. PARALLEL=1 alone would
+# give riscv-compliance's own -j4 --max-load=2; JOBS on the command line replaces it.
+_jobs=$(( ${JOBS:-32} ))
 fail=0
 for isa in rv32i rv32im rv32imc rv32Zicsr rv32Zifencei; do
-  echo "=== ISA: ${isa} ==="
+  echo "=== ISA: ${isa} (up to ${_jobs} tests at a time) ==="
   if ! make -C "${COMPLIANCE_DIR}" RISCV_ISA="${isa}" WORK="${WORK_DIR}" work_dir="${WORK_DIR}" \
-       RISCV_GCC_OPTS="${GCC_OPTS_OVERRIDE}" simulate 2>&1; then
+       PARALLEL=1 JOBS="-j${_jobs}" RISCV_GCC_OPTS="${GCC_OPTS_OVERRIDE}" simulate 2>&1; then
     echo "FAIL: compliance test failed for ${isa}"
     fail=1
   fi

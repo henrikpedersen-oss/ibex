@@ -8,7 +8,8 @@
 # RISC-V mode (cheriot_enable_i Off). Cosim off: the program checks itself (trap log below).
 # rtl_test core_ibex_stall_events_test (see its header) with:
 #   +gnt_trig_lo/hi = [TRIG, TRIG + 0x3ff]: the offset of a data access picks what its grant (G)
-#     raises: T_IRQ irq_external_i from G + 2, T_NMI irq_nm_i from G + 2 (both held until the
+#     raises: T_IRQ irq_external_i from G + 2, T_NMI irq_nm_i from G + 2 (G + 4 with
+#     T_NMI_LATE, +gnt_nmi_late_cycles default 2) (both held until the
 #     core takes an interrupt), T_DPULSE debug_req in cycle G + 1 only (withdrawn), T_NMI_IRQ
 #     irq_nm_i from the second cycle after the next IRQ_TAKEN, held until taken;
 #   +mem_mode_on_write = MEMMODE: M_PIPE, data responses 6..16 cycles after the grant and
@@ -46,13 +47,17 @@
 #      grant G2 >= R1. The internal NMI is pending from R1 + 1, after which halt_if lets nothing
 #      into ID; the word behind is 60+ cycles away, which covers G2 = R1 (nothing would hold it
 #      out at R1 + 1). So ID is empty from G2 + 1 and captures the internal NMI there (its first
-#      empty cycle with the NMI pending). irq_nm_i rises at G2 + 2, with ID still
+#      empty cycle with the NMI pending). irq_nm_i rises at G2 + 4 (T_NMI_LATE), with ID still
 #      empty and L2 still outstanding (response at G2 + 6 or later), so the controller is still
-#      in DECODE and not in NMI mode: new_nmi recaptures (6.1.3). IRQ_TAKEN follows L2's
+#      in DECODE and not in NMI mode: new_nmi recaptures (6.1.3). Raised at G2 + 2 (plain T_NMI,
+#      to 2026-10-18) it could fall in that first capture cycle itself (the irq agent drives a
+#      cycle or two after it starts, and with G2 = R1 the capture is a cycle late): one capture
+#      then took both NMIs (captured_nmi = 1) and 6.1.3 / 6.1.6 were never hit. IRQ_TAKEN follows L2's
 #      response with both NMIs pending: the external one is taken, the internal one stays
 #      (741, 410). Only the load right after the faulting one executes first, as
 #      exception_interrupts.rst allows.
-#   B  As A with T_NMI | T_IRQ and mie.MEIE / mstatus.MIE set: new_irq = 1 too (6.1.6). The
+#   B  As A with T_NMI | T_NMI_LATE | T_IRQ and mie.MEIE / mstatus.MIE set: the interrupt from
+#      G2 + 2 is not captured (captured_valid), and new_irq = 1 when the NMI arrives (6.1.6). The
 #      bench drops irq_external_i at the IRQ_TAKEN (the NMI's), so no MEI is ever taken.
 #   D  A lone 32-bit load at T_DPULSE | T_NMI | T_IRQ (MIE on): ID is empty from G + 1 (next
 #      word 60+ cycles away) while the load is outstanding (id_wb_pending, no debug entry), so
@@ -97,6 +102,7 @@
 #define TRIG          0x80100000          /* +gnt_trig_lo/hi = 80100000 / 801003ff */
 #define T_IRQ         0x008
 #define T_NMI         0x020
+#define T_NMI_LATE    0x004               /* with T_NMI: irq_nm_i +gnt_nmi_late_cycles (2) later */
 #define T_DPULSE      0x100
 #define T_NMI_IRQ     0x200
 #define MEMMODE       0x80100800          /* +mem_mode_on_write=80100800 */
@@ -111,7 +117,7 @@
 #ifdef COV_EXPR_INJECT_FAIL
 #define A_OFF         0
 #else
-#define A_OFF         T_NMI
+#define A_OFF         (T_NMI | T_NMI_LATE)
 #endif
 
 # Registers: a0 = TRIG, a1 = INTG_ADDR, s9 = trap log base, s8 = next free log entry (the
@@ -222,7 +228,7 @@ RVTEST_CODE_BEGIN
   .option push
   .option rvc
   c.lw    a2, 0(a1)                 # L1: bad integrity, internal NMI
-  c.lw    a3, A_OFF(a0)             # L2: irq_nm_i from its grant + 2
+  c.lw    a3, A_OFF(a0)             # L2: irq_nm_i from its grant + 4
   .option pop
 a_resume:
   LOG_COUNT 2, 10
@@ -246,7 +252,7 @@ a_resume:
   .option push
   .option rvc
   c.lw    a2, 0(a1)
-  c.lw    a3, (T_NMI | T_IRQ)(a0)
+  c.lw    a3, (T_NMI | T_NMI_LATE | T_IRQ)(a0)
   .option pop
 b_resume:
   IRQ_OFF

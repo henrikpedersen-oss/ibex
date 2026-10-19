@@ -1,0 +1,59 @@
+# Copyright lowRISC contributors.
+# Licensed under the Apache License, Version 2.0, see LICENSE for details.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Functional coverage closure, fourth round: directed tests for the 7 core_ibex_fcov_if.sv bins the
+# combined coverage of regression 2026-10-18 20:47 left unhit in the UNR-excluded view (uarch_cg
+# exception_stall_instr_cross x4, pipe_cross x2, interrupt_taken_instr_cross x1). Each test header
+# names its bins and why the stimulus reaches them; both reuse the arrangements of
+# cov_fcov2_rv_hazard (cases behind a grant-timed data access) and cov_fcov3_rv_hazard section D
+# (IF empty and idle behind X).
+#
+# Configs are shared across all directed_testlist*.yaml files (directed_test_schema.py):
+# riscv-tests is defined in directed_testlist.yaml, cheriot-dv-tests in
+# directed_testlist_cheriot_traps.yaml. TRIG = 0x80100000 is outside the image, hence
+# +enable_bad_intg_on_uninit_access=0; its upper half is the bus-error window.
+
+- test: cov_fcov4_rv_hazard
+  desc: >
+    RISC-V mode: ebreak (into debug mode) and wfi unstalling on a slow access's response with
+    debug_req and a masked timer interrupt pending; ebreak (exception) and fence in their first ID
+    cycle on a bus-error response with debug_req, the timer pending for ebreak and nothing for
+    fence; dret outside debug mode (PrivIllegal) in ID behind a waiting load with IF empty and
+    idle; and an NMI raised from debug mode, taken right after the handler's dret. Targets uarch_cg
+    exception_stall_instr_cross (0,0,EBreakDbg,None,1,1,1) (0,0,WFI,None,1,1,1)
+    (0,1,EBreakExc,None,0,1,1) (0,1,Fence,None,0,0,1), pipe_cross {PrivIllegal, EmptyAndIdle,
+    FullAndStalled, FullAndUnstalled} and interrupt_taken_instr_cross {nmi, not unstalled, DRet}.
+    Self-checking (trap, NMI and debug-entry counts, causes; codes in the header), Spike cosim on.
+  iterations: 1
+  test_srcs: cov_fcov4_rv_hazard/cov_fcov4_rv_hazard.S
+  config: riscv-tests
+  # Section C's slow instruction fetches (5 attempts) take about 15000-20000 cycles on top.
+  timeout_s: 900
+  rtl_test: core_ibex_stall_events_test
+  sim_opts: >-
+    +disable_spurious_dside_responses=1 +disable_fetch_enable_seq=1
+    +enable_bad_intg_on_uninit_access=0
+    +dside_bus_err_lo=80100080 +dside_bus_err_hi=801000ff
+    +gnt_trig_lo=80100000 +gnt_trig_hi=801000ff +gnt_fetch_off_cycles=40
+    +dbg_req_on_write=80100100 +mem_mode_on_write=80100104 +irq_timer_on_wfi=1
+    +dbg_gap_min=2 +dbg_gap_max=4
+
+- test: cov_fcov4_cheri_hazard
+  desc: >
+    CHERIoT mode (pin raised by +cheriot_enable_on_write): a CHERI instruction (CIncAddrImm
+    independent of the load, CIncAddr reading its destination) in ID behind a load that turns
+    fetch_enable_i off, with nothing fetched behind it, so IF is empty and idle while the CHERI op
+    and the load both wait. Targets uarch_cg pipe_cross {Cheri, EmptyAndIdle, FullAndStalled,
+    FullAndStalled}. Self-checking (trap count, cases run), cosim off. Exit code in a0 (test
+    header).
+  iterations: 1
+  test_srcs: cov_fcov4_cheri_hazard/cov_fcov4_cheri_hazard.S
+  config: cheriot-dv-tests
+  timeout_s: 900
+  rtl_test: core_ibex_stall_events_test
+  sim_opts: >-
+    +cheriot_enable_on_write=80200000 +disable_cosim=1 +disable_spurious_dside_responses=1
+    +require_signature_addr=1 +disable_fetch_enable_seq=1 +enable_bad_intg_on_uninit_access=0
+    +gnt_trig_lo=80100000 +gnt_trig_hi=801000ff +gnt_fetch_off_cycles=40
+    +mem_mode_on_write=80100104

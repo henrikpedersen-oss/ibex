@@ -240,7 +240,7 @@ function set_mstatus_UXL(m : Mstatus, a : arch_xlen) -> Mstatus = {
   }
 }
 
-function legalize_mstatus(o : Mstatus, v : xlenbits) -> Mstatus = {
+function legalize_mstatus_sail(o : Mstatus, v : xlenbits) -> Mstatus = {
   /*
    * Populate all defined fields using the bits of v, stripping anything
    * that does not have a matching bitfield entry. All bits above 32 are handled
@@ -284,6 +284,16 @@ function legalize_mstatus(o : Mstatus, v : xlenbits) -> Mstatus = {
     let m = [m with MPRV = 0b0];
     m
   } else m
+}
+
+/* Ibex: mstatus fields as cs_registers.rst "Machine Status (mstatus)" documents them (local change
+ * 2026-10-18): TW (21), MPRV (17), MPP (12:11), MPIE (7), MIE (3); the rest of the low word reads
+  * zero (Mstatus is xlenbits wide; the model is built for RV32 only). An unsupported MPP is Machine
+ * mode. The generated C carries the same wrapper. */
+function legalize_mstatus(o : Mstatus, v : xlenbits) -> Mstatus = {
+  let m = legalize_mstatus_sail(o, v);
+  let m = Mk_Mstatus(m.bits & zero_extend(0x0022_1888));
+  if m[MPP] == 0b11 | (m[MPP] == 0b00 & haveUsrMode()) then m else [m with MPP = 0b11]
 }
 
 /* architecture and extension checks */
@@ -337,7 +347,7 @@ register mip     : Minterrupts /* Pending */
 register mie     : Minterrupts /* Enabled */
 register mideleg : Minterrupts /* Delegation to S-mode */
 
-function legalize_mip(o : Minterrupts, v : xlenbits) -> Minterrupts = {
+function legalize_mip_sail(o : Minterrupts, v : xlenbits) -> Minterrupts = {
   /* The only writable bits are the S-mode bits, and with the 'N'
    * extension, the U-mode bits. */
   let v = Mk_Minterrupts(v);
@@ -347,7 +357,10 @@ function legalize_mip(o : Minterrupts, v : xlenbits) -> Minterrupts = {
   } else m
 }
 
-function legalize_mie(o : Minterrupts, v : xlenbits) -> Minterrupts = {
+/* Ibex: "mip is a read-only register" (cs_registers.rst; local change 2026-10-18). */
+function legalize_mip(o : Minterrupts, v : xlenbits) -> Minterrupts = o
+
+function legalize_mie_sail(o : Minterrupts, v : xlenbits) -> Minterrupts = {
   let v = Mk_Minterrupts(v);
   let m = [o with
     MEI = v[MEI],
@@ -361,6 +374,13 @@ function legalize_mie(o : Minterrupts, v : xlenbits) -> Minterrupts = {
   if haveUsrMode() & haveNExt() then {
     [m with UEI = v[UEI], UTI = v[UTI], USI = v[USI]]
   } else m
+}
+
+/* Ibex: mie holds MEIE (11), MTIE (7), MSIE (3) and the fast-interrupt enables (30:16)
+ * (cs_registers.rst; local change 2026-10-18). */
+function legalize_mie(o : Minterrupts, v : xlenbits) -> Minterrupts = {
+  let m = legalize_mie_sail(o, v);
+  Mk_Minterrupts((m.bits & zero_extend(0x0888)) | (v & zero_extend(0x7FFF_0000)))
 }
 
 function legalize_mideleg(o : Minterrupts, v : xlenbits) -> Minterrupts = {
@@ -416,6 +436,16 @@ bitfield Mcause : xlenbits = {
   Cause       : xlen - 2 .. 0
 }
 register mcause : Mcause
+
+/* Ibex mcause (local change 2026-10-18): bit 31 and bits 4:0 (cs_registers.rst "Machine Cause"), and
+ * the internal-interrupt encoding 0xFFFFFFE0 (exception_interrupts.rst): bits 30:5 read as ones when
+ * bits 31 and 30 are written 1. RV32 only, as the model is built. */
+function legalize_mcause(v : xlenbits) -> xlenbits = {
+  let lower : xlenbits = v & zero_extend(0x1F);
+  if v[31] == bitzero then lower
+  else if v[30] == bitzero then lower | zero_extend(0x8000_0000)
+  else lower | zero_extend(0xFFFF_FFE0)
+}
 
 /* Interpreting the trap-vector address */
 function tvec_addr(m : Mtvec, c : Mcause) -> option(xlenbits) = {

@@ -19,6 +19,9 @@ The cheriot-rtos tests.extra runs (SIM_ONLY_TESTS) print no verdict lines. Each 
 run ended on the RTOS exit string and holds no other marker, its UART log reports
 "Simulation exit code: 0" (local cheriot-rtos patch 0002) and no other code, and the log contains
 the lines the test must print (SIM_ONLY_TESTS).
+The perf_test runs perf-<config>-lat<n> (boot_performance) pass only if the .sim.txt is as clean,
+the log has "All tests finished" and no FAIL line, and both workloads' PERF lines are within the
+15M-cycle boot budget.
 """
 
 import argparse
@@ -84,9 +87,19 @@ SIM_ONLY_TESTS = {
 EXIT_SEEN = "Exiting the simulator because the magic UART string was seen."
 EXIT_CODE_LINE = re.compile(r"^Simulation exit code: (?P<code>\d+)$")
 
+# firmware/perf_test runs (make sonata-perf-xlm), kept as perf-<config>-lat<n>: testplan
+# perf_<config, '-' as '_'>_lat<n>. Budget: Earl Grey 2's boot, 100 ms at 150 MHz (perf_report.py).
+PERF_TARGET = re.compile(r"^perf-(?P<cfg>.+)-lat(?P<lat>\d+)$")
+PERF_LINE = re.compile(r": PERF (?P<wl>\S+) cycles (?P<cyc>\d+)\b")
+PERF_FAIL = re.compile(r": (FAIL\b|Test\(s\) Failed)")
+PERF_WORKLOADS = ("hash_feed_core", "hash_feed_dma")
+PERF_BUDGET_CYCLES = 15_000_000
+
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 RTOS_LINE = re.compile(r"^Test runner: (?P<name>.+?) (?P<verdict>finished in \d+ cycles|failed)$")
-REVOCATION_LINE = re.compile(r"^Revocation barrier: (?P<verdict>PASS|FAIL) (?P<what>phase [123]|sweep|random)\b")
+REVOCATION_LINE = re.compile(r"^Revocation barrier: (?P<verdict>PASS|FAIL) (?P<what>phase [123]|sweep|random|base|preempt|race|progress)\b")
+# "PASS race" and "PASS progress" are the sweep_race and sweep_progress tests; the others keep their word.
+REVOCATION_TESTS = {"race": "revocation_sweep_race", "progress": "revocation_sweep_progress"}
 # TRBE: the engine's name in firmware built before the upstream rename
 TBRE_INVAL_LINE = re.compile(
     r"^Revocation barrier: (?P<verdict>PASS|FAIL) T(?:BR|RB)E invalidate-only:")
@@ -111,8 +124,8 @@ def parse_log(path):
         m = REVOCATION_LINE.match(line)
         if m:
             what = m["what"].replace(" ", "")
-            name = ("revocation_" + what if what in ("sweep", "random")
-                    else "revocation_barrier_" + what)
+            name = ("revocation_barrier_" + what if what.startswith("phase")
+                    else REVOCATION_TESTS.get(what, "revocation_" + what))
             yield name, m["verdict"] == "PASS"
             continue
         m = TBRE_INVAL_LINE.match(line)
@@ -132,17 +145,49 @@ def parse_log(path):
             yield "cheri_c_" + m["test"], m["verdict"] == "PASS"
 
 
-def sim_only_verdict(log, checks):
-    """(passed, reason) for one tests.extra run: its .sim.txt, exit code and required lines."""
+def sim_txt_problem(log):
+    """Why the run's .sim.txt is not a clean end on the RTOS exit string, or None."""
     sim_txt = log.with_name(log.name[: -len(".uart.log")] + ".sim.txt")
     if not sim_txt.exists():
-        return False, f"no {sim_txt.name}"
+        return f"no {sim_txt.name}"
     markers = [m for m in sim_txt.read_text(errors="replace").splitlines() if m.strip()]
     others = [m for m in markers if m.strip() != EXIT_SEEN]
     if others:
-        return False, f"{sim_txt.name}: {others[0].strip()}"
+        return f"{sim_txt.name}: {others[0].strip()}"
     if len(markers) == len(others):
-        return False, f"{sim_txt.name}: the run did not end on the RTOS exit string"
+        return f"{sim_txt.name}: the run did not end on the RTOS exit string"
+    return None
+
+
+def perf_verdict(log):
+    """(passed, reason) for one perf_test run (boot_performance testpoint)."""
+    problem = sim_txt_problem(log)
+    if problem:
+        return False, problem
+    lines = [ANSI.sub("", raw).strip() for raw in log.read_text(errors="replace").splitlines()]
+    failed = [line for line in lines if PERF_FAIL.search(line)]
+    if failed:
+        return False, failed[0]
+    if not any(line.endswith(": All tests finished") for line in lines):
+        return False, "no 'All tests finished'"
+    cycles = {}
+    for line in lines:
+        m = PERF_LINE.search(line)
+        if m:
+            cycles[m["wl"]] = int(m["cyc"])
+    for wl in PERF_WORKLOADS:
+        if wl not in cycles:
+            return False, f"no PERF line for {wl}"
+        if cycles[wl] > PERF_BUDGET_CYCLES:
+            return False, f"{wl}: {cycles[wl]} cycles, over the {PERF_BUDGET_CYCLES} budget"
+    return True, ""
+
+
+def sim_only_verdict(log, checks):
+    """(passed, reason) for one tests.extra run: its .sim.txt, exit code and required lines."""
+    problem = sim_txt_problem(log)
+    if problem:
+        return False, problem
     lines = [ANSI.sub("", raw).strip() for raw in log.read_text(errors="replace").splitlines()]
     codes = [m["code"] for m in map(EXIT_CODE_LINE.match, lines) if m]
     if codes != ["0"]:
@@ -201,14 +246,20 @@ def main():
         if len(parts) != 2 or parts[1] not in BUILDS:
             continue
         target, build = parts
-        if target not in SIM_ONLY_TESTS:
+        mp = PERF_TARGET.match(target)
+        if mp:
+            test_name = f"perf_{mp['cfg'].replace('-', '_')}_lat{mp['lat']}"
+            verdict_fn = perf_verdict
+        elif target in SIM_ONLY_TESTS:
+            test_name, checks = SIM_ONLY_TESTS[target]
+            verdict_fn = lambda log, checks=checks: sim_only_verdict(log, checks)
+        else:
             continue
-        test_name, checks = SIM_ONLY_TESTS[target]
         if test_name not in required:
             print(f"warning: {log.name}: sim-only test '{test_name}' is not in the testplan",
                   file=sys.stderr)
             continue
-        passed, reason = sim_only_verdict(log, checks)
+        passed, reason = verdict_fn(log)
         if not passed:
             print(f"{log.name}: {reason}")
         key = (test_name, build)

@@ -18,6 +18,9 @@ import os
 import re
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import syn_lib  # noqa: E402
+
 NANGATE45_NAND2_X1_AREA = 0.798
 PIE_SLICES = 5
 
@@ -145,18 +148,27 @@ def split_by_block(modules, top, max_share):
     return total, [(lab, area, path) for lab, area, path, _, _ in slices], memo
 
 
+# NanGate45 (DFF_X1, DLH_X1, CLKGATETST_X1, BUF_X2), ASAP7 (DFFHQNx1_ASAP7_75t_R, DHLx1_, ICGx1_,
+# BUFx2_), and, after their prefix, SKY130 (sky130_fd_sc_hd__dfrtp_1, dlxtp_1, sdlclkp_1, clkbuf_1,
+# buf_2) and IHP (sg13g2_dfrbp_1, dlhq_1, slgcp_1, buf_2).
 CELL_CLASSES = [
-    ('Flip-flops', re.compile(r'^S?DFF')),
-    ('Latches', re.compile(r'^(DL[HL]_|\$_DLATCH)')),
-    ('Clock buffers and gates', re.compile(r'^CLK(BUF|GATE)')),
-    ('Buffers and inverters', re.compile(r'^(BUF|INV)_')),
+    ('Flip-flops', re.compile(r'^(S?DFF|SDF[HL]|s?e?df)')),
+    ('Latches', re.compile(r'^(DL[HL]_|DHLx|DLLx|dl[xrhl]|\$_DLATCH)')),
+    ('Clock buffers and gates', re.compile(r'^(CLK(BUF|GATE)|ICG|CKINV|s?dlclkp|clk(buf|inv|dlybuf)|s?lgcp)')),
+    ('Buffers and inverters', re.compile(r'^((BUF|INV)_|(BUF|INV)x|HB\dx|buf|inv)')),
 ]
+LIB_PREFIX = re.compile(r'^(sky130_fd_sc_[a-z]+__|sg13g2_)')
+
+
+def cell_class(typ):
+    base = LIB_PREFIX.sub('', typ)
+    return next((c for c, rx in CELL_CLASSES if rx.match(base)), 'Combinational logic')
 
 
 def split_by_cell_class(mod):
     areas = {}
     for typ, (_, area) in mod['cells'].items():
-        cls = next((c for c, rx in CELL_CLASSES if rx.match(typ)), 'Combinational logic')
+        cls = cell_class(typ)
         areas[cls] = areas.get(cls, 0.0) + (area or 0.0)
     return [(cls, a, cls) for cls, a in areas.items() if a > 0]
 
@@ -350,9 +362,13 @@ def main():
     ap.add_argument('-o', '--out', help='HTML output (default: area_chart.html beside the report)')
     ap.add_argument('--max-share', type=float, default=0.30,
                     help='split any block above this share of the total into its parts (default 0.30)')
-    ap.add_argument('--ge-area', type=float, default=NANGATE45_NAND2_X1_AREA,
-                    help='area of one gate equivalent, um^2 (default: NanGate45 NAND2_X1, 0.798)')
+    ap.add_argument('--ge-area', type=float,
+                    help='area of one gate equivalent, um^2 (default: the run\'s library, '
+                         'run_info.txt; NanGate45 NAND2_X1, 0.798, for a run without one)')
     args = ap.parse_args()
+    lib = syn_lib.for_report(args.report)
+    if args.ge_area is None:
+        args.ge_area = lib['ge_area']
 
     modules, order, top_area = parse_report(args.report)
     top = find_top(modules, order)
@@ -381,7 +397,7 @@ def main():
                      'the blocks add up to {:,.0f}.'.format(top_area, total))
 
     title = '{} area by {}'.format(clean_name(top), 'block' if hierarchical else 'cell class')
-    subtitle = ' · '.join(x for x in (isa, 'NanGate45, 1 GE = NAND2_X1 = {} µm²'.format(args.ge_area),
+    subtitle = ' · '.join(x for x in (isa, syn_lib.ge_label(lib, args.ge_area),
                                            os.path.basename(os.path.dirname(os.path.dirname(
                                                os.path.abspath(args.report))))) if x)
     out = args.out or os.path.join(os.path.dirname(args.report), 'area_chart.html')
