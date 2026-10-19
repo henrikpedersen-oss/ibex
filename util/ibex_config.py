@@ -41,8 +41,15 @@ class Config:
         ('PMPGranularity', int),
         ('PMPNumRegions', int),
         ('MHPMCounterNum', int),
-        ('MHPMCounterWidth', int)
+        ('MHPMCounterWidth', int),
+        ('DbgHwBreakNum', int),
+        ('PMPRstEarlGrey', bool)
     ]
+
+    # Fields that select testbench options, not ibex_top parameters: never passed as a parameter
+    # (fusesoc, -defparam, -G), always as a <prefix><field> define the testbench reads.
+    # PMPRstEarlGrey: build with Earl Grey's PMP reset values (earlgrey-pmprst).
+    bench_only_fields = {'PMPRstEarlGrey'}
 
     def __init__(self, yml):
         if not isinstance(yml, dict):
@@ -84,6 +91,8 @@ class Config:
         self.pmp_num_regions = Config.read_int('PMPNumRegions', yml)
         self.mhpm_counter_num = Config.read_int('MHPMCounterNum', yml)
         self.mhpm_counter_width = Config.read_int('MHPMCounterWidth', yml)
+        self.dbg_hw_break_num = Config.read_int('DbgHwBreakNum', yml)
+        self.pmp_rst_earlgrey = Config.read_bool('PMPRstEarlGrey', yml)
 
     @staticmethod
     def read_bool(fld, yml):
@@ -136,6 +145,8 @@ class FusesocOpts:
     def output(self, config, args):
         fusesoc_cmd = []
         for fld, typ in Config.known_fields:
+            if fld in Config.bench_only_fields:
+                continue
             val = config.params[fld]
             fusesoc_cmd.append(shlex.quote(f'--{fld}={val}'))
 
@@ -213,7 +224,7 @@ class SimOpts:
                 # Explicitly convert to 0/1 (handling genuine booleans)
                 val_as_int = int(val)
 
-                if self.params_as_defines:
+                if self.params_as_defines or fld in Config.bench_only_fields:
                     parameter_define = args.string_define_prefix + fld
                     param_opts = self.define_set_fn(parameter_define,
                                                     str(val_as_int))

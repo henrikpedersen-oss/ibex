@@ -7,9 +7,10 @@
 // same name: the model gains the CSRs Ibex documents and the model lacked or read differently.
 //
 // Values come from Ibex's documentation (ibex/doc/03_reference/cs_registers.rst,
-// performance_counters.rst; "doc" below), with the parameters of the `opentitan` configuration the
-// TestRIG bench builds (ibex/ibex_configs.yaml: MHPMCounterNum 10, MHPMCounterWidth 32,
-// DbgTriggerEn 1, ICache 1, SecureIbex 1; DbgHwBreakNum 1, the default). One exception, marked
+// performance_counters.rst; "doc" below), with the parameters the benches build with
+// (ibex/ibex_configs.yaml earlgrey and opentitan: MHPMCounterWidth 32, DbgTriggerEn 1, ICache 1,
+// SecureIbex 1). MHPMCounterNum differs (earlgrey 2, opentitan 10) and the bench sets it
+// (ibex_platform_set_mhpm_counter_num). One exception, marked
 // below: mhpmevent follows the RTL where the documentation disagrees with it (draft ticket in
 // status/rtl_tickets.md (ibex_cheriot_verification)).
 //
@@ -24,7 +25,11 @@
 
 #include "ibex_platform_csrs.h"
 
-#define IBEX_MHPM_COUNTER_NUM  10u  // opentitan; mhpmcounter3 .. mhpmcounter12 count
+// MHPMCounterNum: the number of event counters, mhpmcounter3 .. mhpmcounter(3+N-1). A build
+// parameter, so the bench sets it before init (ibex_platform_set_mhpm_counter_num) from the
+// configuration it built; 10 (opentitan) until then.
+static unsigned s_mhpm_counter_num = 10u;
+#define IBEX_MHPM_COUNTER_NUM  s_mhpm_counter_num
 #define IBEX_MHPM_COUNTER_BASE 3u
 
 // mcounteren / mcountinhibit: one bit per counter 0 .. MHPMCounterNum+2, no time counter (bit 1
@@ -112,7 +117,8 @@ mach_bits ibex_csr_read(mach_bits csr) {
     case 0xF15: case 0x30A: case 0x31A: return 0;
     case 0x306: return s_mcounteren;
     case 0x320: return s_mcountinhibit;
-    case 0x7A0: return 0;  // doc :397-412: reset 0, one trigger, so index 0 only
+    case 0x7A0: return 0;  // reset 0; written only in debug mode, as the RTL does (the doc is
+                           // unclear for DbgHwBreakNum > 1: draft ticket, status/rtl_tickets.md)
     case 0x7A1: return IBEX_TDATA1_VALUE;
     case 0x7A2: return 0;  // tmatch_value, written only in debug mode, reset 0
     case 0x7A3: case 0x7A8: case 0x7AA: case 0x5A8:
@@ -251,6 +257,10 @@ uint64_t ibex_smepmp_write_cfg(uint64_t old_cfg, uint64_t v, uint64_t grain) {
 
 void ibex_platform_set_mhpmcounter(unsigned idx, uint64_t value) {
   if (is_hpm_idx_implemented(idx)) s_mhpmcounter[idx] = value;
+}
+
+void ibex_platform_set_mhpm_counter_num(unsigned num) {
+  s_mhpm_counter_num = num > 29u ? 29u : num;  // mhpmcounter3 .. mhpmcounter31 at most
 }
 
 void ibex_platform_set_ic_scr_key_valid(bool valid) { s_ic_scr_key_valid = valid; }

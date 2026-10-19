@@ -1196,6 +1196,7 @@ module ibex_core import ibex_pkg::*; import ibex_cheriot_pkg::*; #(
 
     .lsu_resp_valid_i(lsu_resp_valid),
     .lsu_resp_err_i  (lsu_resp_err),
+    .cheriot_wb_err_i(cheriot_wb_err),
 
     .instr_done_wb_o(instr_done_wb)
   );

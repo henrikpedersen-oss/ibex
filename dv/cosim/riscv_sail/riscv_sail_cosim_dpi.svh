@@ -24,6 +24,8 @@ import "DPI-C" function void riscv_sail_cosim_set_pc(bit [31:0] pc);
 import "DPI-C" function void riscv_sail_cosim_set_mhpmcounter(int unsigned idx,
                                                               longint unsigned value);
 import "DPI-C" function void riscv_sail_cosim_set_ic_scr_key_valid(bit valid);
+// set_mhpm_counter_num: MHPMCounterNum of the build (configuration: call before init)
+import "DPI-C" function void riscv_sail_cosim_set_mhpm_counter_num(int unsigned num);
 
 import "DPI-C" function int unsigned     riscv_sail_cosim_get_pc_wdata();
 import "DPI-C" function bit              riscv_sail_cosim_get_trap();

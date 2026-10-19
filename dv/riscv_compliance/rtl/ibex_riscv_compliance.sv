@@ -56,6 +56,7 @@ module ibex_riscv_compliance (
   parameter int unsigned LockstepOffset   = 1;
   parameter bit ICacheScramble            = 1'b0;
   parameter bit DbgTriggerEn              = 1'b0;
+  parameter int unsigned DbgHwBreakNum   = 1;
 
   logic clk_sys, rst_sys_n;
 
@@ -191,6 +192,7 @@ module ibex_riscv_compliance (
       .FetchOutputReg            (FetchOutputReg      ),
       .DataIfReg                 (DataIfReg           ),
       .DbgTriggerEn              (DbgTriggerEn        ),
+      .DbgHwBreakNum             (DbgHwBreakNum       ),
       .SecureIbex                (SecureIbex          ),
       .LockstepOffset            (LockstepOffset      ),
       .ICacheScramble            (ICacheScramble      ),

@@ -133,6 +133,12 @@ parameters:
     paramtype: vlogparam
     description: "Enable support for debug triggers. "
 
+  DbgHwBreakNum:
+    datatype: int
+    default: 1
+    paramtype: vlogparam
+    description: "Number of debug hardware triggers (with DbgTriggerEn)"
+
   SecureIbex:
     datatype: int
     default: 0

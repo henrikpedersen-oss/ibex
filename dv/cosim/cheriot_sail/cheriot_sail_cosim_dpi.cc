@@ -567,6 +567,12 @@ void cheriot_sail_cosim_set_mcounteren_writable(svBit writable) {
   ibex_platform_set_mcounteren_writable(writable != 0);
 }
 
+// The build's MHPMCounterNum: which mhpmcounter/mhpmevent CSRs count and the mcounteren /
+// mcountinhibit mask. Configuration, so set before init.
+void cheriot_sail_cosim_set_mhpm_counter_num(uint32_t num) {
+  ibex_platform_set_mhpm_counter_num(num);
+}
+
 // ---------------------------------------------------------------------------
 // RVFI execution packet of the last step()
 // ---------------------------------------------------------------------------

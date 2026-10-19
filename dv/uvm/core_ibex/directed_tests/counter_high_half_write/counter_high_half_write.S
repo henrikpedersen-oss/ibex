@@ -12,10 +12,10 @@
 #   ibex_counter.sv `if (counterh_we_i) begin` (the upper-half load) in
 #     cs_registers_i.mcycle_counter_i                       (mcycleh,  0xB80)
 #     cs_registers_i.minstret_counter_i                     (minstreth, 0xB82)
-#     cs_registers_i.gen_cntrs[0..9].gen_imp.mcounters_variable_i
-#                                                           (mhpmcounter3h..12h, 0xB83..0xB8C)
+#     cs_registers_i.gen_cntrs[0..N-1].gen_imp.mcounters_variable_i
+#                                                           (mhpmcounter3h.., N = MHPMCounterNum)
 #   ibex_cs_registers.sv the counter-upper-half write case item (one block per CSR label):
-#     the unimplemented mhpmcounter13h..31h (0xB8D..0xB9F) as well
+#     the unimplemented mhpmcounter(3+N)h..31h as well
 #   and the low-half carry into the upper half of mcycle and minstret.
 #
 # Expected behaviour (not taken from the RTL):
@@ -26,9 +26,10 @@
 #     riscv_insts_zicsr.sail:150-152, minstret_increment = false). The low-half checks below
 #     use a window, so they hold whichever way an implementation counts; the exact count is
 #     Spike's to compare (csrr minstret is not pushed from the DUT, unlike mcycle/HPM).
-#   - Event counters: the verified configuration has MHPMCounterNum = 10 and
-#     MHPMCounterWidth = 32 (spec, "Verified configuration" table; ibex_configs.yaml
-#     opentitan). A 32-bit counter has no bits 63:32 (doc/03_reference/performance_counters.rst:
+#   - Event counters: mhpmcounter3 .. mhpmcounter(3+N-1) exist, N = MHPMCounterNum of the build
+#     (IBEX_MHPM_COUNTER_NUM, from ibex_configs.yaml via compile_test.py: earlgrey 2, opentitan
+#     10); the others read 0 and ignore writes (doc cs_registers.rst). MHPMCounterWidth is 32 in
+#     every configuration this test runs on. A 32-bit counter has no bits 63:32 (doc/03_reference/performance_counters.rst:
 #     "Their width can be parametrized between 1 and 64 bit"), so mhpmcounterNh reads 0 after
 #     a write of all-ones, and the low half is unchanged by it.
 #
@@ -46,14 +47,20 @@
 #   8  minstret low half not in [L2, L2+256)
 #   9  minstret did not carry into minstreth (low = 0xFFFFFFF0, then >= 64 instructions)
 #   10 minstret low half after the carry not in [1, 256)
-#   20+N  mhpmcounterNh != 0 after writing 0xFFFFFFFF (N = 3..12)
-#   40+N  mhpmcounterN low half not in [0x1000+N, 0x1000+N+256) after the upper-half write
-#   60+N  unimplemented mhpmcounterNh != 0 after writing 0xFFFFFFFF (N = 13..31)
+#   20+n  implemented mhpmcounternh != 0 after writing 0xFFFFFFFF (n = 3 .. 2+MHPMCounterNum)
+#   40+n  implemented mhpmcountern low half not in [0x1000+n, 0x1000+n+256) after the
+#         upper-half write
+#   60+n  unimplemented mhpmcounternh != 0 after writing 0xFFFFFFFF (n = 3+MHPMCounterNum .. 31)
+#   (codes as in the configurations here, MHPMCounterNum <= 10, so 20+n and 40+n do not overlap)
 #   99    liveness: fewer checks executed than assembled
 #   0x100 | code  unexpected trap while check `code` was in progress
 
 #include "riscv_test.h"
 #include "test_macros.h"
+
+#ifndef IBEX_MHPM_COUNTER_NUM
+#error "IBEX_MHPM_COUNTER_NUM (MHPMCounterNum) is set by compile_test.py"
+#endif
 
 #define H1 0x5A5A0001
 #define L1 0x00100000
@@ -108,7 +115,7 @@ RVTEST_RV32M
 RVTEST_CODE_BEGIN
 
   .option push
-  .option norvc                   # no compressed instructions: keeps mhpmcounter10 still
+  .option norvc                   # no compressed instructions: keeps mhpmcounter10 (if any) still
   li    s1, 0
 
   # ── mcycle: upper-half write, lower half untouched ──────────────────────────
@@ -162,18 +169,18 @@ RVTEST_CODE_BEGIN
   addi  a1, a1, -1                # [1, 256) -> [0, 255)
   CHK_LTU a1, 0xFF, 10
 
-  # ── mhpmcounter3h..12h (32-bit event counters) ──────────────────────────────
-  .irp n, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12
+  # ── mhpmcounter3h..31h: the implemented ones (32-bit event counters) are checked as
+  # counters, the others (gen_unimp) read 0. Xcelium scores the multi-label write case item
+  # once per label, so each CSR is written. ──
+  .irp n, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31
+  .if \n < 3 + IBEX_MHPM_COUNTER_NUM
     HPM_CHECK \n
-  .endr
-
-  # ── mhpmcounter13h..31h: not implemented (MHPMCounterNum = 10), read as 0 (gen_unimp) ──
-  # Xcelium scores the multi-label write case item once per label, so each CSR is written.
-  .irp n, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31
+  .else
     li    t1, 0xFFFFFFFF
     csrw  0xB80 + \n, t1
     csrr  a0, 0xB80 + \n
     CHK_EQ a0, zero, 60 + \n
+  .endif
   .endr
 
   li    TESTNUM, 99

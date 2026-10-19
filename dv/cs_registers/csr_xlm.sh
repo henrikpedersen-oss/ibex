@@ -65,13 +65,13 @@ fi
 # Build and run are two xrun calls, as in the RTOS flow (cheriot_rtos_xlm_build.sh / _run.sh), for
 # the LD_LIBRARY_PATH below: with it set, the Cadence gcc compiling the C++ fails (*E,CCERR, no
 # compiler message); without it, the simulation cannot load librun.
-# Parameters: the bench's parameters from the ibex configuration (default opentitan, the one the
+# Parameters: the bench's parameters from the ibex configuration (default earlgrey, the one the
 # UVM testbench and coverage_combined use; IBEX_CONFIG overrides), so its coverage merges onto the
 # core's cs_registers_i (2026-10-14: with the core file's defaults -- 4 PMP regions, 8 counters of
 # 40 bits -- expressions and the generate structure did not match). BaseIsa, ShadowCSR and the
 # RV32M/RV32B options are not bench parameters and keep ibex_cs_registers' defaults.
 # -clean: a fresh xcelium.d every build (a few seconds).
-CFG="${IBEX_CONFIG:-opentitan}"
+CFG="${IBEX_CONFIG:-earlgrey}"
 defparams=()
 for p in PMPEnable PMPGranularity PMPNumRegions MHPMCounterNum MHPMCounterWidth DbgTriggerEn ICache; do
   v=$(python3 "${IBEX_ROOT}/util/ibex_config.py" --config_filename "${IBEX_ROOT}/ibex_configs.yaml" \

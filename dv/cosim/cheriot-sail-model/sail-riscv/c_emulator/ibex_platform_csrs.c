@@ -13,11 +13,14 @@
 // -- the illegal-instruction checks (privilege, writes to read-only CSRs), the ASR check, the
 // write of rd, RVFI -- is the model's own CSR instruction semantics.
 //
-// Values come from the RTL source, never from the DUT at run time. Configuration: Ibex's
-// `opentitan` configuration, the one the UVM and TestRIG benches build (ibex/ibex_configs.yaml:
-// MHPMCounterNum 10, MHPMCounterWidth 32, DbgTriggerEn 1, ICache 1, SecureIbex 1 so
-// DataIndTiming and DummyInstructions 1 (ibex_core.sv:195, ibex_top.sv:214); DbgHwBreakNum 1,
-// the ibex_top.sv default). Line numbers below are ibex/rtl/ibex_cs_registers.sv unless stated.
+// Values come from the RTL source, never from the DUT at run time. Configuration: the parameters
+// the UVM and TestRIG benches build with (ibex/ibex_configs.yaml earlgrey and opentitan:
+// MHPMCounterWidth 32, DbgTriggerEn 1, ICache 1, SecureIbex 1 so DataIndTiming and
+// DummyInstructions 1 (ibex_core.sv:195, ibex_top.sv:214)). MHPMCounterNum differs between them
+// (earlgrey 2, opentitan 10) and the bench sets it (ibex_platform_set_mhpm_counter_num).
+// DbgHwBreakNum (earlgrey 4, opentitan 1) changes nothing the model can see: tselect is written
+// only in debug mode (:1761), which the model does not have, so it reads 0 and tdata1/tdata2 are
+// trigger 0's. Line numbers below are ibex/rtl/ibex_cs_registers.sv unless stated.
 //
 // Only the counters' values are bench inputs: they depend on timing (wait cycles, the number of
 // loads, ...) the model does not have, so the bench pushes the DUT's RVFI record of them before
@@ -28,12 +31,15 @@
 
 #include "ibex_platform_csrs.h"
 
-// opentitan configuration (see the header comment).
-#define IBEX_MHPM_COUNTER_NUM 10u  // mhpmcounter3 .. mhpmcounter12 exist
+// MHPMCounterNum: the number of event counters, mhpmcounter3 .. mhpmcounter(3+N-1). A build
+// parameter, so the bench sets it before init (ibex_platform_set_mhpm_counter_num) from the
+// configuration it built; 10 (opentitan) until then.
+static unsigned s_mhpm_counter_num = 10u;
+#define IBEX_MHPM_COUNTER_NUM s_mhpm_counter_num
 #define IBEX_MHPM_COUNTER_BASE 3u   // MHPMCOUNTER_BASE, :185
 
 // mcounteren / mcountinhibit: one flop per counter 0 .. MHPMCounterNum+2, bit 1 (time) tied to
-// 0 (:1541-1559, :1697-1736): 0x1FFD.
+// 0 (:1541-1559, :1697-1736): 0x1FFD with 10 counters, 0x1D with 2.
 #define IBEX_COUNTER_MASK \
   ((((uint64_t)1 << (IBEX_MHPM_COUNTER_NUM + IBEX_MHPM_COUNTER_BASE)) - 1) & ~(uint64_t)0x2)
 
@@ -108,7 +114,7 @@ mach_bits ibex_csr_read(mach_bits csr) {
     case 0x306: return s_mcounteren;            // :472
     case 0x30A: case 0x31A: return 0;           // :457, no write case
     case 0x320: return s_mcountinhibit;         // :576
-    case 0x7A0: return 0;                       // :644-647, tselect_q (1 bit, DbgHwBreakNum 1)
+    case 0x7A0: return 0;                       // :644-647, tselect_q, written only in debug mode (:1761)
     case 0x7A1: return IBEX_TDATA1_VALUE;       // :648-651
     case 0x7A2: return 0;                       // :652-655, tmatch_value_q, reset 0 (:1808-1819)
     case 0x7A3: case 0x7A8: case 0x7AA: case 0x5A8:
@@ -190,6 +196,10 @@ unit ibex_csr_reset(unit u) {
 
 void ibex_platform_set_mhpmcounter(unsigned idx, uint64_t value) {
   if (is_hpm_idx_implemented(idx)) s_mhpmcounter[idx] = value;
+}
+
+void ibex_platform_set_mhpm_counter_num(unsigned num) {
+  s_mhpm_counter_num = num > 29u ? 29u : num;  // mhpmcounter3 .. mhpmcounter31 at most
 }
 
 void ibex_platform_set_ic_scr_key_valid(bool valid) { s_ic_scr_key_valid = valid; }

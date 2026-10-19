@@ -37,6 +37,9 @@ uint64_t ibex_smepmp_write_cfg(uint64_t old_cfg, uint64_t v, uint64_t grain);
 // Bench inputs, pushed before each step. idx is the counter number, 3..31 (mhpmcounter<idx>);
 // value is the full 64-bit counter.
 void ibex_platform_set_mhpmcounter(unsigned idx, uint64_t value);
+// MHPMCounterNum of the build (0 .. 29). Configuration, not state: set before init, kept by
+// ibex_csr_reset.
+void ibex_platform_set_mhpm_counter_num(unsigned num);
 // cpuctrlsts.ic_scr_key_valid (bit 8): the instruction cache's scrambling-key handshake.
 void ibex_platform_set_ic_scr_key_valid(bool valid);
 

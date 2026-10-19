@@ -13,7 +13,7 @@ import subprocess
 import pathlib3x as pathlib
 
 from metadata import RegressionMetadata, LockedMetadata
-from ibex_cmd import get_compile_opts
+from ibex_cmd import get_compile_opts, get_config
 from scripts_lib import run_one
 import riscvdv_interface
 
@@ -143,6 +143,13 @@ def _main() -> int:
             debug_mode_opts = (r" +define+DEBUG_MODE_HALT_ADDR=8000_0000 " +
                                r" +define+DEBUG_MODE_EXCEPTION_ADDR=8000_0008 ")
 
+        # The boot address. earlgrey-pmprst (PMPRstEarlGrey) resets the PMP to Earl Grey's values:
+        # mseccfg.MMWP denies M-mode every address no region matches, so the core must boot inside
+        # a region at reset: DV_ROM (region 13, 0x0001_0000, 4 KiB, locked RWX), where the test's
+        # code and data both fit. Its test (earlgrey_pmp_reset) is linked there; nothing else
+        # runs on that build.
+        boot_addr = '0001_0000' if get_config(md.ibex_config).pmp_rst_earlgrey else '8000_0000'
+
         # Populate the entire set of variables to substitute in the templated
         # compilation command, including the compiler flags for the ISS.
         subst_vars_dict = {
@@ -156,7 +163,7 @@ def _main() -> int:
                 # accesses to it.
                 r" +define+DM_ADDR=1A11_0000 " + \
                 r" +define+DM_ADDR_MASK=0000_0FFF" + \
-                r" +define+BOOT_ADDR=8000_0000 " + \
+                f" +define+BOOT_ADDR={boot_addr} " + \
                 # DEBUG_MODE_HALT_ADDR / DEBUG_MODE_EXCEPTION_ADDR (and, for DM=1, the
                 # debug module itself): see debug_mode_opts above.
                 debug_mode_opts + \

@@ -1,0 +1,38 @@
+# Copyright lowRISC contributors.
+# Licensed under the Apache License, Version 2.0, see LICENSE for details.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Earl Grey's PMP reset values. These tests run only on the earlgrey-pmprst build
+# (IBEX_CONFIG=earlgrey-pmprst: PMPRstEarlGrey = 1, boot address 0x0001_0000), and that build runs
+# nothing else: with mseccfg.MMWP set at reset, a program linked at 0x8000_0000 cannot fetch its
+# first instruction.
+#   make uvm-test-xlm TEST=earlgrey_pmp_reset IBEX_CONFIG=earlgrey-pmprst SEED=1 ITERATIONS=1
+
+# Linked into the DV_ROM region (earlgrey_pmp_reset/link.ld); no riscv-test-env start-up.
+- config: earlgrey-pmp-reset
+  ld_script: earlgrey_pmp_reset/link.ld
+  includes: .
+  gcc_opts: -march=rv32im -static -nostdlib -nostartfiles
+  rtl_test: core_ibex_base_test
+  rtl_params:
+    PMPEnable: 1
+    PMPRstEarlGrey: 1
+  timeout_s: 300
+
+- test: earlgrey_pmp_reset
+  desc: >
+    The PMP CSRs reset to Earl Grey's values (OpenTitan ibex_pmp_reset_pkg.sv: ROM region 2 NAPOT
+    LRX, MMIO region 11 TOR LRW, DV_ROM region 13 NAPOT LRWX; mseccfg RLB = 1, MMWP = 1), read
+    before anything writes them. MMWP denies loads, stores and fetches no region matches (at
+    0x8000_0000 and just outside each region; mcause 1 / 5 / 7, mtval the address); MMIO is
+    read/write and not executable; ROM is readable and not writable. With RLB = 1 locked region 2
+    is rewritten and read back; MMWP cannot be cleared; once RLB is cleared locked writes are
+    ignored and RLB cannot be set again, while unlocked region 0 stays writable and opens memory.
+    Cosim off, self-checking: gp = the failing code, a0 = the value read (test header).
+    The ROM loads (53, 55) and the final load (80) read memory nothing has written: the data side
+    must not answer them with bad integrity (the default for uninitialised reads), which is a
+    major bus alert, not a PMP result.
+  iterations: 1
+  test_srcs: earlgrey_pmp_reset/earlgrey_pmp_reset.S
+  config: earlgrey-pmp-reset
+  sim_opts: "+disable_cosim=1 +disable_spurious_dside_responses=1 +enable_bad_intg_on_uninit_access=0"

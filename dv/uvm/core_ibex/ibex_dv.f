@@ -138,6 +138,7 @@ ${PRJ_DIR}/dv/uvm/core_ibex/env/core_ibex_rvfi_if.sv
 ${PRJ_DIR}/dv/uvm/core_ibex/common/ibex_cosim_agent/core_ibex_ifetch_if.sv
 ${PRJ_DIR}/dv/uvm/core_ibex/common/ibex_cosim_agent/core_ibex_ifetch_pmp_if.sv
 ${PRJ_DIR}/dv/uvm/core_ibex/tb/ibex_revbm_pkg.sv
+${PRJ_DIR}/dv/uvm/core_ibex/tb/ibex_pmp_reset_earlgrey_pkg.sv
 ${PRJ_DIR}/dv/uvm/core_ibex/common/ibex_cosim_agent/ibex_cosim_agent_pkg.sv
 ${PRJ_DIR}/dv/uvm/core_ibex/common/ibex_mem_intf_agent/ibex_mem_intf_agent_pkg.sv
 ${PRJ_DIR}/dv/uvm/core_ibex/env/core_ibex_instr_monitor_if.sv

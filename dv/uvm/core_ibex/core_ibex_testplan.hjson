@@ -2271,10 +2271,42 @@
               and clears mcountinhibit.IR after a load, after a divide and with nothing before:
               exactly 1 and 6 each time, in each of four passes. Cosim off,
               self-checking: TEST_FAIL code in gp, the measured value in s9. Written for the
-              TestRIG riscv minstret mismatches of 2026-10-19.'''
+              TestRIG riscv minstret mismatches of 2026-10-19.
+            - cheriot_minstret_exact: The same in CHERIoT mode: AUIPCC, CAndPerm, CSetAddr,
+              CSetBounds, CSpecialR, CLC, CSC and a taken CJALR count once each; a CJALR
+              through c0, an unimplemented CSR and (without SR) an mscratch read faulting on SR do
+              not retire; instret is read where SR is missing; and QuickCheckVEngine's capcsr
+              pattern (MTCC without SR, a CJALR trapping into it) counts exactly. CHERIoT-Sail
+              cosim on, so the model's count is compared in the same run. Returns 0 or the failing
+              code, the measured difference in a2.'''
       stage: V2
       tags: ["directed"]
-      tests: ["minstret_exact"]
+      tests: ["minstret_exact", "cheriot_minstret_exact"]
+    }
+
+    {
+      name: earlgrey_pmp_reset
+      desc: '''The PMP resets to Earl Grey's values and protects as they say
+
+            Earl Grey passes ibex_top PMP reset values (OpenTitan
+            hw/top_earlgrey/rtl/ibex_pmp_reset_pkg.sv): ROM region 2 NAPOT 0x0004_0000 2 KiB
+            locked R X, MMIO region 11 TOR [0x4000_0000, 0x4201_0000) locked R W, DV_ROM region
+            13 NAPOT 0x0001_0000 4 KiB locked R W X, mseccfg RLB = 1, MMWP = 1, MML = 0. With MMWP
+            an M-mode access no region matches is denied (Smepmp); MMWP is sticky; RLB = 1 allows
+            writes to locked regions, RLB = 0 does not, and RLB cannot be set again while a region
+            is locked (Smepmp). The other tests run on ibex_top's defaults.
+
+            - earlgrey_pmp_reset: On the earlgrey-pmprst build (IBEX_CONFIG=earlgrey-pmprst,
+              booting at 0x0001_0000 inside DV_ROM): reads every pmpcfg, pmpaddr and mseccfg(h)
+              before anything writes them; loads, stores and fetches no region matches fault
+              (mcause 1 / 5 / 7, mtval the address) at 0x8000_0000 and just outside each region;
+              MMIO is read/write and not executable, ROM readable and not writable; locked region
+              2 is rewritten under RLB = 1, the writes are ignored after RLB is cleared, RLB stays
+              0 and MMWP stays 1; unlocked region 0 then opens memory. Cosim off, self-checking:
+              the failing code in gp, the value read in a0.'''
+      stage: V2
+      tags: ["directed"]
+      tests: ["earlgrey_pmp_reset"]
     }
 
     {

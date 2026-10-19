@@ -9,7 +9,7 @@
 #   -c  Enable coverage instrumentation
 #   -e  Assert CHERIOT_ENABLE define (enables CHERIoT capability mode)
 #   -o  Output directory (default: xlm_compliance_out)
-#   -C  Ibex configuration from ibex_configs.yaml (default: $IBEX_CONFIG, else opentitan -- the
+#   -C  Ibex configuration from ibex_configs.yaml (default: $IBEX_CONFIG, else earlgrey -- the
 #       configuration the UVM testbench builds, so compliance checks the same core and its coverage
 #       database merges with the UVM one)
 
@@ -22,7 +22,7 @@ export dv_root=$(realpath "${LOWRISC_IP_DIR}/dv")
 export DUT_TOP="ibex_top"
 
 OUTDIR="xlm_compliance_out"
-IBEX_CFG="${IBEX_CONFIG:-opentitan}"
+IBEX_CFG="${IBEX_CONFIG:-earlgrey}"
 cheriot_define=""
 coverage_arg=""
 while getopts "ceo:C:" opt; do

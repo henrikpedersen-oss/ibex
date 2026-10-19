@@ -66,10 +66,14 @@
     compressed ones), stay frozen while mcountinhibit bits 2 and 10 are set and instructions
     (8 compressed, 8 not) retire, then count again. Targets ibex_cs_registers.sv mhpmcounter[2]
     and gen_compressed_instr_cnt (instr_ret*_spec_i & ~mcountinhibit). Cosim off: this Spike does
-    not inhibit minstret (see counter_high_half_write). TEST_FAIL code in gp.
+    not inhibit minstret (see counter_high_half_write). TEST_FAIL code in gp. Only with
+    MHPMCounterNum = 10: mhpmcounter10 and its counter block do not exist with fewer (earlgrey: 2).
   iterations: 1
   test_srcs: cov_expr_counter_inhibit/cov_expr_counter_inhibit.S
   config: riscv-tests
+  rtl_params:
+    PMPEnable: 1
+    MHPMCounterNum: 10
   sim_opts: "+disable_cosim=1 +disable_spurious_dside_responses=1"
 
 - test: cov_expr_intg_err

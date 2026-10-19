@@ -96,6 +96,8 @@ void cheriot_sail_cosim_set_mcycle(uint64_t mcycle);
 void cheriot_sail_cosim_set_mhpmcounter(uint32_t idx, uint64_t value);
 void cheriot_sail_cosim_set_ic_scr_key_valid(svBit valid);
 void cheriot_sail_cosim_set_mcounteren_writable(svBit writable);
+// set_mhpm_counter_num: MHPMCounterNum of the build (configuration: call before init)
+void cheriot_sail_cosim_set_mhpm_counter_num(uint32_t num);
 
 // Fields of the RVFI execution packet produced by the last step(). The rd and
 // mem getters return 0 when the model reported no integer write / memory access.

@@ -86,6 +86,8 @@ import "DPI-C" function void cheriot_sail_cosim_set_mhpmcounter(int unsigned idx
                                                                longint unsigned value);
 import "DPI-C" function void cheriot_sail_cosim_set_ic_scr_key_valid(bit valid);
 import "DPI-C" function void cheriot_sail_cosim_set_mcounteren_writable(bit writable);
+// set_mhpm_counter_num: MHPMCounterNum of the build (configuration: call before init)
+import "DPI-C" function void cheriot_sail_cosim_set_mhpm_counter_num(int unsigned num);
 
 // Fields of the RVFI execution packet produced by the last step(). The rd and
 // mem getters return 0 when the model reported no integer write / memory access.

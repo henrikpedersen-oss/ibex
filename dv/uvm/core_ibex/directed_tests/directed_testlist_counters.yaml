@@ -22,3 +22,19 @@
   test_srcs: minstret_exact/minstret_exact.S
   config: riscv-tests
   sim_opts: "+disable_cosim=1 +disable_spurious_dside_responses=1"
+
+- test: cheriot_minstret_exact
+  desc: >
+    minstret in CHERIoT mode counts exactly the instructions retired, around AUIPCC, CAndPerm,
+    CSetAddr, CSetBounds, CSpecialR, CLC, CSC and a taken CJALR (one each), traps with SR (a
+    CJALR through c0, an unimplemented CSR) and without SR (an mscratch read faulting on SR, mcause
+    28 / mtval 0x418), with instret read where SR is missing; and QuickCheckVEngine's capcsr
+    pattern: CSpecialW MTCC to a vector without SR, a CJALR that traps into it, and the way back.
+    Trap handlers are two instructions, so every count is exact. CHERIoT-Sail cosim on, so the run
+    also compares the model's minstret/instret with the core's. Written for the TestRIG cheriot
+    minstret mismatches of 2026-10-19. Returns 0 or the failing code; the measured difference in
+    a2 (test header).
+  iterations: 1
+  test_srcs: cheriot_minstret_exact/cheriot_minstret_exact.S
+  config: cheriot-c-tests
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"

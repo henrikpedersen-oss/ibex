@@ -19,6 +19,9 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 IBEX = os.path.join(HERE, '..', '..')
 
+# Testbench options, not ibex_top parameters (Config.bench_only_fields in util/ibex_config.py).
+BENCH_ONLY = {'PMPRstEarlGrey'}
+
 
 def read_config(path, name):
     params, found = {}, False
@@ -62,6 +65,8 @@ def main():
     args = ap.parse_args()
 
     params = read_config(args.config_file, args.config)
+    for name in BENCH_ONLY:
+        params.pop(name, None)
     for ov in args.override:
         name, _, val = ov.partition('=')
         if name not in params:

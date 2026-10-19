@@ -154,6 +154,17 @@ module core_ibex_tb_top;
   `ifndef IBEX_CFG_DbgTriggerEn
     `define IBEX_CFG_DbgTriggerEn 0
   `endif
+  `ifndef IBEX_CFG_DbgHwBreakNum
+    `define IBEX_CFG_DbgHwBreakNum 1
+  `endif
+  // A testbench option, not an ibex_top parameter (bench_only_fields in util/ibex_config.py):
+  // 1 = the PMP CSRs reset to Earl Grey's values (ibex_pmp_reset_earlgrey_pkg), as
+  // rv_core_ibex sets them; 0 = ibex_top's defaults (every region off, mseccfg 0). Only the
+  // earlgrey-pmprst configuration sets it, and it boots at 0x0001_0000 (compile_tb.py), inside
+  // the DV_ROM region: with mseccfg.MMWP set, M-mode can fetch from nothing else.
+  `ifndef IBEX_CFG_PMPRstEarlGrey
+    `define IBEX_CFG_PMPRstEarlGrey 0
+  `endif
 
   // Ibex Parameters
   parameter ibex_pkg::base_isa_e BaseIsa  = `IBEX_CFG_BaseIsa;
@@ -179,7 +190,15 @@ module core_ibex_tb_top;
   parameter int unsigned LockstepOffset   = 1;
   parameter bit ICacheScramble            = `IBEX_CFG_ICacheScramble;
   parameter bit DbgTriggerEn              = `IBEX_CFG_DbgTriggerEn;
-  parameter int unsigned DmBaseAddr       = 32'h`DM_ADDR;
+  parameter int unsigned DbgHwBreakNum    = `IBEX_CFG_DbgHwBreakNum;
+  localparam bit PMPRstEarlGrey           = `IBEX_CFG_PMPRstEarlGrey;
+  localparam ibex_pkg::pmp_cfg_t PMPRstCfg[ibex_pkg::PMP_MAX_REGIONS] =
+    PMPRstEarlGrey ? ibex_pmp_reset_earlgrey_pkg::PmpCfgRst : ibex_pkg::PmpCfgRst;
+  localparam logic [ibex_pkg::PMP_ADDR_MSB:0] PMPRstAddr[ibex_pkg::PMP_MAX_REGIONS] =
+    PMPRstEarlGrey ? ibex_pmp_reset_earlgrey_pkg::PmpAddrRst : ibex_pkg::PmpAddrRst;
+  localparam ibex_pkg::pmp_mseccfg_t PMPRstMsecCfg =
+    PMPRstEarlGrey ? ibex_pmp_reset_earlgrey_pkg::PmpMseccfgRst : ibex_pkg::PmpMseccfgRst;
+  parameter int unsigned DmBaseAddr      = 32'h`DM_ADDR;
   parameter int unsigned DmAddrMask       = 32'h`DM_ADDR_MASK;
   parameter int unsigned DmHaltAddr       = 32'h`DEBUG_MODE_HALT_ADDR;
   parameter int unsigned DmExceptionAddr  = 32'h`DEBUG_MODE_EXCEPTION_ADDR;
@@ -280,6 +299,10 @@ module core_ibex_tb_top;
     .FetchOutputReg       (FetchOutputReg      ),
     .DataIfReg            (DataIfReg           ),
     .DbgTriggerEn         (DbgTriggerEn        ),
+    .DbgHwBreakNum        (DbgHwBreakNum       ),
+    .PMPRstCfg            (PMPRstCfg           ),
+    .PMPRstAddr           (PMPRstAddr          ),
+    .PMPRstMsecCfg        (PMPRstMsecCfg       ),
     .DmBaseAddr           (DmBaseAddr          ),
     .DmAddrMask           (DmAddrMask          ),
     .DmHaltAddr           (DmHaltAddr          ),

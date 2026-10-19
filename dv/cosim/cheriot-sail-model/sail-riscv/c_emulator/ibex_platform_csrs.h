@@ -28,6 +28,9 @@ unit      ibex_csr_mret(unit);
 // Bench inputs, pushed before each step (never read back from the DUT's CSR state).
 // idx is the counter number, 3..31 (mhpmcounter<idx>); value is the full 64-bit counter.
 void ibex_platform_set_mhpmcounter(unsigned idx, uint64_t value);
+// MHPMCounterNum of the build (0 .. 29). Configuration, not state: set before init, kept by
+// ibex_csr_reset.
+void ibex_platform_set_mhpm_counter_num(unsigned num);
 // cpuctrlsts.ic_scr_key_valid (bit 8): the instruction cache's scrambling key handshake.
 void ibex_platform_set_ic_scr_key_valid(bool valid);
 // The mcounteren_writable_i pin (default 1, ibex_configs/TestRIG tie it On).

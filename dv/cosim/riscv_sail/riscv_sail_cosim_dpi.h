@@ -67,6 +67,8 @@ RISCV_SAIL_DPI void     riscv_sail_cosim_set_pc(const svBitVecVal *pc);
 //   set_ic_scr_key_valid: cpuctrlsts.ic_scr_key_valid (bit 8), the RVFI record's value
 RISCV_SAIL_DPI void riscv_sail_cosim_set_mhpmcounter(uint32_t idx, uint64_t value);
 RISCV_SAIL_DPI void riscv_sail_cosim_set_ic_scr_key_valid(svBit valid);
+// set_mhpm_counter_num: MHPMCounterNum of the build (configuration: call before init)
+RISCV_SAIL_DPI void riscv_sail_cosim_set_mhpm_counter_num(uint32_t num);
 
 // Fields of the RVFI execution packet from the last step(). rd and mem getters return 0 when
 // the model reported no integer write / memory access.

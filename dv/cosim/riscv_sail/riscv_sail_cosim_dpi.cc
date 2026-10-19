@@ -231,6 +231,11 @@ void riscv_sail_cosim_set_ic_scr_key_valid(svBit valid) {
   ibex_platform_set_ic_scr_key_valid(valid != 0);
 }
 
+// The build's MHPMCounterNum (see cheriot_sail_cosim_set_mhpm_counter_num). Set before init.
+void riscv_sail_cosim_set_mhpm_counter_num(uint32_t num) {
+  ibex_platform_set_mhpm_counter_num(num);
+}
+
 void riscv_sail_cosim_write_mem_byte(const svBitVecVal *addr_p, const svBitVecVal *data_p) {
   if (!s_initialized) {
     s_errors.emplace_back("riscv-sail write_mem_byte before init");

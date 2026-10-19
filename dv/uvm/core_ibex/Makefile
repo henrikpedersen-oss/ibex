@@ -47,7 +47,7 @@ ITERATIONS          :=
 SIGNATURE_ADDR      := 8ffffffc
 
 ### Ibex top level parameters ###
-IBEX_CONFIG         := opentitan
+IBEX_CONFIG         := earlgrey
 
 # 1: build the testbench with the real RISC-V debug module (pulp_riscv_dbg dm_top behind
 # ibex_dm_obi_mux, +define+IBEX_DM_REAL; scripts/compile_tb.py) for the directed tests marked

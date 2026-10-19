@@ -19,6 +19,7 @@ import riscvdv_interface
 from test_entry import read_test_dot_seed, get_test_entry
 from metadata import RegressionMetadata
 from test_run_result import TestRunResult, TestType
+from ibex_cmd import get_config
 
 import logging
 logger = logging.getLogger(__name__)
@@ -165,9 +166,15 @@ def get_directed_compile_cmds(md: RegressionMetadata, trr: TestRunResult) -> Lis
     # -DDV_SEED: each test.seed is compiled into its own directory, so a directed test can draw
     # per-seed stimulus at assembly time (cheriot_rand_operands seeds its LFSR with it). Tests that
     # do not use the macro are unaffected.
+    # -DIBEX_MHPM_COUNTER_NUM / -DIBEX_DBG_HW_BREAK_NUM: the build's MHPMCounterNum and
+    # DbgHwBreakNum (ibex_configs.yaml), so a test checks the counters and triggers the core it runs
+    # on has (earlgrey: 2 and 4; opentitan: 10 and 1) instead of assuming one configuration.
+    cfg = get_config(md.ibex_config)
     riscv_gcc_cmd = " ".join([env.get('RISCV_GCC'),
                               trr.directed_data.get('gcc_opts'),
                               f"-DDV_SEED={trr.seed}",
+                              f"-DIBEX_MHPM_COUNTER_NUM={cfg.mhpm_counter_num}",
+                              f"-DIBEX_DBG_HW_BREAK_NUM={cfg.dbg_hw_break_num}",
                               f"-I{trr.directed_data.get('includes')}",
                               f"-T{trr.directed_data.get('ld_script')}",
                               f"-o {trr.objectfile}",

@@ -10,7 +10,9 @@ rtl_tb_compile: $(METADATA-DIR)/tb.compile.stamp
 # snapshot in the same out/build directory, so switching DM must rebuild in both directions.
 # USER_XCELIUM_HOME selects the Xcelium installation (lowrisc-it's xrun wrapper; the eda_shell sets
 # it): a snapshot elaborated by another version is one xrun -R cannot use (*E,NOSTUPR).
-rtl-tb-compile-var-deps := SIMULATOR COV WAVES DM USER_XCELIUM_HOME
+# IBEX_CONFIG: the configuration's parameters are compile options (compile_tb.py), and
+# earlgrey-pmprst also moves BOOT_ADDR; a snapshot of another configuration was reused before.
+rtl-tb-compile-var-deps := SIMULATOR COV WAVES DM USER_XCELIUM_HOME IBEX_CONFIG
 
 rtl_sim_run: $(rtl-sim-logs)
 

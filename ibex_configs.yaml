@@ -38,6 +38,8 @@ small:
   PMPNumRegions            : 4
   MHPMCounterNum           : 0
   MHPMCounterWidth         : 40
+  DbgHwBreakNum            : 1
+  PMPRstEarlGrey           : 0
 
 # Configuration to match that used in the OpenTitan project
 opentitan:
@@ -62,6 +64,69 @@ opentitan:
   PMPNumRegions            : 16
   MHPMCounterNum           : 10
   MHPMCounterWidth         : 32
+  DbgHwBreakNum            : 1
+  PMPRstEarlGrey           : 0
+
+# Earl Grey 2: the parameters Earl Grey instantiates Ibex with (rv_core_ibex param_decl in
+# lowRISC/opentitan hw/top_earlgrey/data/top_earlgrey.hjson, the source of truth;
+# earlgrey-internal-tracker #965, #972). The verification target. It differs from opentitan in
+# MHPMCounterNum (2, not 10) and DbgHwBreakNum (4, not 1), and in the PMP reset values, which
+# earlgrey-pmprst adds (below).
+earlgrey:
+  BaseIsa                  : "ibex_pkg::BaseIsaRV32IorCHERIoT"
+  RV32E                    : 0
+  RV32M                    : "ibex_pkg::RV32MSingleCycle"
+  RV32B                    : "ibex_pkg::RV32BFull"
+  RV32ZC                   : "ibex_pkg::RV32ZcaZcbZcmp"
+  RegFile                  : "ibex_pkg::RegFileFF"
+  BranchTargetALU          : 1
+  WritebackStage           : 1
+  ICache                   : 1
+  ICacheECC                : 1
+  ICacheScramble           : 1
+  BranchPredictor          : 0
+  FetchOutputReg           : 0
+  DataIfReg                : 0
+  DbgTriggerEn             : 1
+  SecureIbex               : 1
+  PMPEnable                : 1
+  PMPGranularity           : 0
+  PMPNumRegions            : 16
+  MHPMCounterNum           : 2
+  MHPMCounterWidth         : 32
+  DbgHwBreakNum            : 4
+  PMPRstEarlGrey           : 0
+
+# earlgrey with Earl Grey's PMP reset values (OpenTitan hw/top_earlgrey/rtl/ibex_pmp_reset_pkg.sv:
+# locked ROM, MMIO and DV_ROM regions, mseccfg MMWP = 1 and RLB = 1). Machine-mode default deny
+# out of reset means a program must run from the DV_ROM region (0x10000, 4 KiB): the testbench
+# boots there with this configuration, and only the tests that ask for it (rtl_params
+# PMPRstEarlGrey: 1) run on it. PMPRstEarlGrey is a testbench option, not an ibex_top parameter,
+# and only the UVM testbench (core_ibex_tb_top.sv) reads it; the other benches build earlgrey.
+earlgrey-pmprst:
+  BaseIsa                  : "ibex_pkg::BaseIsaRV32IorCHERIoT"
+  RV32E                    : 0
+  RV32M                    : "ibex_pkg::RV32MSingleCycle"
+  RV32B                    : "ibex_pkg::RV32BFull"
+  RV32ZC                   : "ibex_pkg::RV32ZcaZcbZcmp"
+  RegFile                  : "ibex_pkg::RegFileFF"
+  BranchTargetALU          : 1
+  WritebackStage           : 1
+  ICache                   : 1
+  ICacheECC                : 1
+  ICacheScramble           : 1
+  BranchPredictor          : 0
+  FetchOutputReg           : 0
+  DataIfReg                : 0
+  DbgTriggerEn             : 1
+  SecureIbex               : 1
+  PMPEnable                : 1
+  PMPGranularity           : 0
+  PMPNumRegions            : 16
+  MHPMCounterNum           : 2
+  MHPMCounterWidth         : 32
+  DbgHwBreakNum            : 4
+  PMPRstEarlGrey           : 1
 
 # Three-stage pipeline with additional branch traget ALU and 1 cycle multiplier
 # (2 cycles for mulh) so mul does not stall (mulh stall 1 cycles). This is the
@@ -89,6 +154,8 @@ maxperf:
   PMPNumRegions            : 4
   MHPMCounterNum           : 0
   MHPMCounterWidth         : 40
+  DbgHwBreakNum            : 1
+  PMPRstEarlGrey           : 0
 
 # maxperf config above with balanced bitmanip extension and PMP
 maxperf-pmp-bmbalanced:
@@ -113,6 +180,8 @@ maxperf-pmp-bmbalanced:
   PMPNumRegions            : 16
   MHPMCounterNum           : 0
   MHPMCounterWidth         : 40
+  DbgHwBreakNum            : 1
+  PMPRstEarlGrey           : 0
 
 # ========================
 # * OTHER CONFIGURATIONS *
@@ -143,6 +212,8 @@ maxperf-pmp:
   PMPNumRegions            : 16
   MHPMCounterNum           : 0
   MHPMCounterWidth         : 40
+  DbgHwBreakNum            : 1
+  PMPRstEarlGrey           : 0
 
 
 # maxperf-pmp config above with full bitmanip extension
@@ -168,6 +239,8 @@ maxperf-pmp-bmfull:
   PMPNumRegions            : 16
   MHPMCounterNum           : 0
   MHPMCounterWidth         : 40
+  DbgHwBreakNum            : 1
+  PMPRstEarlGrey           : 0
 
 # maxperf-pmp-bmfull config above with icache enabled
 maxperf-pmp-bmfull-icache:
@@ -192,6 +265,8 @@ maxperf-pmp-bmfull-icache:
   PMPNumRegions            : 16
   MHPMCounterNum           : 0
   MHPMCounterWidth         : 40
+  DbgHwBreakNum            : 1
+  PMPRstEarlGrey           : 0
 
 
 # ===============================
@@ -227,6 +302,8 @@ cheriot-min:
   PMPNumRegions            : 4
   MHPMCounterNum           : 0
   MHPMCounterWidth         : 40
+  DbgHwBreakNum            : 1
+  PMPRstEarlGrey           : 0
 
 # cheriot-min with the core's bus requests from flops (FetchOutputReg, DataIfReg): for timing
 # evaluation in synthesis only (make genus-synth SYN_CONFIG=cheriot-min-outreg). Not simulated by
@@ -254,6 +331,8 @@ cheriot-min-outreg:
   PMPNumRegions            : 4
   MHPMCounterNum           : 0
   MHPMCounterWidth         : 40
+  DbgHwBreakNum            : 1
+  PMPRstEarlGrey           : 0
 
 # Configurations using experimental features that aren't yet verified and/or
 # known to have issues.
@@ -280,3 +359,5 @@ experimental-branch-predictor:
   PMPNumRegions            : 4
   MHPMCounterNum           : 0
   MHPMCounterWidth         : 40
+  DbgHwBreakNum            : 1
+  PMPRstEarlGrey           : 0

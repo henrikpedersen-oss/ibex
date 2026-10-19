@@ -266,6 +266,7 @@ class ibex_cosim_scoreboard extends uvm_scoreboard;
     // riscv_sail_write_mem_byte mirrors), so the model's RAM covers the whole address space, as
     // Spike's does. 0xFFFF_FFFF itself is excluded: plat_ram_size is an XLEN-bit value.
     riscv_sail_cosim_configure(32'h0, 32'hFFFF_FFFF, cfg.pmp_num_regions, cfg.pmp_granularity);
+    riscv_sail_cosim_set_mhpm_counter_num(cfg.mhpm_counter_num);
     riscv_sail_cosim_init(cfg.start_pc);
     riscv_sail_cmp.reset();
     riscv_sail_prev_trap   = 1'b0;
@@ -587,6 +588,8 @@ class ibex_cosim_scoreboard extends uvm_scoreboard;
         cheriot_sail_cosim_set_ram_size(32'h1000_0000);
         cheriot_sail_cosim_set_rom(32'h0, 32'h0);
       end
+      // The build's event counters (MHPMCounterNum), as Spike gets them.
+      cheriot_sail_cosim_set_mhpm_counter_num(cfg.mhpm_counter_num);
       cheriot_sail_cosim_init(cfg.start_pc);
       // The program starts from reset, where every GPR is NULL (not the RVFI-DII root caps).
       cheriot_sail_cosim_null_gprs();

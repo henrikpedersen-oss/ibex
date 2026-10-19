@@ -65,6 +65,7 @@ module ibex_simple_system (
   parameter bit                 WritebackStage           = 1'b0;
   parameter bit                 ICache                   = 1'b0;
   parameter bit                 DbgTriggerEn             = 1'b0;
+  parameter int unsigned        DbgHwBreakNum            = 1;
   parameter bit                 ICacheECC                = 1'b0;
   parameter bit                 ICacheTweakInfection     = 1'b0;
   parameter bit                 BranchPredictor          = 1'b0;
@@ -231,6 +232,7 @@ module ibex_simple_system (
       .FetchOutputReg       ( FetchOutputReg       ),
       .DataIfReg            ( DataIfReg            ),
       .DbgTriggerEn         ( DbgTriggerEn         ),
+      .DbgHwBreakNum        ( DbgHwBreakNum        ),
       .DmBaseAddr           ( 32'h00100000         ),
       .DmAddrMask           ( 32'h00000003         ),
       .DmHaltAddr           ( 32'h00100000         ),
