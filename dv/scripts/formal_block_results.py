@@ -6,6 +6,7 @@
 
   --block icache  ibex/dv/formal_ibex_cheriot/formal-icache, formal_icache_testplan.hjson
   --block id      ibex/dv/formal_ibex_cheriot/formal-id, formal_id_testplan.hjson
+  --block trvk    ibex/dv/formal_ibex_cheriot/formal-trvk, formal_trvk_testplan.hjson
 
 Reads <block dir>/results_<config>.txt (Jasper `report -file`, one per configuration of the block
 Makefile's `make configs`; results_e2e.txt from the iCache's check_e2e.tcl). Each testpoint lists
@@ -56,6 +57,7 @@ BLOCKS = {
     "icache": ("ibex/dv/formal_ibex_cheriot/formal-icache", re.compile(r"ecc[01]_tweak[01]_bc[01]|e2e"),
                {"e2e": ["results_e2e_step1.txt"]}),
     "id": ("ibex/dv/formal_ibex_cheriot/formal-id", re.compile(r"wb[01]_btalu[01]_cheriot[01](_live)?"), {}),
+    "trvk": ("ibex/dv/formal_ibex_cheriot/formal-trvk", re.compile(r"out\d+_ecc[01]_bmw\d+(_live)?"), {}),
 }
 EMBEDDED = "rtl_embedded_assertions"
 MAPPED = "properties_mapped"
@@ -190,6 +192,13 @@ def main():
         for name, st in read_results(res).items():
             if st in VERDICTS or name not in status:
                 status[name] = st
+        # Assertions the run took from its checkpoint (scripts/checkpoint.tcl) are assumptions in
+        # the report. The run writes this list after the report, so an older one is another run's.
+        loaded = bdir / f"checkpoint-{args.block}-{cfg}-loaded.txt"
+        if loaded.exists() and loaded.stat().st_mtime >= mtime:
+            for name in loaded.read_text().split():
+                if status.get(name) not in VERDICTS:
+                    status[name] = "proven"
 
         groups = {}   # testpoint -> [passing, total, [failures]]
         other = {}    # testbench property status not counted -> number

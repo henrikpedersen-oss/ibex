@@ -19,7 +19,7 @@ count the same things:
                            A run killed before its final report (OOM, SIGTERM) is 0/1.
   <prefix>_<property>      named properties (transition, vericheri): an assertion passes when
                            proven, a cover when covered. total = 1.
-  formal_block_<blk>_<cfg> block-level checks (ibex/dv/formal_ibex_cheriot/formal-icache, -id, -dit), one per
+  formal_block_<blk>_<cfg> block-level checks (ibex/dv/formal_ibex_cheriot/formal-icache, -id, -dit, -trvk), one per
                            configuration of their `make configs`, read from results_<cfg>.txt
                            (Jasper `report -file`): total = the checked assertions (no ':' in the
                            name, status proven, cex or undetermined) plus the testbench covers
@@ -28,7 +28,7 @@ count the same things:
                            proven assertions plus covered covers (unreachable ones for a cover
                            listed in the block's must_be_unreachable.txt). The same rule as
                            run_all_tests.sh and the block Makefiles' summary. Per property group:
-                           formal_block_results.py with formal_icache/formal_id_testplan.hjson.
+                           formal_block_results.py with formal_icache/formal_id/formal_trvk_testplan.hjson.
 
 A flow whose log is missing leaves its tests NOT RUN; a log older than --stale-days is reported,
 so a months-old proof is not read as current. The output's timestamp is the time of the oldest
@@ -69,7 +69,8 @@ EXPECT_SANITY = {"formal_transition_sanity_decoder_gate":
 # Block-level checks: test prefix -> directory holding their results_<cfg>.txt.
 BLOCK_FLOWS = {"formal_block_icache": "ibex/dv/formal_ibex_cheriot/formal-icache",
                "formal_block_id": "ibex/dv/formal_ibex_cheriot/formal-id",
-               "formal_block_dit": "ibex/dv/formal_ibex_cheriot/formal-dit"}
+               "formal_block_dit": "ibex/dv/formal_ibex_cheriot/formal-dit",
+               "formal_block_trvk": "ibex/dv/formal_ibex_cheriot/formal-trvk"}
 COVERED = re.compile(r'The cover property "([^"]+)" was covered')
 SUMMARY_UNDET = re.compile(r"={20,}\nSUMMARY\n={20,}.*?assertions\s*:.*?- undetermined\s*:\s*(\d+)",
                            re.S)
