@@ -28,6 +28,28 @@
   rtl_test: core_ibex_single_debug_pulse_test
   sim_opts: "+disable_spurious_dside_responses=1 +require_signature_addr=1 +enable_debug_seq=1"
 
+- test: debug_triggers_all
+  desc: >
+    Every debug trigger of the build (DbgHwBreakNum, passed as IBEX_DBG_HW_BREAK_NUM; earlgrey
+    4, opentitan 1) is selected, read, programmed and fired. One haltreq session: for each
+    trigger k, tselect := k reads k, tdata1 reads 0x28001048 and tdata2 0 (reset), tdata2 := the
+    address of target k and tdata1 := execute on; every tdata2 is then read back (separate
+    values) and tselect := 0xFF reads the last index (Ibex manual). After dret the program runs
+    the targets in order: each trigger enters debug mode before its target with dcsr.cause =
+    trigger and dpc = the target, and the handler turns it off. Before this test tselect was
+    never other than 0, so triggers 1-3 were never exercised. Cosim off (Spike's trigger module
+    is not configured with the build's trigger count); returns 0 or a code from the test header.
+  iterations: 1
+  test_srcs: debug_triggers_all/debug_triggers_all.S
+  config: cheriot-dv-tests
+  rtl_test: core_ibex_single_debug_pulse_test
+  rtl_params:
+    PMPEnable: 1
+    DbgTriggerEn: 1
+  sim_opts: >-
+    +disable_cosim=1 +disable_spurious_dside_responses=1 +require_signature_addr=1
+    +enable_debug_seq=1
+
 - test: cov_fcov_pmp_mml_locked_wr
   desc: >
     mseccfg.MML = 1, RLB = 0: PMP entries 4-7 locked as MML_L, MML_RM, MML_WRM and MML_RM_RU

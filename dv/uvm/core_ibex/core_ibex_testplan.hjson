@@ -2286,7 +2286,7 @@
 
     {
       name: earlgrey_pmp_reset
-      desc: '''The PMP resets to Earl Grey's values and protects as they say
+      desc: '''The PMP resets to Earl Grey's values and protects as they say (REQ_ISA_05)
 
             Earl Grey passes ibex_top PMP reset values (OpenTitan
             hw/top_earlgrey/rtl/ibex_pmp_reset_pkg.sv): ROM region 2 NAPOT 0x0004_0000 2 KiB
@@ -2307,6 +2307,28 @@
       stage: V2
       tags: ["directed"]
       tests: ["earlgrey_pmp_reset"]
+    }
+
+    {
+      name: debug_triggers_all
+      desc: '''Every debug trigger of the configuration can be selected, programmed and fired (REQ_DBG_06)
+
+            DbgHwBreakNum triggers (earlgrey: 4, tselect 0-3). tselect selects the trigger the
+            tdata registers access; a write of an index beyond the last trigger writes the last
+            index (Ibex manual, cs_registers.rst). tdata1 resets to 0x28001048 with execute (bit
+            2) the one writable bit; tdata2 is the match address, reset 0. A trigger with execute
+            on enters debug mode before the matching instruction: dcsr.cause = trigger, dpc = its
+            address (Debug Specification 0.13.2).
+
+            - debug_triggers_all: In one haltreq session, for each trigger: tselect read back,
+              tdata1 / tdata2 reset values, tdata2 := a target address, execute on; every tdata2
+              read back after all are written; tselect := 0xFF reads the last index. After dret
+              the targets run in order and each trigger fires once (cause, dpc checked; the
+              handler turns it off). The trigger count comes from the build
+              (IBEX_DBG_HW_BREAK_NUM). Cosim off, self-checking: code in a0.'''
+      stage: V2
+      tags: ["directed"]
+      tests: ["debug_triggers_all"]
     }
 
     {
