@@ -422,5 +422,10 @@ module ibex_trvk #(
   `ASSERT_INIT(RevBitmapWordAddrWidthRange_A, RevBitmapWordAddrWidth inside {[1:26]})
   `ASSERT_INIT(RevBitmapBaseAddrAligned_A, RevBitmapBaseAddr[1:0] == 2'b00)
   `ASSERT(HeapBaseAligned_A, heap_base_addr_i[2:0] == 3'b0)
+  // The revocable window (2^(RevBitmapAddrWidth+6) bytes from the heap base: one bit per 8-byte
+  // granule) does not wrap past 2^32. The in-window check is (base - heap base) mod 2^32, so a
+  // wrapping window would revoke bases below the heap base, which CHERIoT-Sail never does.
+  `ASSERT(HeapWindowNoWrap_A, ({32'h0, heap_base_addr_i} +
+                               (64'd1 << (RevBitmapAddrWidth + 32'd6))) <= 64'h1_0000_0000)
 
 endmodule

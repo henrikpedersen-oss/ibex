@@ -402,9 +402,11 @@ int cheriot_sail_cosim_step(const svBitVecVal *insn_p,
   // RTL's.  Skip when the RTL took a trap — on a trap the RTL's rd_addr is 0
   // (no register was committed) and rd_wdata is undefined.
   //
-  // Also skip mcycle/minstret (0xB00/0xB02, 0xB80/0xB82 and the cycle/instret aliases at
-  // 0xC00/0xC02, 0xC80/0xC82; time 0xC01/0xC81 is illegal on both sides): mcycle is pushed but
-  // sampled at retirement, not when the CSR was read, and minstret is the model's own count.
+  // Also skip mcycle (0xB00, 0xB80 and the cycle aliases 0xC00, 0xC80; time 0xC01/0xC81 is illegal
+  // on both sides): it is pushed but sampled at retirement, not when the CSR was read.
+  // minstret(h) and instret(h) are compared: retired instructions are architectural and the model
+  // counts them itself, as ibex_sail_rvfi_cmp does for RISC-V Sail and TestRIG (until 2026-10-21
+  // they were skipped here, so cheriot_minstret_exact's cosim never compared them).
   //   opcode SYSTEM = 0x73; funct3 != 0 distinguishes CSR from ECALL/EBREAK.
   // The HPM counters (mhpmcounter3-31(h), hpmcounter3-31(h)) are compared: their values are
   // pushed before every step from the RVFI record (cheriot_sail_cosim_set_mhpmcounter), which
@@ -414,8 +416,8 @@ int cheriot_sail_cosim_step(const svBitVecVal *insn_p,
   bool is_counter_csr    = false;
   if (is_csr_insn) {
     switch (csr_addr) {
-      case 0xB00: case 0xB02: case 0xB80: case 0xB82:              // mcycle(h), minstret(h)
-      case 0xC00: case 0xC01: case 0xC02: case 0xC80: case 0xC81: case 0xC82:  // aliases
+      case 0xB00: case 0xB80:                                      // mcycle(h)
+      case 0xC00: case 0xC01: case 0xC80: case 0xC81:              // cycle(h), time(h)
         is_counter_csr = true;
         break;
       default:

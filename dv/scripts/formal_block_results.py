@@ -70,6 +70,10 @@ RESULT_LINE = re.compile(r"^\[\d+\]\s+(\S+)\s+([a-z_]+)(?:\s|$)")
 # one-argument macros around them (`define M(x) `ASSERT(x``_suffix, ...)).
 SV_PROP = re.compile(r"`(?:ASSERT|ASSUME|COVER)\(\s*(\w+)\s*,")
 SV_MACRO = re.compile(r"`define\s+(\w+)\((\w+)\)\s*\\\s*\n\s*`(?:ASSERT|ASSUME|COVER)\(\2``(\w+)\s*,")
+# The shared OBI checker (ibex/dv/sva/ibex_obi_assert.sv), bound by blocks that list it in files.f:
+# its rules are declared through its own two macros.
+OBI_CHECKER = REPO / "ibex/dv/sva/ibex_obi_assert.sv"
+OBI_RULE = re.compile(r"`IBEX_OBI_(?:HOST|DEVICE)_RULE\(\s*(\w+)\s*,")
 
 
 def plan_properties(testpoints):
@@ -158,6 +162,10 @@ def main():
         return exact.get(name, []) + [tp for g, tp in globs if fnmatch.fnmatchcase(name, g)]
 
     seen = tb_names(bdir / "formal_tb.sv")  # every testbench property name, for properties_mapped
+    if "ibex_obi_assert.sv" in (bdir / "files.f").read_text(errors="replace"):
+        obi = re.sub(r"//.*", "", OBI_CHECKER.read_text(errors="replace"))
+        seen |= {n for n in set(OBI_RULE.findall(obi)) | set(SV_PROP.findall(obi))
+                 if not n.startswith("__")}  # not the macros' own parameters
     unreachable_ok = must_be_unreachable(bdir)
     for name in sorted(unreachable_ok - seen):
         print(f"WARNING  must_be_unreachable.txt lists {name}, which formal_tb.sv does not declare")

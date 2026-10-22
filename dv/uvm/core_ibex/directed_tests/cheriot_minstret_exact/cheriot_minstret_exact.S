@@ -11,7 +11,8 @@
 # CSpecialW MTCC (a trap vector without SR), a CJALR that traps, then counter CSRs read in the
 # handler without SR. The checks below are exact counts from the specifications, so the test says
 # whether the core counts correctly; CHERIoT-Sail cosim stays on (it compares minstret/instret
-# reads since 2026-10-19), so the same run says whether the model agrees.
+# reads since 2026-10-21; TestRIG's checker since 2026-10-19), so the same run says whether the
+# model agrees.
 #
 # Method: each check brackets a short sequence between two reads (s0, then a4) and compares the
 # difference with the instructions that retire in between, plus 1 for the first read itself. With
@@ -44,6 +45,9 @@
 #
 # Proving it can fail (build-time switch, not in the testlist):
 #   -DCHERIOT_MINSTRET_INJECT_FAIL  adds an uncounted nop to check 11's sequence -> 11
+# and for the model's side (plusarg):
+#   +cheriot_sail_corrupt_instret=1  the CHERIoT-Sail check sees every minstret/instret read + 1
+#                                    -> "cheriot-sail rd_wdata mismatch" at the first read
 
 #include "cheriot_dv.h"
 

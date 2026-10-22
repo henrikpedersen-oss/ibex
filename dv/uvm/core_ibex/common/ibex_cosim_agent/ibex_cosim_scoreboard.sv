@@ -32,6 +32,9 @@ class ibex_cosim_scoreboard extends uvm_scoreboard;
   local int unsigned cheriot_sail_steps;
   // +far_code_windows=1: code windows at both ends of the address space (see init_cosim()).
   local bit          far_code_windows_en;
+  // +cheriot_sail_corrupt_instret=1: fault injection. The CHERIoT-Sail check is handed rd_wdata + 1
+  // for every minstret(h)/instret(h) read, so a run must fail; shows the counter compare is live.
+  local bit          cheriot_sail_corrupt_instret;
 
   uvm_tlm_analysis_fifo #(ibex_rvfi_seq_item)       rvfi_port;
   uvm_tlm_analysis_fifo #(ibex_mem_intf_seq_item)   dmem_port;
@@ -595,6 +598,11 @@ class ibex_cosim_scoreboard extends uvm_scoreboard;
       cheriot_sail_cosim_null_gprs();
       cheriot_sail_load_revbm();
       cheriot_prev_trap = 1'b0;
+      void'($value$plusargs("cheriot_sail_corrupt_instret=%0b", cheriot_sail_corrupt_instret));
+      if (cheriot_sail_corrupt_instret) begin
+        `uvm_info(`gfn, {"+cheriot_sail_corrupt_instret: minstret/instret reads corrupted for the ",
+                         "CHERIoT-Sail check; this run must fail"}, UVM_LOW)
+      end
       void'($value$plusargs("check_cheriot_cause=%0b", check_cheriot_cause_en));
       `uvm_info(`gfn, $sformatf("CHERIoT-Sail trap cause check %s (+check_cheriot_cause)",
                                 check_cheriot_cause_en ? "ENABLED" : "disabled"), UVM_LOW)
@@ -771,6 +779,13 @@ class ibex_cosim_scoreboard extends uvm_scoreboard;
         automatic bit cheri_we  = (rvfi_instr.rd_addr != 5'h0) && !rvfi_instr.rf_wr_suppress
                                   && !rvfi_instr.trap;
         automatic bit cheri_tag = rvfi_instr.rd_wcap[32];
+        automatic bit [31:0] rd_wdata = rvfi_instr.rd_wdata;
+        // minstret(h) 0xB02/0xB82, instret(h) 0xC02/0xC82: CSR instructions (SYSTEM, funct3 != 0).
+        if (cheriot_sail_corrupt_instret && rvfi_instr.insn[6:0] == 7'h73 &&
+            rvfi_instr.insn[14:12] != 3'b000 &&
+            rvfi_instr.insn[31:20] inside {12'hB02, 12'hB82, 12'hC02, 12'hC82}) begin
+          rd_wdata = rd_wdata + 32'd1;
+        end
         // The Sail DII model never advances mcycle, so a csrr mcycle leaves 0 in
         // rd and the first arithmetic on it mismatches the RTL.
         cheriot_sail_cosim_set_mcycle(rvfi_instr.mcycle);
@@ -790,7 +805,7 @@ class ibex_cosim_scoreboard extends uvm_scoreboard;
         cheriot_prev_trap_skip = rvfi_instr.nmi || rvfi_instr.nmi_int || rvfi_instr.debug_req;
         if (cheriot_sail_cosim_step(rvfi_instr.insn, rvfi_instr.pc,
                                     cheri_we, rvfi_instr.rd_addr, cheri_tag,
-                                    rvfi_instr.rd_wdata, rvfi_instr.trap) != 0) begin
+                                    rd_wdata, rvfi_instr.trap) != 0) begin
           // UVM_ERROR (not FATAL) so simulation continues to collect all mismatches
           `uvm_error(`gfn, get_cheriot_sail_error_str())
         end

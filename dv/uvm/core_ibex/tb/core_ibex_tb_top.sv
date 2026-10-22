@@ -722,6 +722,20 @@ module core_ibex_tb_top;
   // disturbs a load whose request is waiting for its grant (seed 17277).
   `DV_ASSERT_CTRL("tb_data_req_held_until_gnt", core_ibex_tb_top.DataReqHeldUntilGnt)
 
+  // The OBI checker on ibex_top's ports (dv/sva/ibex_top_obi_bind.sv) follows the same controls:
+  // the address-phase rules with DataReqHeldUntilGnt, the response rules with the spurious
+  // d-side responses below (a spurious response answers no request, which is what they check).
+  `define IBEX_OBI_DATA_CHK core_ibex_tb_top.dut.u_ibex_top.u_obi_assert_data
+  `DV_ASSERT_CTRL("tb_data_req_held_until_gnt",
+    `IBEX_OBI_DATA_CHK.g_ReqHeldUntilGnt.ReqHeldUntilGnt)
+  `DV_ASSERT_CTRL("tb_data_req_held_until_gnt", `IBEX_OBI_DATA_CHK.g_APhaseStable.APhaseStable)
+  `DV_ASSERT_CTRL("tb_no_spurious_response",
+    `IBEX_OBI_DATA_CHK.g_RspOnlyOutstanding.RspOnlyOutstanding)
+  `DV_ASSERT_CTRL("tb_no_spurious_response",
+    `IBEX_OBI_DATA_CHK.g_max_outstanding.g_MaxOutstandingRespected.MaxOutstandingRespected)
+  `DV_ASSERT_CTRL("tb_no_spurious_response", `IBEX_OBI_DATA_CHK.g_RDataKnown.RDataKnown)
+  `undef IBEX_OBI_DATA_CHK
+
   `DV_ASSERT_CTRL("tb_no_spurious_response",
     core_ibex_tb_top.dut.u_ibex_top.u_ibex_core.NoMemResponseWithoutPendingAccess)
   `DV_ASSERT_CTRL("tb_no_spurious_response",
