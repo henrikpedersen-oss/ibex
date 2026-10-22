@@ -24,7 +24,7 @@
 # core_ibex_tb_top.sv ties trvk_revbm_err_i to 0, so TRVK can only ever say
 # "live". A check that expects a revoked verdict could never pass, and one that
 # expects "live" is what test 1 below already does. The revoked path belongs to
-# the Sonata SoC layer (cheri_tbre), where an allocator writes the bitmap.
+# the RTOS test SoC layer (cheri_tbre), where an allocator writes the bitmap.
 #
 # The TRVK lookup itself IS on the path of every tagged CLC here, so test 1
 # fails when TRVK clears the tag of a live capability.

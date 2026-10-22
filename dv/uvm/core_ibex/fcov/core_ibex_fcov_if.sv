@@ -3244,7 +3244,7 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
   // The illegal_bins are the edge outcomes both definitions rule out for every input (a tag kept
   // past the window or on a sealed source, a tag cleared at the base or the last address), so
   // they also check that this window matches the RTL's. Representability could not be mutated in
-  // the Sonata mutation check (the check is
+  // the CHERIoT RTOS mutation check (the check is
   // inside a package function), and CHERI-C intcap tests one address in one window, so without
   // this group nothing shows whether these edges are reached at all.
   logic               fcov_rep_valid, fcov_rep_tag_out, fcov_rep_sealed, fcov_rep_outside;

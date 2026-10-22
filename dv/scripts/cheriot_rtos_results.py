@@ -2,9 +2,9 @@
 # Copyright lowRISC contributors.
 # Licensed under the Apache License, Version 2.0, see LICENSE for details.
 # SPDX-License-Identifier: Apache-2.0
-"""Turn saved Sonata UART logs into a dvsim sim_results file for sonata_testplan.hjson.
+"""Turn saved CHERIoT RTOS test SoC UART logs into a dvsim sim_results file for cheriot-rtos_testplan.hjson.
 
-Reads <logs>/<target>.<build>.uart.log, as saved by `make sonata-test-xlm SONATA_RESULT=<target>`,
+Reads <logs>/<target>.<build>.uart.log, as saved by `make cheriot-rtos-test-xlm CHERIOT_RTOS_RESULT=<target>`,
 and writes the {timestamp, test_results: [{name, passing, total}]} file that
 ibex/vendor/lowrisc_ip/util/dvsim/testplanner.py -s reads.
 
@@ -15,7 +15,7 @@ an incomplete run cannot read as a pass. A FAIL anywhere in a build's logs outra
 same build.
 
 The cheriot-rtos tests.extra runs (SIM_ONLY_TESTS) print no verdict lines. Each passes only if its
-<target>.<build>.sim.txt (the failure-marker grep of run.log that sonata-test-xlm keeps) shows the
+<target>.<build>.sim.txt (the failure-marker grep of run.log that cheriot-rtos-test-xlm keeps) shows the
 run ended on the RTOS exit string and holds no other marker, its UART log reports
 "Simulation exit code: 0" (local cheriot-rtos patch 0002) and no other code, and the log contains
 the lines the test must print (SIM_ONLY_TESTS).
@@ -71,7 +71,7 @@ JULIET_TESTS = {
     "416": "juliet_cwe416_uaf",
 }
 
-# Targets with no UART verdict lines of their own (cheriot-rtos tests.extra): SONATA_RESULT target
+# Targets with no UART verdict lines of their own (cheriot-rtos tests.extra): CHERIOT_RTOS_RESULT target
 # name (the "<target>" in <target>.<build>.uart.log) -> (testplan name, [(regex, count)]): each
 # regex must match exactly count lines of the ANSI-stripped UART log.
 SIM_ONLY_TESTS = {
@@ -87,7 +87,7 @@ SIM_ONLY_TESTS = {
 EXIT_SEEN = "Exiting the simulator because the magic UART string was seen."
 EXIT_CODE_LINE = re.compile(r"^Simulation exit code: (?P<code>\d+)$")
 
-# firmware/perf_test runs (make sonata-perf-xlm), kept as perf-<config>-lat<n>: testplan
+# firmware/perf_test runs (make cheriot-rtos-perf-xlm), kept as perf-<config>-lat<n>: testplan
 # perf_<config, '-' as '_'>_lat<n>. Budget: Earl Grey 2's boot, 100 ms at 150 MHz (perf_report.py).
 PERF_TARGET = re.compile(r"^perf-(?P<cfg>.+)-lat(?P<lat>\d+)$")
 PERF_LINE = re.compile(r": PERF (?P<wl>\S+) cycles (?P<cyc>\d+)\b")
@@ -103,7 +103,7 @@ REVOCATION_TESTS = {"race": "revocation_sweep_race", "progress": "revocation_swe
 # TRBE: the engine's name in firmware built before the upstream rename
 TBRE_INVAL_LINE = re.compile(
     r"^Revocation barrier: (?P<verdict>PASS|FAIL) T(?:BR|RB)E invalidate-only:")
-# firmware/dbg_host_test (make sonata-dbg-host-xlm): "Debug host: PASS|FAIL tag clear|locked: ..."
+# firmware/dbg_host_test (make cheriot-rtos-dbg-host-xlm): "Debug host: PASS|FAIL tag clear|locked: ..."
 DBG_HOST_LINE = re.compile(r"^Debug host: (?P<verdict>PASS|FAIL) (?P<what>tag clear|locked)\b")
 DBG_HOST_TESTS = {
     "tag clear": "bus_master_dbg_host_tag_clear",

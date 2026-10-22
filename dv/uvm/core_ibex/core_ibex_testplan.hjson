@@ -2456,7 +2456,7 @@
               only. (1) CSetBounds(MTDC, 128) gives tag=1; (2) CClearTag clears it; (3) a second
               CClearTag leaves it cleared; (4) the address is unchanged; (5)-(7) no interrupt. No
               load, store or trap; nothing is freed or revoked (revocation is covered at the
-              Sonata layer).
+              RTOS test SoC layer).
             - juliet_cwe416_use_after_free: Named after CWE-416 Use After Free; a register-level
               CClearTag check only. A 64-byte capability to a .data object (MTDC, CSetAddr,
               CSetBounds): (1) tag=1; (2) CClearTag ("free") gives tag=0; (3) CGetAddr is still

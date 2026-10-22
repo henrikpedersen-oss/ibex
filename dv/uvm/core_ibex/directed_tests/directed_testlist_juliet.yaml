@@ -10,9 +10,9 @@
 # The check in each case is that the capability loses its tag or traps, rather
 # than that the C program misbehaves.
 #
-# Distinct from ibex/dv/cheriot-rtos-test-suite/firmware/juliet_cwe, which runs the
+# Distinct from ibex/dv/cheriot-rtos-test-suite/sw/tests/juliet_cwe, which runs the
 # same CWE classes as compiled C under CHERIoT RTOS on the RTOS test SoC via
-# `make sonata-juliet-xlm`. These need no RTOS and run under the normal uvm-test-xlm path.
+# `make cheriot-rtos-juliet-xlm`. These need no RTOS and run under the normal uvm-test-xlm path.
 #
 # Kept in their own testlist so the suite can be maintained and reviewed
 # separately; metadata.py loads every directed_testlist*.yaml in this directory,
@@ -83,7 +83,7 @@
     CSetBounds(MTDC, 128) gives tag=1; (2) CClearTag clears it; (3) a second
     CClearTag leaves it cleared; (4) the address is unchanged; (5)-(7) no
     interrupt. No load, store or trap; nothing is freed or revoked (revocation
-    is covered at the Sonata layer).
+    is covered at the RTOS test SoC layer).
   iterations: 1
   test_srcs: juliet_cwe415_double_free/juliet_cwe415_double_free.S
   sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"

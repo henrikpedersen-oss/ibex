@@ -17,7 +17,7 @@
 # 0xC00-0xC9F, omitting the four 0xB machine-mode counters. Every "csrr rd,
 # mcycle" from a compartment without ASR therefore raised
 # PermitAccessSystemRegistersViolation. CHERIoT RTOS times each test with
-# exactly that instruction, so the Sonata test suite hung in an endless
+# exactly that instruction, so the CHERIoT RTOS test suite hung in an endless
 # violation loop, re-faulting at the same PC forever.
 #
 # Running this needs ASR actually absent from PCC, which is awkward because

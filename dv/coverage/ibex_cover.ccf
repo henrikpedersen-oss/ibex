@@ -6,7 +6,7 @@
 // testbench (yaml/rtl_simulation.yaml via scripts/compile_tb.py), RISC-V compliance
 // (dv/riscv_compliance/build_xlm.sh), TestRIG (dv/testrig_ibex_cheriot/testrig_xlm_build.sh), the Sonata Xcelium
 // flow (sonata-xlm/sonata_xlm_build.sh) and the CHERIoT RTOS test SoC
-// (dv/cheriot-rtos-test-suite/cheriot_rtos_cover.ccf, which includes this file and adds the
+// (dv/cheriot-rtos-test-suite/dv/cov/cheriot_rtos_cover.ccf, which includes this file and adds the
 // memory subsystem on top).
 //
 // One file so that every suite's database models the same items under ibex_top: when two suites
