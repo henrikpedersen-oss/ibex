@@ -223,7 +223,7 @@ module ibex_register_file_ff import ibex_pkg::*; #(
     // never be set. The bank-select bit is anyway forced to 0.
     // The write address is only meaningful with we_a_i: without ResetAll the writeback address
     // register is unreset and X until the first instruction writes back.
-    `ASSERT(CheriotWaddrMSBClear,  cheriot_enabled && we_a_i |-> !waddr_a_i[4])
+    `ASSERT(CheriotWaddrMSBClear,  (cheriot_enabled && we_a_i) |-> !waddr_a_i[4])
     `ASSERT(CheriotRaddrAMSBClear, cheriot_enabled |-> !raddr_a_i[4])
     `ASSERT(CheriotRaddrBMSBClear, cheriot_enabled |-> !raddr_b_i[4])
 

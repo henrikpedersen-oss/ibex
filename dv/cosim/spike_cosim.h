@@ -185,6 +185,10 @@ class SpikeCosim : public simif_t, public Cosim {
   void set_mcycle(uint64_t mcycle) override;
   void set_csr(const int csr_num, const uint32_t new_val) override;
   uint32_t get_csr(const int csr_num) override;
+  // Read-only architectural state, for a bench that hands Spike's state to another model (the
+  // EG2 chip bench's handover to its CHERIoT-mode model at the CHERIoT lock).
+  uint32_t get_gpr(int idx) { return processor->get_state()->XPR[idx]; }
+  uint32_t get_pc() { return processor->get_state()->pc; }
   void set_ic_scr_key_valid(bool valid) override;
   void notify_dside_access(const DSideAccessInfo &access_info) override;
   // The spike co-simulator assumes iside and dside accesses within a step are

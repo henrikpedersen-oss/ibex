@@ -130,6 +130,7 @@ class riscv_debug_rom_gen extends riscv_asm_program_gen;
     if (cfg.gen_debug_section) begin
       str = {$sformatf("j %0sdebug_end", hart_prefix(hart))};
     end else begin
+      // No debug section, so no frame to pop.
       str = {"dret"};
     end
     gen_section($sformatf("%0sdebug_exception", hart_prefix(hart)), str);
