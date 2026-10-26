@@ -3319,14 +3319,16 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
         iff (fcov_rep_valid & ~fcov_rep_sealed & (fcov_rep_eclass != 2'd3)) {
       bins d[] = {[-10:10]};
     }
-    // The tag outcome at the edges, as the core produced it. Below the base the outcome is binned
-    // both ways (the reference model's call); at the base the new address equals the base, so the
-    // bounds decode unchanged and the tag is kept (ibex_cheriot_pkg.sv cheriot_set_address: zero
-    // distance from the base; Sail setCapAddr, capBoundsEqual).
+    // The tag outcome at the edges, as the core produced it. Below the base the address is outside
+    // the window, so the tag is cleared: the window's lower limit is the base (CHERIoT ISA 7.13.5;
+    // Sail setCapAddr). E = 24 is no exception: a tagged capability with E = 24 has base 0, and
+    // fcov_rep_d_lo does not wrap, so nothing lies below it. At the base the new address equals the
+    // base, so the bounds decode unchanged and the tag is kept (ibex_cheriot_pkg.sv
+    // cheriot_set_address: zero distance from the base; Sail setCapAddr, capBoundsEqual).
     cp_rep_lo_edge: coverpoint {fcov_rep_d_lo == -1, fcov_rep_d_lo == 0, fcov_rep_tag_out}
         iff (fcov_rep_valid & ~fcov_rep_sealed) {
       bins below_cleared = {3'b100};
-      bins below_kept    = {3'b101};
+      illegal_bins below_kept = {3'b101};
       illegal_bins base_cleared = {3'b010};
       bins base_kept     = {3'b011};
     }
@@ -3370,11 +3372,13 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
     }
     // AUIPCC edge outcomes at the even distances it can reach. AUIPCC never clears for a seal
     // (SETADDR_PCC_ARITH), so the tag follows representability alone: kept at the base and two
-    // below the window's end, cleared past it (as cp_rep_lo_edge / cp_rep_hi_edge).
+    // below the window's end, cleared past it and below the base (as cp_rep_lo_edge /
+    // cp_rep_hi_edge). Two below the base is reachable: imm20 << 11 is sign-extended, so a PC
+    // 2046 bytes above the base with imm20 = -1 lands there (cheriot_auipcc_auicgp_repr).
     cp_rep_auipcc_edge: coverpoint {fcov_rep_edge, fcov_rep_tag_out}
         iff (fcov_rep_valid & (fcov_rep_op == 3'd3)) {
       bins lo_minus2_cleared = {4'b010_0};
-      bins lo_minus2_kept    = {4'b010_1};
+      illegal_bins lo_minus2_kept = {4'b010_1};
       illegal_bins lo_base_cleared   = {4'b011_0};
       bins lo_base_kept      = {4'b011_1};
       illegal_bins hi_minus2_cleared = {4'b101_0};

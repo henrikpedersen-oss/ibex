@@ -26,6 +26,11 @@ void cheriot_sail_cosim_init(const svBitVecVal *boot_addr);
 // Set x1-x15 to NULL, CHERIoT-Ibex's reset value (init leaves them root_cap_mem, the RVFI-DII
 // start state TestRIG uses). Call after init when the program runs from reset (UVM cosim).
 void cheriot_sail_cosim_null_gprs(void);
+void cheriot_sail_cosim_set_gpr_int(const svBitVecVal *idx, const svBitVecVal *val);
+void cheriot_sail_cosim_handover(const svBitVecVal *next_pc, const svBitVecVal *mtvec,
+                                 const svBitVecVal *mepc, const svBitVecVal *mstatus,
+                                 const svBitVecVal *mie, const svBitVecVal *mcause,
+                                 const svBitVecVal *mtval);
 // RAM size mapped at 0x80000000 by the next init (default 8 MiB, the TestRIG TB's data memory).
 void cheriot_sail_cosim_set_ram_size(const svBitVecVal *size);
 // Second region [base, base + size) mapped by the next init, in the platform's ROM segment
@@ -60,6 +65,13 @@ void cheriot_sail_cosim_cleanup(void);
 // take the interrupt from its own state. Call before stepping the handler's first instruction.
 // Returns 0 on success, -1 (with an error recorded) if the model would not take it.
 int         cheriot_sail_cosim_take_interrupt(const svBitVecVal *mip);
+
+// The DUT's instruction took a bus error the model cannot see (the model executes the RVFI
+// instruction word and its memory never errors): the model takes the access fault instead of
+// executing it. kind 0 instruction fetch, 1 load, 2 store; tval the faulting address. Returns 0,
+// or -1 with an error recorded (the model's PC is not the DUT's). 2026-10-25, EG2 review R12.
+int         cheriot_sail_cosim_step_bus_error(const svBitVecVal *pc, int kind,
+                                              const svBitVecVal *tval);
 
 // 1 if the model, in its current state, would take an interrupt were these bits pending: one is
 // enabled in mie and mstatus.MIE is set (CHERIoT is M-mode only). Changes nothing.

@@ -57,6 +57,11 @@ class ibex_mem_intf_monitor extends uvm_monitor;
     ibex_mem_intf_seq_item mailbox_result;
     // Clear the mailbox of any content
     while (collect_response_queue.try_get(mailbox_result));
+    // And the count: the responses still in flight when reset rose never come (rvalid is gated
+    // by reset in ibex_mem_intf), so a count left above 0 stopped the spurious d-side responses
+    // for the rest of the test (found by review 2026-10-25).
+    outstanding_accesses = 0;
+    outstanding_accesses_port.write(outstanding_accesses);
     wait (vif.monitor_cb.reset === 1'b0);
   endtask
 

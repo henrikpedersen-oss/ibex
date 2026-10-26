@@ -3246,12 +3246,14 @@ cp_cheri_cd_cs1_repr_cases).
 - cp_rep_auipcc_edge: AUIPCC's tag outcome at the even edge distances
 - cp_rep_auicgp_sealed_out: AUICGP through a sealed c3 (must clear the tag)
 
-There are deliberately no illegal_bins. The window formula is the RTL's
-implementation, while CHERIoT-Sail defines representability as the bounds decoding
-the same with the new address; illegal bins built on the RTL's formula would miss
-exactly a disagreement between the two. The group records which edges were reached;
-whether each outcome is right is the cosim's and TestRIG's call against Sail, so a
-below_kept or past_kept hit is checked there.
+The illegal_bins are the edge outcomes that both definitions of the window rule out for
+every input: the RTL's formula and CHERIoT-Sail's, where representability means the
+bounds decode the same with the new address (checked to agree, getCapBoundsBits). They
+are a tag kept below the base or past the window, a tag cleared at the base or the last
+address, and a tag kept on a sealed source. A tag kept below the base is impossible for
+every exponent: a tagged capability with E = 24 has base 0, so nothing lies below it.
+An illegal-bin hit is a defect; whether every other outcome is right is the cosim's and
+TestRIG's call against Sail.
 
 Source: fcov/core_ibex_fcov_if.sv. 16 coverpoints and crosses, sampled in the main
 core only (the lockstep shadow core is excluded).

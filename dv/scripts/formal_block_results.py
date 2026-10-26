@@ -57,7 +57,7 @@ BLOCKS = {
     "icache": ("ibex/dv/formal_ibex_cheriot/formal-icache", re.compile(r"ecc[01]_tweak[01]_bc[01]|e2e"),
                {"e2e": ["results_e2e_step1.txt"]}),
     "id": ("ibex/dv/formal_ibex_cheriot/formal-id", re.compile(r"wb[01]_btalu[01]_cheriot[01](_live)?"), {}),
-    "trvk": ("ibex/dv/formal_ibex_cheriot/formal-trvk", re.compile(r"out\d+_ecc[01]_bmw\d+(_live)?"), {}),
+    "trvk": ("ibex/dv/formal_ibex_cheriot/formal-trvk", re.compile(r"out\d+_ecc[01]_bmw\d+(_bms\d+)?(_live)?"), {}),
 }
 EMBEDDED = "rtl_embedded_assertions"
 MAPPED = "properties_mapped"

@@ -495,10 +495,42 @@ class core_ibex_base_test extends uvm_test;
       cheriot_enable_port.get(txn);
       if (txn.read_write == WRITE && txn.addr == cfg.cheriot_enable_on_write) break;
     end
+    if (cfg.cheriot_enable_on_sleep) begin
+      raise_cheriot_enable_in_sleep();
+      return;
+    end
     clk_vif.wait_clks(cfg.cheriot_enable_delay);
     dut_vif.dut_cb.cheriot_enable <= ibex_pkg::IbexMuBiOn;
     `uvm_info(`gfn, $sformatf("cheriot_enable_i raised %0d cycles after the write to 0x%08h",
                               cfg.cheriot_enable_delay, cfg.cheriot_enable_on_write), UVM_LOW)
+  endtask
+
+  // +cheriot_enable_on_sleep=1 (directed_tests/cheriot_enable_handover, its WFI run; EG2
+  // REQ_SOC_07 "a switch during WFI"): after the trigger write the program executes WFI. The pin is
+  // raised cheriot_enable_delay cycles into the core's SLEEP state, and irq_timer_i is raised and
+  // held cheriot_enable_delay cycles after that to wake the core. The program has set mie.MTIE with
+  // mstatus.MIE clear, so WFI ends without a trap; it masks the line afterwards.
+  virtual task raise_cheriot_enable_in_sleep();
+    irq_timer_hold_seq timer_h;
+    int unsigned       waited = 0;
+    while (dut_vif.dut_cb.ctrl_fsm_cs != ibex_pkg::SLEEP) begin
+      @(dut_vif.dut_cb);
+      if (++waited > 20000) begin
+        `uvm_error(`gfn, "+cheriot_enable_on_sleep: the core did not reach SLEEP after the trigger write")
+        return;
+      end
+    end
+    clk_vif.wait_clks(cfg.cheriot_enable_delay);
+    if (dut_vif.dut_cb.ctrl_fsm_cs != ibex_pkg::SLEEP) begin
+      `uvm_error(`gfn, "+cheriot_enable_on_sleep: the core left SLEEP before the pin was raised")
+    end
+    dut_vif.dut_cb.cheriot_enable <= ibex_pkg::IbexMuBiOn;
+    `uvm_info(`gfn, $sformatf("cheriot_enable_i raised in SLEEP, %0d cycles after the core slept",
+                              cfg.cheriot_enable_delay), UVM_LOW)
+    clk_vif.wait_clks(cfg.cheriot_enable_delay);
+    timer_h = irq_timer_hold_seq::type_id::create("cheriot_enable_wake_h");
+    timer_h.start(env.vseqr.irq_seqr);
+    `uvm_info(`gfn, "irq_timer_i raised and held to wake the core", UVM_LOW)
   endtask
 
   // The 1->0 transition the pin contract forbids (REQ_BCK_06; directed_tests/cheriot_enable_on_off):

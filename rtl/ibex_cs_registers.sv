@@ -2016,7 +2016,11 @@ module ibex_cs_registers import ibex_pkg::*, ibex_cheriot_pkg::*; #(
           end
         CHERIOT_SCR_MTCC:
           begin
-            cheriot_csr_rdata_o = mtvec_q;
+            // MTCC's address bits [1:0] read 0 (CHERIoT: MTCC is 4-byte aligned; verification spec
+            // REQ_SCR_02). A CHERIoT-mode write legalizes them (ibex_cheriot_ex.sv), but mtvec_q
+            // keeps the MODE bits (01, vectored) of a write made in RISC-V mode before the switch,
+            // which MTCC then read back as address bit 0 (EG2 F39). mtvec itself keeps its MODE.
+            cheriot_csr_rdata_o = {mtvec_q[31:2], 2'b00};
             cheriot_csr_rcap_o  = mtvec_cap;
           end
         CHERIOT_SCR_MTDC:

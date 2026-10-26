@@ -2066,6 +2066,18 @@ module ibex_core import ibex_pkg::*; import ibex_cheriot_pkg::*; #(
       if ((id_stage_i.controller_i.ctrl_fsm_cs == IRQ_TAKEN) & id_stage_i.controller_i.handle_irq &
           ~instr_valid_id & ready_wb & ~captured_taken) begin
         rvfi_irq_valid <= 1'b1;
+        // The pending bits the notification carries are those of this cycle: IRQ_TAKEN picks the
+        // interrupt from the lines now, which can differ from those captured when ID emptied if they
+        // changed in between. With the earlier capture the cosim took another interrupt than the
+        // core (riscv_mem_error_traps_test 6458, 2026-10-25: tb "IRQ_TAKEN and IRQs have just
+        // changed"; the core entered the handler at mtvec + 0x64, Spike at mtvec + 0x0c). This
+        // assignment comes after the capture above, so it wins in a cycle that does both.
+        // The NMI flags likewise: irq_nm_i is level-sensitive, and an NMI that dropped before
+        // IRQ_TAKEN, which then took a pending regular interrupt, made the cosim take an NMI the
+        // core did not (found by review 2026-10-25). The internal NMI stays until taken.
+        captured_mip     <= cs_registers_i.mip;
+        captured_nmi     <= irq_nm_i;
+        captured_nmi_int <= id_stage_i.controller_i.irq_nm_int;
       end else begin
         rvfi_irq_valid <= 1'b0;
       end

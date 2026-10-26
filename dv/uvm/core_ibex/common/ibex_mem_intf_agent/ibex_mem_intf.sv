@@ -17,6 +17,12 @@ interface ibex_mem_intf#(
   wire                     we;
   wire  [DATA_WIDTH/8-1:0] be;
   wire                     rvalid;
+  // What the response driver drives; rvalid is this, gated by reset: a memory does not answer while
+  // in reset (OBI R-2.2, ibex_obi_assert RvalidLowInReset). The driver sees a reset through its
+  // clocking block one cycle late and drops rvalid a cycle after that, so without the gate a
+  // response in flight when reset rises stayed up into the reset (riscv_reset_test, 2026-10-25).
+  wire                     rvalid_drv;
+  assign rvalid = rvalid_drv & !reset;
   wire  [DATA_WIDTH-1:0]   wdata;
   wire  [INTG_WIDTH-1:0]   wintg;
   wire  [DATA_WIDTH-1:0]   rdata;
@@ -51,7 +57,7 @@ interface ibex_mem_intf#(
     input   addr;
     input   we;
     input   be;
-    output  rvalid;
+    output  rvalid = rvalid_drv;
     input   wdata;
     input   wintg;
     output  rdata;

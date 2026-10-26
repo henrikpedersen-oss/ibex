@@ -809,6 +809,18 @@ class ibex_cosim_scoreboard extends uvm_scoreboard;
           // UVM_ERROR (not FATAL) so simulation continues to collect all mismatches
           `uvm_error(`gfn, get_cheriot_sail_error_str())
         end
+        // Every capability result in full, address and metadata, as ibex_sail_rvfi_cmp compares it
+        // for TestRIG: cheriot_sail_cosim_step compares only a capability write's register and tag,
+        // so a wrong CIncAddr address or CSetBounds bounds passed (found 2026-10-24 by a must-fail
+        // run on the RTOS test SoC: a corrupted CIncAddrImm result went unreported).
+        if (cheri_we && !rvfi_instr.trap && cheriot_sail_cosim_get_cd_addr() != 0 &&
+            cheriot_sail_cosim_get_cd_addr() == rvfi_instr.rd_addr &&
+            {rvfi_instr.rd_wcap[31:0], rd_wdata} != cheriot_sail_cosim_get_cd_wdata()) begin
+          `uvm_error(`gfn, $sformatf("cheriot-sail cap rd data (c%0d): rtl 0x%08x_%08x, model 0x%016x (insn=0x%08x pc=0x%08x)",
+                                     rvfi_instr.rd_addr, rvfi_instr.rd_wcap[31:0], rd_wdata,
+                                     cheriot_sail_cosim_get_cd_wdata(), rvfi_instr.insn,
+                                     rvfi_instr.pc))
+        end
         cheriot_sail_steps++;
       end
     end

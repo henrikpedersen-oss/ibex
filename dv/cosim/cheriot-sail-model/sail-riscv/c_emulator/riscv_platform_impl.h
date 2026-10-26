@@ -24,6 +24,9 @@ extern bool rv_enable_writable_fiom;
 
 extern uint64_t rv_ram_base;
 extern uint64_t rv_ram_size;
+extern uint64_t rv_revocation_heap_base;
+extern uint64_t rv_revocation_heap_size;
+extern uint64_t rv_revocation_bits_base;
 
 extern uint64_t rv_rom_base;
 extern uint64_t rv_rom_size;

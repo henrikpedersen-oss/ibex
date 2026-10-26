@@ -17,6 +17,9 @@ bool plat_enable_misaligned_access(unit);
 bool plat_mtval_has_illegal_inst_bits(unit);
 
 mach_bits plat_ram_base(unit);
+mach_bits plat_revocation_heap_base(unit);
+mach_bits plat_revocation_heap_size(unit);
+mach_bits plat_revocation_bits_base(unit);
 mach_bits plat_ram_size(unit);
 bool within_phys_mem(mach_bits, sail_int);
 

@@ -53,3 +53,39 @@
   rtl_test: core_ibex_dm_test
   requires_dm: true
   sim_opts: "+enable_cheriot_seq=1 +cosim_off=1 +disable_spurious_dside_responses=1"
+
+- test: dm_corners_cheriot
+  desc: >
+    Debug-mode corner cases through the real debug module, CHERIoT mode (REQ_DBG_03, REQ_DBG_04,
+    REQ_DBG_05, REQ_SCR_01). The program's PCC and MTCC are bounded away from the debug memory.
+    Outside debug mode, SCRs 24-26 are illegal (mcause 2). Halted: an ecall and an illegal
+    instruction in the program buffer give cmderr 3 and change no CSR; program buffers load,
+    store, CLC and CSC beyond a5's top, through an untagged a4 and through a3 with only GL, with
+    no fault (cmderr 0), the right data, the CLC'd capability unattenuated and tagged, and the
+    CSC'd capability stored with its tag (checked by the program after resume); DEPCC and
+    DScratchC0/1 read and written in the program buffer. Then DEPCC := untagged, sealed, without
+    EX, and dret: the first fetch faults (mcause 28; mtval 0x402 untagged, mtval[10:5] = PCC
+    otherwise). Then dcsr.prv := 0..3: only M reads back, and dret returns to M (ecall cause 11).
+    Self-checking, cosim off. +dm_inject_fail=1 makes one expectation wrong and the run must
+    fail. Returns 0 on success; codes in the test header.
+  iterations: 1
+  test_srcs: dm_corners_cheriot/dm_corners_cheriot.S
+  config: cheriot-dv-tests
+  rtl_test: core_ibex_dm_corners_test
+  requires_dm: true
+  sim_opts: "+enable_cheriot_seq=1 +cosim_off=1 +disable_spurious_dside_responses=1"
+
+- test: dm_corners
+  desc: >
+    dm_corners_cheriot's dcsr.prv phases in RISC-V mode (REQ_DBG_04): the program buffer
+    exception probes, misa (U, no S), then dcsr.prv := 0..3 through the real debug module. U and
+    M read back as written, 1 and 2 as U or M (Debug Spec dcsr.prv WARL), and dret returns to the
+    level read back (ecall cause 8 or 11; PMP entry 0 lets U-mode run). Self-checking, cosim off.
+    +dm_inject_fail=1 expects dcsr.prv 0 after writing 3 and must fail. Returns 0 on success;
+    codes in the test header.
+  iterations: 1
+  test_srcs: dm_corners/dm_corners.S
+  config: cheriot-dv-tests
+  rtl_test: core_ibex_dm_corners_test
+  requires_dm: true
+  sim_opts: "+cosim_off=1 +disable_spurious_dside_responses=1"

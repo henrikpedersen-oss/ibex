@@ -141,9 +141,10 @@ module ibex_obi_assert #(
   `IBEX_OBI_HOST_RULE(ReqKnown, !$isunknown(req))
   // R-3.1.2: a request stays up until it is granted.
   `IBEX_OBI_HOST_RULE(ReqHeldUntilGnt, req && !gnt |=> req)
-  // R-3.1.1: the address phase does not change until it is granted.
-  `IBEX_OBI_HOST_RULE(APhaseStable,
-    req && !gnt |=> $stable({addr, we, be, wdata, wdata_intg, wtag}))
+  // R-3.1.1: the address phase does not change until it is granted. Split so a failure says which:
+  // the transfer (addr, we, be), or the write data, which carries nothing on a read.
+  `IBEX_OBI_HOST_RULE(APhaseStable, req && !gnt |=> $stable({addr, we, be}))
+  `IBEX_OBI_HOST_RULE(WDataStable, req && !gnt && we |=> $stable({wdata, wdata_intg, wtag}))
   `IBEX_OBI_HOST_RULE(APhaseKnown, req |-> !$isunknown({addr, we, be}))
   `IBEX_OBI_HOST_RULE(WDataKnown, req && we |-> !$isunknown({wdata, wdata_intg, wtag}))
   // R-7: at least one byte enable, and the enabled bytes are contiguous.
@@ -162,8 +163,9 @@ module ibex_obi_assert #(
   // Device: the response phase //
   ////////////////////////////////
 
-  // R-2.2: no response while in reset.
-  `IBEX_OBI_DEVICE_RULE(RvalidLowInReset, !rst_ni |-> !rvalid, 1'b0)
+  // R-2.2: no response while in reset. Not driven yet (X/Z, e.g. a UVM agent driving through a
+  // clocking block before its first edge) is not a response; RvalidKnown applies out of reset.
+  `IBEX_OBI_DEVICE_RULE(RvalidLowInReset, !rst_ni |-> rvalid !== 1'b1, 1'b0)
   `IBEX_OBI_DEVICE_RULE(RvalidKnown, !$isunknown(rvalid))
   // R-5: a response only for a request granted in an earlier cycle (so never in the grant cycle
   // of the request it answers), one per request.

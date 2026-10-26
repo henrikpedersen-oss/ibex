@@ -190,6 +190,19 @@ void cheriot_sail_cosim_init(const svBitVecVal *boot_addr_p) {
   // the model lowered MSHWM only on stores to RAM; see VENDORED_FROM.)
   zMSHWM  = UINT64_C(0);
   zMSHWMB = UINT64_C(0);
+  // mepc: "Reset Value: 0x0000_0000" (cs_registers.rst, Machine Exception PC), so MEPCC, whose
+  // address is mepc, resets with address 0 (its metadata, the executable root, is init's). The
+  // model's init leaves the address at the boot PC: a CSpecialR of MEPCC before the first trap read
+  // 0x80000000 in the model and 0 on the RTL (UVM cheriot_rand_* seeds 6447-6458, 2026-10-25, once
+  // the scoreboard compared full capability results).
+  zMEPCC.zaddress = UINT64_C(0);
+  zmepc           = UINT64_C(0);
+  // MTCC: the RTL resets mtvec to {boot_addr[31:8], 8'h00} and MTCC reads it with bits [1:0] = 0
+  // (ibex_cs_registers.sv). The model traps through MTCC's address, which init leaves at
+  // root_cap_exe's 0x80000000, and its set_mtvec is a no-op, so the zmtvec line below has no
+  // effect. The UVM bench boots at 0x80000000 and agreed by coincidence; the RTOS SoC boots at
+  // 0x00100000 and did not (found by review 2026-10-25).
+  zMTCC.zaddress  = (uint64_t)(boot_addr & ~0xffu);
 
   // CHERIoT-Ibex RVFI-DII mode: RAM starts at 0x80000000, no ROM unless set_rom() asked for one.
   // These globals are in riscv_platform_impl.c, linked into our .so.
@@ -233,6 +246,44 @@ void cheriot_sail_cosim_null_gprs(void) {
   struct zCapability *const gprs[] = {&zx1, &zx2,  &zx3,  &zx4,  &zx5,  &zx6,  &zx7, &zx8,
                                       &zx9, &zx10, &zx11, &zx12, &zx13, &zx14, &zx15};
   for (struct zCapability *r : gprs) *r = znull_cap;
+}
+
+// Handover from RISC-V (ePMP) mode at the CHERIoT lock, for a bench that switches modes inside one
+// run (eg2_top_verification's EG2 chip scoreboard; REQ_SOC_07 there, RFC CHERIoT Ibex "Handover to
+// CHERIoT Mode Software"). Call after init(); the state comes from the RISC-V-mode model.
+//
+// set_gpr_int: x<idx> (1..15) holds an integer: an untagged capability whose address is the value.
+void cheriot_sail_cosim_set_gpr_int(const svBitVecVal *idx_p, const svBitVecVal *val_p) {
+  assert(s_initialized && "cheriot_sail_cosim_init() must be called first");
+  struct zCapability *const gprs[] = {&zx1, &zx2,  &zx3,  &zx4,  &zx5,  &zx6,  &zx7, &zx8,
+                                      &zx9, &zx10, &zx11, &zx12, &zx13, &zx14, &zx15};
+  const uint32_t idx = idx_p[0];
+  assert(idx >= 1 && idx <= 15);
+  struct zCapability c = znull_cap;
+  c.zaddress = val_p[0];
+  *gprs[idx - 1] = c;
+}
+
+// handover: execution continues at next_pc with PCC the executable root; MTCC and MEPCC are the
+// executable root with the addresses of mtvec (mode bits cleared) and mepc; MTDC and MScratchC
+// stay the memory and sealing roots init() made. mstatus.MIE/MPIE, mie, mcause and mtval carry
+// over from the RISC-V-mode model.
+void cheriot_sail_cosim_handover(const svBitVecVal *next_pc_p, const svBitVecVal *mtvec_p,
+                                 const svBitVecVal *mepc_p, const svBitVecVal *mstatus_p,
+                                 const svBitVecVal *mie_p, const svBitVecVal *mcause_p,
+                                 const svBitVecVal *mtval_p) {
+  assert(s_initialized && "cheriot_sail_cosim_init() must be called first");
+  const uint64_t kMie = UINT64_C(1) << 3, kMpie = UINT64_C(1) << 7;
+  zPC            = next_pc_p[0];
+  zPCC.zaddress  = next_pc_p[0];
+  zMTCC.zaddress = mtvec_p[0] & ~UINT64_C(3);
+  zmtvec.zbits   = mtvec_p[0];
+  zMEPCC.zaddress = mepc_p[0];
+  zmepc          = mepc_p[0];
+  zmstatus.zbits = (zmstatus.zbits & ~(kMie | kMpie)) | (mstatus_p[0] & (kMie | kMpie));
+  zmie.zbits     = mie_p[0];
+  zmcause.zbits  = mcause_p[0];
+  zmtval         = mtval_p[0];
 }
 
 int cheriot_sail_cosim_step(const svBitVecVal *insn_p,
@@ -488,6 +539,86 @@ int cheriot_sail_cosim_take_interrupt(const svBitVecVal *mip_p) {
     return -1;
   }
   return 0;
+}
+
+// The DUT's instruction at `pc` took a bus error (an error response to its fetch, load or store)
+// that the model cannot produce: in RVFI-DII it executes the instruction word it is given, and
+// its memory never errors. Like Spike's set_iside_error() and notify_dside_access(.., error), the
+// error is an event the bench gives the model; the model takes the access fault itself (its own
+// mtvec/MTCC, mepc/MEPCC, mcause, mtval and cpuctrlsts) instead of executing the instruction, as
+// its step() does for a fetch that fails (riscv_step.sail: handle_mem_exception, tick_pc).
+// kind 0: instruction access fault, 1: load access fault, 2: store/AMO access fault; tval the
+// address that faulted. 2026-10-25, EG2 chip bench review R12 (chip_sw_rram_uncorr_fetch_cheriot:
+// the model ran on past a fetch the chip faulted on, and diverged).
+int cheriot_sail_cosim_step_bus_error(const svBitVecVal *pc_p, int kind,
+                                      const svBitVecVal *tval_p) {
+  const uint32_t pc   = pc_p[0];
+  const uint32_t tval = tval_p[0];
+  assert(s_initialized && "cheriot_sail_cosim_init() must be called first");
+
+  zrvfi_zzero_exec_packet(UNIT);
+  bool pc_diverged = false;
+  if (zPC != (uint64_t)pc) {
+    char buf[160];
+    snprintf(buf, sizeof(buf),
+             "cheriot-sail model PC 0x%08llx differs from DUT PC 0x%08x at step %lld (bus error): "
+             "the two diverged on an earlier step",
+             (unsigned long long)zPC, pc, (long long)s_step_no);
+    s_errors.emplace_back(buf);
+    pc_diverged = true;
+  }
+  if (s_pcc_mtcc_loop) {
+    ibex_csr_sync_exception(UNIT);
+    s_step_no++;
+    return pc_diverged ? -1 : 0;
+  }
+
+  struct zExceptionType e;
+  switch (kind) {
+    case 0:
+      e.kind = Kind_zE_Fetch_Access_Fault;
+      e.variants.zE_Fetch_Access_Fault = UNIT;
+      break;
+    case 1:
+      e.kind = Kind_zE_Load_Access_Fault;
+      e.variants.zE_Load_Access_Fault = UNIT;
+      break;
+    case 2:
+      e.kind = Kind_zE_SAMO_Access_Fault;
+      e.variants.zE_SAMO_Access_Fault = UNIT;
+      break;
+    default: {
+      char buf[96];
+      snprintf(buf, sizeof(buf), "cheriot_sail_cosim_step_bus_error: no access kind %d", kind);
+      s_errors.emplace_back(buf);
+      return -1;
+    }
+  }
+
+  sail_recovery_buf_active = 1;
+  if (setjmp(sail_recovery_buf) != 0) {
+    sail_recovery_buf_active = 0;
+    char buf[400];
+    snprintf(buf, sizeof(buf),
+             "cheriot-sail model cannot take the bus error at pc=0x%08x (step %lld, Sail %s)", pc,
+             (long long)s_step_no, sail_recovery_msg);
+    s_errors.emplace_back(buf);
+    s_step_no++;
+    return -1;
+  }
+  zhandle_mem_exception((uint64_t)tval, e);
+  ztick_pc(UNIT);
+  zext_post_step_hook(UNIT);
+  sail_recovery_buf_active = 0;
+  s_step_no++;
+
+  if (have_exception) {
+    have_exception = false;
+    s_errors.emplace_back("cheriot-sail model raised a Sail exception taking a bus error at step " +
+                          std::to_string(s_step_no - 1));
+    return -1;
+  }
+  return pc_diverged ? -1 : 0;
 }
 
 // The same condition take_interrupt() checks first; reads the model's state only.

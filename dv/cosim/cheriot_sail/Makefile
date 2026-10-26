@@ -62,7 +62,7 @@ PLATFORM_SRCS := \
     $(SAIL_RISCV_DIR)/c_emulator/ibex_platform_csrs.c
 
 # DPI wrapper (compiled as C++ with Sail headers already on the path)
-DPI_SRCS := cheriot_sail_cosim_dpi.cc
+DPI_SRCS := cheriot_sail_cosim_dpi.cc cheriot_sail_cosim_revocation.cc
 
 ALL_SRCS := $(MODEL_C) $(PLATFORM_SRCS) $(SAIL_RUNTIME_SRCS) $(DPI_SRCS)
 

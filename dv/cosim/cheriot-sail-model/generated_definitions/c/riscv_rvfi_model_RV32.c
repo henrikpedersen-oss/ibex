@@ -59909,7 +59909,9 @@ bool zmem_read_cap_revoked(uint64_t zaddr)
 
   bool z6zE624;
   uint64_t zram_base;
-  zram_base = plat_ram_base(UNIT);
+  /* ibex_cheriot_verification 2026-10-24: the revocable heap and its bitmap are platform settings
+     (cheri_mem.sail mem_read_cap_revoked; riscv_platform.c plat_revocation_*). */
+  zram_base = plat_revocation_heap_base(UNIT);
   bool z2zE2259;
   {
     RECREATE(lbits)(&zghz33277);
@@ -59921,6 +59923,13 @@ bool zmem_read_cap_revoked(uint64_t zaddr)
   if (z2zE2259) {  z6zE624 = false;  } else {
     __label__ cleanup_3264, end_cleanup_3265;
 
+    {
+      uint64_t zheap_size = plat_revocation_heap_size(UNIT);
+      if (zheap_size != UINT64_C(0) && ((zaddr - zram_base) & UINT64_C(0xFFFFFFFF)) >= zheap_size) {
+        z6zE624 = false;
+        goto end_function_3263;
+      }
+    }
     uint64_t zrevocation_byte_offset;
     {
       uint64_t z2zE2265;
@@ -59938,7 +59947,7 @@ bool zmem_read_cap_revoked(uint64_t zaddr)
     uint64_t zbyte;
     {
       uint64_t z2zE2264;
-      z2zE2264 = ((UINT64_C(0x83000000) + zrevocation_byte_offset) & UINT64_C(0xFFFFFFFF));
+      z2zE2264 = ((plat_revocation_bits_base(UNIT) + zrevocation_byte_offset) & UINT64_C(0xFFFFFFFF));
       {
         sbits z3zE8813;
         z3zE8813 = CONVERT_OF(sbits, fbits)(z2zE2264, UINT64_C(32) , true);

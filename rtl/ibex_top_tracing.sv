@@ -44,7 +44,9 @@ module ibex_top_tracing import ibex_pkg::*; import ibex_cheriot_pkg::*; #(
   parameter int unsigned DmHaltAddr                = 32'h1A110800,
   parameter int unsigned DmExceptionAddr           = 32'h1A110808,
   parameter int unsigned CheriotRevBitmapAddrWidth = 32'd11,
-  parameter int unsigned CheriotRevBitmapBaseAddr  = 32'h0
+  parameter int unsigned CheriotRevBitmapBaseAddr  = 32'h0,
+  // 2026-10-25 (EG2 F38): passed to ibex_top (revocation bitmap size in bytes).
+  parameter int unsigned CheriotRevBitmapSizeBytes = 32'd1 << CheriotRevBitmapAddrWidth
 ) (
   // Clock and Reset
   input  logic                                                         clk_i,
@@ -262,7 +264,8 @@ module ibex_top_tracing import ibex_pkg::*; import ibex_cheriot_pkg::*; #(
     .DmHaltAddr                ( DmHaltAddr                ),
     .DmExceptionAddr           ( DmExceptionAddr           ),
     .CheriotRevBitmapAddrWidth ( CheriotRevBitmapAddrWidth ),
-    .CheriotRevBitmapBaseAddr  ( CheriotRevBitmapBaseAddr  )
+    .CheriotRevBitmapBaseAddr  ( CheriotRevBitmapBaseAddr  ),
+    .CheriotRevBitmapSizeBytes ( CheriotRevBitmapSizeBytes )
   ) u_ibex_top (
     .clk_i,
     .rst_ni,

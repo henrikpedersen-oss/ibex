@@ -24,6 +24,10 @@ module ibex_top import ibex_pkg::*; import ibex_cheriot_pkg::*; #(
   parameter ibex_pkg::pmp_mseccfg_t PMPRstMsecCfg                = ibex_pkg::PmpMseccfgRst,
   parameter int unsigned            CheriotRevBitmapAddrWidth    = 32'd11,
   parameter int unsigned            CheriotRevBitmapBaseAddr     = 32'h0,
+  // Revocation bitmap size in bytes (ibex_trvk RevBitmapSizeBytes); 2026-10-25 (EG2 F38): bounds
+  // the revocable window when the bitmap is not a power of two. Default: 2^AddrWidth, as before.
+  parameter int unsigned            CheriotRevBitmapSizeBytes    =
+                                        32'd1 << CheriotRevBitmapAddrWidth,
   parameter bit                     RV32E                        = 1'b0,
   parameter rv32m_e                 RV32M                        = RV32MFast,
   parameter rv32b_e                 RV32B                        = RV32BNone,
@@ -1314,6 +1318,7 @@ module ibex_top import ibex_pkg::*; import ibex_cheriot_pkg::*; #(
       .NumOutstanding(MaxOutstandingDSideAccesses),
       .MemECC(MemECC),
       .RevBitmapAddrWidth(CheriotRevBitmapAddrWidth),
+      .RevBitmapSizeBytes(CheriotRevBitmapSizeBytes),
       .RevBitmapBaseAddr(CheriotRevBitmapBaseAddr)
     ) i_ibex_trvk (
       .clk_i                  (clk),

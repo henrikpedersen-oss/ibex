@@ -19,6 +19,9 @@ class core_ibex_env_cfg extends uvm_object;
   // enable_cheriot_seq, which raises it before the first fetch, cannot produce. 0 = not used.
   bit[31:0]                     cheriot_enable_on_write;
   int unsigned                  cheriot_enable_delay = 6;
+  // +cheriot_enable_on_sleep=1 (with +cheriot_enable_on_write): after the write, raise the pin while
+  // the core sleeps in WFI, then wake it with irq_timer_i (directed_tests/cheriot_enable_handover).
+  bit                           cheriot_enable_on_sleep;
   // +cheriot_disable_on_write=<hex addr>: the reverse, which the pin contract forbids (once On,
   // cheriot_enable_i stays On until reset): once the program writes to <addr>, slow the d-side
   // grants to cheriot_disable_gnt_delay cycles and lower the pin while a CSC waits for the grant of
@@ -103,6 +106,7 @@ class core_ibex_env_cfg extends uvm_object;
     void'($value$plusargs("enable_cheriot_seq=%0d", enable_cheriot_seq));
     void'($value$plusargs("cheriot_enable_on_write=%h", cheriot_enable_on_write));
     void'($value$plusargs("cheriot_enable_delay=%0d", cheriot_enable_delay));
+    void'($value$plusargs("cheriot_enable_on_sleep=%0d", cheriot_enable_on_sleep));
     void'($value$plusargs("cheriot_disable_on_write=%h", cheriot_disable_on_write));
     void'($value$plusargs("cheriot_disable_gnt_delay=%0d", cheriot_disable_gnt_delay));
     void'($value$plusargs("cheriot_disable_alert_window=%0d", cheriot_disable_alert_window));

@@ -82,6 +82,24 @@ mach_bits plat_ram_base(unit u)
   return rv_ram_base;
 }
 
+/* The revocable heap and its bitmap (cheri_mem.sail mem_read_cap_revoked): heap base 0 means
+   plat_ram_base(), heap size 0 no upper end. Set through the co-simulation DPI
+   (cheriot_sail_cosim_set_revocation). */
+mach_bits plat_revocation_heap_base(unit u)
+{
+  return rv_revocation_heap_base ? rv_revocation_heap_base : rv_ram_base;
+}
+
+mach_bits plat_revocation_heap_size(unit u)
+{
+  return rv_revocation_heap_size;
+}
+
+mach_bits plat_revocation_bits_base(unit u)
+{
+  return rv_revocation_bits_base;
+}
+
 mach_bits plat_ram_size(unit u)
 {
   return rv_ram_size;

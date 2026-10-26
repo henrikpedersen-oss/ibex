@@ -20,6 +20,10 @@ bool rv_enable_writable_fiom = true;
 
 uint64_t rv_ram_base = UINT64_C(0x80000000);
 uint64_t rv_ram_size = UINT64_C(0x4000000);
+/* cheri_mem.sail mem_read_cap_revoked: 0 = plat_ram_base(); 0 = no upper end; the bitmap. */
+uint64_t rv_revocation_heap_base = UINT64_C(0);
+uint64_t rv_revocation_heap_size = UINT64_C(0);
+uint64_t rv_revocation_bits_base = UINT64_C(0x83000000);
 
 uint64_t rv_rom_base = UINT64_C(0x1000);
 uint64_t rv_rom_size = UINT64_C(0x100);

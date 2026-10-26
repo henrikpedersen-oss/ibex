@@ -729,6 +729,7 @@ module core_ibex_tb_top;
   `DV_ASSERT_CTRL("tb_data_req_held_until_gnt",
     `IBEX_OBI_DATA_CHK.g_ReqHeldUntilGnt.ReqHeldUntilGnt)
   `DV_ASSERT_CTRL("tb_data_req_held_until_gnt", `IBEX_OBI_DATA_CHK.g_APhaseStable.APhaseStable)
+  `DV_ASSERT_CTRL("tb_data_req_held_until_gnt", `IBEX_OBI_DATA_CHK.g_WDataStable.WDataStable)
   `DV_ASSERT_CTRL("tb_no_spurious_response",
     `IBEX_OBI_DATA_CHK.g_RspOnlyOutstanding.RspOnlyOutstanding)
   `DV_ASSERT_CTRL("tb_no_spurious_response",

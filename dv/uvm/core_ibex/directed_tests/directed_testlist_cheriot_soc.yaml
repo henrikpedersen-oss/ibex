@@ -1,0 +1,176 @@
+# Copyright lowRISC contributors.
+# Licensed under the Apache License, Version 2.0, see LICENSE for details.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Core-level tests of Earl Grey 2's CHERIoT integration requirements (eg2_top_verification
+# eg2_toplevel_verification_spec.md): REQ_SOC_07 (the handover state), REQ_SOC_06 (the ePMP has no
+# effect in CHERIoT mode), REQ_CIB_02 (register-file integrity in CHERIoT mode). Expected values
+# come from those requirements and the documents they cite, not from the RTL. Each test has an
+# _inject_fail run that breaks one expectation and must fail.
+#
+# Single sim_opts key per test (YAML keeps only the last duplicate). A test-level gcc_opts replaces
+# its config's, so the ones below repeat the config's flags.
+
+# ---- REQ_SOC_07: cheriot_enable_handover ----
+# Expected to FAIL on the pinned RTL with code 30: MTCC keeps mtvec's vectored MODE bit (EG2
+# status/rtl_tickets.md F39, GAP-RTL-14; core REQ_SCR_02 says bits [1:0] are 0).
+
+- test: cheriot_enable_handover
+  desc: >
+    EG2 REQ_SOC_07, the switch after a store. x1-x31, mtvec and mepc filled in RISC-V mode
+    (x16-x31 all ones: the flops that hold x1-x15's capability halves in CHERIoT mode), dummy
+    instructions on; the testbench raises cheriot_enable_i after the program's write to 0x80200000.
+    Then every general-purpose register's tag (x1-x15) is 0; PCC, MTCC and MEPCC are the
+    executable root (perms 0x1EB, base 0, length 2^32, unsealed) with the next PC, mtvec's and
+    mepc's addresses; MTDC and MScratchC the memory (0x07F) and sealing (0xE01) roots; MTCC's
+    address bits [1:0] are 0. No alert (NoAlertsTriggered). Failure codes in the program header.
+  iterations: 1
+  test_srcs: cheriot_enable_handover/cheriot_enable_handover.S
+  config: riscv-tests
+  sim_opts: "+cheriot_enable_on_write=80200000 +disable_cosim=1 +disable_spurious_dside_responses=1"
+
+- test: cheriot_enable_handover_wfi
+  desc: >
+    As cheriot_enable_handover, the switch during WFI: the program sleeps right after its write,
+    the testbench raises cheriot_enable_i while the core is in SLEEP (+cheriot_enable_on_sleep)
+    and then irq_timer_i to wake it (mie.MTIE set, mstatus.MIE clear: no trap).
+  iterations: 1
+  test_srcs: cheriot_enable_handover/cheriot_enable_handover.S
+  config: riscv-tests
+  gcc_opts: -static -mcmodel=medany -fvisibility=hidden -nostdlib -nostartfiles
+            -I../../../vendor/riscv-test-env/
+            -I../../../vendor/riscv-test-env/p/
+            -I../../../vendor/riscv-tests/isa/macros/scalar/
+            -DHANDOVER_WFI
+  sim_opts: >-
+    +cheriot_enable_on_write=80200000 +cheriot_enable_on_sleep=1 +cheriot_enable_delay=20
+    +disable_cosim=1 +disable_spurious_dside_responses=1
+
+- test: cheriot_enable_handover_inject_fail
+  desc: >
+    Must fail: cheriot_enable_handover built with -DHANDOVER_INJECT_FAIL, which expects a tag in
+    x1-x15 after the switch: fails with code 1, before the code-30 check the plain test fails on.
+  iterations: 1
+  test_srcs: cheriot_enable_handover/cheriot_enable_handover.S
+  config: riscv-tests
+  gcc_opts: -static -mcmodel=medany -fvisibility=hidden -nostdlib -nostartfiles
+            -I../../../vendor/riscv-test-env/
+            -I../../../vendor/riscv-test-env/p/
+            -I../../../vendor/riscv-tests/isa/macros/scalar/
+            -DHANDOVER_INJECT_FAIL
+  sim_opts: "+cheriot_enable_on_write=80200000 +disable_cosim=1 +disable_spurious_dside_responses=1"
+
+# ---- REQ_SOC_06: cheriot_pmp_gated ----
+# On the earlgrey-pmprst build only (config earlgrey-pmp-reset, directed_testlist_earlgrey.yaml):
+#   make uvm-test-xlm TEST=cheriot_pmp_gated IBEX_CONFIG=earlgrey-pmprst SEED=1 ITERATIONS=1
+
+- test: cheriot_pmp_gated
+  desc: >
+    EG2 REQ_SOC_06. On Earl Grey's PMP reset values (MMWP), the program locks deny-all regions
+    (0x8000_0000 256 MiB, the whole space below the Earl Grey regions; only the signature words
+    allowed), clears RLB, and checks in RISC-V mode that loads, a store, a ROM store and a fetch
+    fault. Then the testbench raises cheriot_enable_i (write to 0x0001_0F00), and through the
+    roots the program stores and loads at six denied addresses and fetches from two denied
+    regions (CJALR to code it wrote there): no trap. Failure codes in the program header.
+  iterations: 1
+  test_srcs: cheriot_pmp_gated/cheriot_pmp_gated.S
+  config: earlgrey-pmp-reset
+  sim_opts: >-
+    +cheriot_enable_on_write=10F00 +disable_cosim=1 +disable_spurious_dside_responses=1
+    +enable_bad_intg_on_uninit_access=0
+
+- test: cheriot_pmp_gated_inject_fail
+  desc: >
+    Must fail: cheriot_pmp_gated built with -DPMP_GATED_INJECT_FAIL, which expects one fetch
+    more than ran (gp = 41).
+  iterations: 1
+  test_srcs: cheriot_pmp_gated/cheriot_pmp_gated.S
+  config: earlgrey-pmp-reset
+  gcc_opts: -march=rv32im -static -nostdlib -nostartfiles -DPMP_GATED_INJECT_FAIL
+  sim_opts: >-
+    +cheriot_enable_on_write=10F00 +disable_cosim=1 +disable_spurious_dside_responses=1
+    +enable_bad_intg_on_uninit_access=0
+
+# ---- REQ_CIB_02: cheriot_rf_intg ----
+# core_ibex_cheriot_rf_intg_test (tests/core_ibex_test_lib.sv): one single-bit register-file fault
+# in CHERIoT mode at the first register read of a valid instruction after 200-2000 cycles;
+# alert_major_internal_o required within the lockstep delay plus 4 cycles. The program is
+# cheriot_revoke_load_barrier_rnd (capability loads and stores throughout), as for the TRVK fault
+# tests; the run ends at the check.
+
+- test: cheriot_rf_intg_rcap_a
+  desc: >
+    EG2 REQ_CIB_02: one bit of capability read port A (ibex_top rf_rcap_a: tag, metadata or
+    correction bits) flipped for one cycle in CHERIoT mode raises alert_major_internal_o.
+  iterations: 2
+  test_srcs: cheriot_revoke_load_barrier_rnd/cheriot_revoke_load_barrier_rnd.S
+  config: cheriot-c-tests
+  rtl_test: core_ibex_cheriot_rf_intg_test
+  sim_opts: >-
+    +cheriot_rf_intg_site=rcap_a +disable_cosim=1
+    +enable_cheriot_seq=1 +disable_spurious_dside_responses=1
+    +revbm_mode=random +revbm_revoke_pct=50 +revbm_heap_base=80000000 +revbm_err_pct=0
+
+- test: cheriot_rf_intg_rcap_b
+  desc: >
+    As cheriot_rf_intg_rcap_a on capability read port B (rf_rcap_b).
+  iterations: 2
+  test_srcs: cheriot_revoke_load_barrier_rnd/cheriot_revoke_load_barrier_rnd.S
+  config: cheriot-c-tests
+  rtl_test: core_ibex_cheriot_rf_intg_test
+  sim_opts: >-
+    +cheriot_rf_intg_site=rcap_b +disable_cosim=1
+    +enable_cheriot_seq=1 +disable_spurious_dside_responses=1
+    +revbm_mode=random +revbm_revoke_pct=50 +revbm_heap_base=80000000 +revbm_err_pct=0
+
+- test: cheriot_rf_intg_rdata
+  desc: >
+    EG2 REQ_CIB_02 for a register's data in CHERIoT mode: one bit of integer read port A
+    (rf_rdata_a) flipped for one cycle raises alert_major_internal_o.
+  iterations: 2
+  test_srcs: cheriot_revoke_load_barrier_rnd/cheriot_revoke_load_barrier_rnd.S
+  config: cheriot-c-tests
+  rtl_test: core_ibex_cheriot_rf_intg_test
+  sim_opts: >-
+    +cheriot_rf_intg_site=rdata_a +disable_cosim=1
+    +enable_cheriot_seq=1 +disable_spurious_dside_responses=1
+    +revbm_mode=random +revbm_revoke_pct=50 +revbm_heap_base=80000000 +revbm_err_pct=0
+
+- test: cheriot_rf_intg_shared
+  desc: >
+    EG2 REQ_CIB_02 in the shared storage: one bit of the capability half of the register being
+    read (register_file_i.g_cheriot_rf.g_rf_shared_flops[n], x16-x31's flops in ePMP mode) flipped
+    in the flop, so it stays until the register is written: alert_major_internal_o.
+  iterations: 2
+  test_srcs: cheriot_revoke_load_barrier_rnd/cheriot_revoke_load_barrier_rnd.S
+  config: cheriot-c-tests
+  rtl_test: core_ibex_cheriot_rf_intg_test
+  sim_opts: >-
+    +cheriot_rf_intg_site=shared +disable_cosim=1
+    +enable_cheriot_seq=1 +disable_spurious_dside_responses=1
+    +revbm_mode=random +revbm_revoke_pct=50 +revbm_heap_base=80000000 +revbm_err_pct=0
+
+- test: cheriot_rf_intg_data
+  desc: >
+    As cheriot_rf_intg_shared in the register's data flops (g_rf_data_flops[n]).
+  iterations: 2
+  test_srcs: cheriot_revoke_load_barrier_rnd/cheriot_revoke_load_barrier_rnd.S
+  config: cheriot-c-tests
+  rtl_test: core_ibex_cheriot_rf_intg_test
+  sim_opts: >-
+    +cheriot_rf_intg_site=data +disable_cosim=1
+    +enable_cheriot_seq=1 +disable_spurious_dside_responses=1
+    +revbm_mode=random +revbm_revoke_pct=50 +revbm_heap_base=80000000 +revbm_err_pct=0
+
+- test: cheriot_rf_intg_inject_fail
+  desc: >
+    Must fail: cheriot_rf_intg_rcap_a with +cheriot_rf_intg_inject_fail=1, which expects no
+    alert after the fault.
+  iterations: 1
+  test_srcs: cheriot_revoke_load_barrier_rnd/cheriot_revoke_load_barrier_rnd.S
+  config: cheriot-c-tests
+  rtl_test: core_ibex_cheriot_rf_intg_test
+  sim_opts: >-
+    +cheriot_rf_intg_site=rcap_a +cheriot_rf_intg_inject_fail=1 +disable_cosim=1
+    +enable_cheriot_seq=1 +disable_spurious_dside_responses=1
+    +revbm_mode=random +revbm_revoke_pct=50 +revbm_heap_base=80000000 +revbm_err_pct=0

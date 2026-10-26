@@ -14,6 +14,12 @@ import "DPI-C" function void cheriot_sail_cosim_init(bit [31:0] boot_addr);
 // Set x1-x15 to NULL, CHERIoT-Ibex's reset value; init leaves them root_cap_mem (the RVFI-DII
 // start state TestRIG uses). Call after init when the program runs from reset (UVM cosim).
 import "DPI-C" function void cheriot_sail_cosim_null_gprs();
+// Handover from RISC-V mode at the CHERIoT lock (a bench switching modes inside one run): x<idx>
+// (1..15) holds an integer value (untagged); then PC, mtvec, mepc, mstatus.MIE/MPIE, mie, mcause
+// and mtval from the RISC-V-mode model. See cheriot_sail_cosim_dpi.cc.
+import "DPI-C" function void cheriot_sail_cosim_set_gpr_int(bit [4:0] idx, bit [31:0] val);
+import "DPI-C" function void cheriot_sail_cosim_handover(bit [31:0] next_pc, bit [31:0] mtvec,
+  bit [31:0] mepc, bit [31:0] mstatus, bit [31:0] mie, bit [31:0] mcause, bit [31:0] mtval);
 // RAM size mapped at 0x80000000 by the next init (default 8 MiB, the TestRIG TB's data memory).
 import "DPI-C" function void cheriot_sail_cosim_set_ram_size(bit [31:0] size);
 // Second region [base, base + size) mapped by the next init, in the platform's ROM segment
@@ -47,6 +53,9 @@ import "DPI-C" function int cheriot_sail_cosim_step(
 // The DUT entered an interrupt handler: give the model the DUT's pending bits and let it take
 // the interrupt from its own state. Call before stepping the handler's first instruction.
 import "DPI-C" function int cheriot_sail_cosim_take_interrupt(bit [31:0] mip);
+
+// cheriot_sail_cosim_step_bus_error (cheriot_sail_cosim_dpi.h, 2026-10-25) is imported by the EG2
+// chip bench's eg2_iss_wrapper.sv itself, so this bench elaborates with a library built before it.
 
 // 1 if the model would take an interrupt were these bits pending (mie and mstatus.MIE). Changes
 // nothing.

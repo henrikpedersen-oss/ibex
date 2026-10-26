@@ -22,7 +22,8 @@ module core_ibex_fcov_bind;
 
   // TRVK is instantiated at ibex_top (i_ibex_trvk), outside the ibex_core scope the
   // two binds above use, so it needs its own bind to the module itself.
-  bind ibex_trvk core_ibex_trvk_fcov_if u_trvk_fcov_bind (
+  bind ibex_trvk core_ibex_trvk_fcov_if #(.RevBitmapSizeBytes(RevBitmapSizeBytes))
+      u_trvk_fcov_bind (
     .*
   );
 endmodule

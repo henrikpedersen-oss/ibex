@@ -82,7 +82,7 @@
   test_srcs: cheriot_mem_err/cheriot_mem_err.S
   config: cheriot-dv-tests
   rtl_test: core_ibex_cheriot_mem_err_test
-  sim_opts: "+cheriot_enable_on_write=80200000 +disable_cosim=1 +disable_spurious_dside_responses=1 +require_signature_addr=1 +enable_bad_intg_on_uninit_access=0 +dside_bus_err_lo=80000814 +dside_bus_err_hi=8000081b +dside_intg_err_lo=8000082c +dside_intg_err_hi=80000833 +iside_bus_err_lo=80000c00 +iside_bus_err_hi=80000c03 +iside_intg_err_lo=80000d00 +iside_intg_err_hi=80000d03 +cheriot_mem_err_min_bus_alerts=6"
+  sim_opts: "+cheriot_enable_on_write=80200000 +disable_cosim=1 +disable_spurious_dside_responses=1 +require_signature_addr=1 +enable_bad_intg_on_uninit_access=0 +dside_bus_err_lo=80000814 +dside_bus_err_hi=8000081b +dside_intg_err_lo=8000082c +dside_intg_err_hi=80000833 +iside_bus_err_lo=80000c00 +iside_bus_err_hi=80000c03 +iside_intg_err_lo=80000d00 +iside_intg_err_hi=80000d03 +cheriot_mem_err_min_bus_alerts=7"
 
 - test: cheriot_branch_self_loop
   desc: >

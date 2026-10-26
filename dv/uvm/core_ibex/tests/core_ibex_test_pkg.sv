@@ -52,5 +52,6 @@ package core_ibex_test_pkg;
   `include "core_ibex_test_lib.sv"
   // Real debug module over DMI (needs the DM build, make ... DM=1)
   `include "core_ibex_dm_test.sv"
+  `include "core_ibex_dm_corners_test.sv"
 
 endpackage

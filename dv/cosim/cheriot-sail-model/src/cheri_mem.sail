@@ -82,22 +82,29 @@ function mem_read_cap (addr, aq, rl, res) = {
  * THIS(addr) reads the revocation bit corresponding with the revocation
  * granule aligned address.
  */
+/* The revocable heap and its bitmap: platform settings (riscv_platform.c), so a SoC's own
+   layout can be modelled (lowRISC, ibex_cheriot_verification: the CHERIoT RTOS test SoC and Earl
+   Grey 2 keep both elsewhere). Defaults: the heap from plat_ram_base() with no upper end, the
+   bitmap at 0x83000000, as before. */
+val plat_revocation_heap_base = {c: "plat_revocation_heap_base"} : unit -> xlenbits
+val plat_revocation_heap_size = {c: "plat_revocation_heap_size"} : unit -> xlenbits
+val plat_revocation_bits_base = {c: "plat_revocation_bits_base"} : unit -> xlenbits
+
 val mem_read_cap_revoked : xlenbits -> bool
 function mem_read_cap_revoked (addr) = {
-  let ram_base = plat_ram_base();
-  /* XXX we put the revocation bits in the existing DRAM region for now so we
-    don't have to create a new memory region in riscv_platform.sail. This only
-    works if software doesn't otherwise use this memory which is likely because
-    the MCU has much less than the Sail default of 1GiB. */
-  let revocation_bits_base = 0x83000000;
-  if (addr <_u ram_base) then {
+  let heap_base = plat_revocation_heap_base();
+  let heap_size = plat_revocation_heap_size();
+  let revocation_bits_base = plat_revocation_bits_base();
+  if (addr <_u heap_base) then {
     /* reads outside the revokable region are never revoked */
+    false
+  } else if (heap_size != zeros() & (addr - heap_base) >=_u heap_size) then {
     false
   } else {
     /* Find the offset in shadow region of the byte containing the relevant bit.
        There are 8 bits per byte and each bit covers 8 bytes of address space so
        shift right by 6. */
-    let revocation_byte_offset = (addr - ram_base) >> 6;
+    let revocation_byte_offset = (addr - heap_base) >> 6;
     let byte = __read_mem(Read_plain, sizeof(xlen), revocation_bits_base + revocation_byte_offset, 1);
     /* extract the relevant bit of byte */
     return bit_to_bool(byte[unsigned(addr[5..3])])

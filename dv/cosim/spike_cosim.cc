@@ -144,10 +144,15 @@ bool SpikeCosim::mmio_load(reg_t addr, size_t len, uint8_t *bytes) {
 }
 
 bool SpikeCosim::mmio_store(reg_t addr, size_t len, const uint8_t *bytes) {
-  bool bus_error = !bus.store(addr, len, bytes);
   // If the RTL produced a bus error for the access, or the checking failed
   // produce a memory fault in spike.
   bool dut_error = (check_mem_access(true, addr, len, bytes) != kCheckMemOk);
+  // Checked before the store: a store the DUT's memory refused does not change Spike's memory
+  // either. Storing first left Spike's memory holding the faulted store's data, and a later load
+  // of those bytes mismatched (riscv_mem_error_traps_test.6457 and .6459, 2026-10-25: the trap
+  // handler's `sw s2, 72(a5)` got a bus error, then its `lw s2, 72(a5)` read the old word on the
+  // DUT and the faulted store's data in Spike).
+  bool bus_error = !dut_error && !bus.store(addr, len, bytes);
 
   return !(bus_error || dut_error);
 }
@@ -170,6 +175,30 @@ bool SpikeCosim::backdoor_write_mem(uint32_t addr, size_t len,
 bool SpikeCosim::backdoor_read_mem(uint32_t addr, size_t len,
                                    uint8_t *data_out) {
   return bus.load(addr, len, data_out);
+}
+
+// Spike decodes each fetched instruction once and keeps it (mmu_t's icache, filled on mmio
+// fetches too), so code rewritten by a backdoor write would run stale without this. 2026-10-25.
+void SpikeCosim::flush_icache() { processor->get_mmu()->flush_icache(); }
+
+// Spike's wfi() moves the pc on and throws wait_for_interrupt_t. Only with commit logging on (a
+// trace log) does it record last_inst_pc for it, so without a trace log a completed WFI would read
+// as a trap: the pc moved on by 4 with last_inst_pc still PC_INVALID. Recognise it by the pc and
+// the instruction (WFI has no compressed form), and record it as retired.
+void SpikeCosim::recognise_completed_wfi(uint32_t initial_pc) {
+  if (processor->get_state()->last_inst_pc != PC_INVALID ||
+      (processor->get_state()->pc & 0xffffffff) != ((initial_pc + 4) & 0xffffffff)) {
+    return;
+  }
+  uint8_t insn[4];
+  if (!bus.load(initial_pc, 4, insn)) {
+    return;
+  }
+  uint32_t word = uint32_t(insn[0]) | uint32_t(insn[1]) << 8 | uint32_t(insn[2]) << 16 |
+                  uint32_t(insn[3]) << 24;
+  if (word == 0x10500073) {
+    processor->get_state()->last_inst_pc = initial_pc;
+  }
 }
 
 // When we call processor->step(), spike advances to the next pc IFF a trap does
@@ -349,6 +378,7 @@ bool SpikeCosim::step(uint32_t write_reg, uint32_t write_reg_data, uint32_t pc,
   } else {
     processor->step(1);
   }
+  recognise_completed_wfi(initial_spike_pc);
 
   // ISS
   // - If encountered an async trap,
@@ -629,6 +659,12 @@ bool SpikeCosim::check_sync_trap(uint32_t write_reg, uint32_t dut_pc,
     // We have a load or store access fault, apply fixup for misaligned accesses
     misaligned_pmp_fixup();
   }
+  // A misaligned store whose first half got a bus error: apply the second half the DUT wrote
+  // (check_mem_access). Found by review 2026-10-25, the bus-error twin of the PMP case.
+  if (second_half_store_pending && (processor->get_state()->mcause->read() == 0x7)) {
+    misaligned_store_second_half(second_half_store);
+  }
+  second_half_store_pending = false;
 
   // If we see an internal NMI, that means we receive an extra memory intf item.
   // Deleting that is necessary since next Load/Store would fail otherwise.
@@ -794,6 +830,11 @@ void SpikeCosim::initial_proc_setup(uint32_t start_pc, uint32_t start_mtvec,
   // difference (debug_dm_pmp: DUT 0x1880, Spike 0x1800 after setting MPP).
   processor->get_state()->mstatus->write(processor->get_state()->mstatus->read() |
                                          MSTATUS_MPIE);
+
+  // cpuctrlsts: Spike's cpuctrlsts_csr_t never initialises its value, so sync_exc_seen and
+  // double_fault_seen could read 1 before any trap; Ibex resets the register to 0. EG2's bench
+  // already writes it (eg2_iss_wrapper.sv); this one did not (found by review 2026-10-25).
+  processor->put_csr(CSR_CPUCTRLSTS, 0);
 
   processor->get_state()->csrmap[CSR_MARCHID] =
       std::make_shared<const_csr_t>(processor.get(), CSR_MARCHID, IBEX_MARCHID);
@@ -1002,7 +1043,9 @@ void SpikeCosim::misaligned_pmp_fixup() {
         // bench's memory and Spike's different, and the next load of those bytes mismatched
         // (riscv_pmp_full_random_test.3977: sh 0xfaff6170 to 0x3e99f1ff, first half denied,
         // 0x61 written at 0x3e99f200; much later an lhu read it back as 0x61 vs Spike's 0).
-        if (top_pending_access_info.store) {
+        // Only if the second half did not get a bus error itself: then the bench's memory did not
+        // write it either (review 2026-10-25).
+        if (top_pending_access_info.store && !top_pending_access_info.error) {
           misaligned_store_second_half(top_pending_access_info);
         }
 
@@ -1192,6 +1235,12 @@ void SpikeCosim::set_iside_error(uint32_t addr) {
 
   pending_iside_error = true;
   pending_iside_err_addr = addr;
+  // Spike serves an instruction it has decoded before from its instruction cache without calling
+  // mmio_load, where the pending error is consumed: an error set for a re-executed instruction
+  // (a loop, a retried call) did not fire on its fetch and stayed armed for a later access to the
+  // word. Dropping the decoded instructions makes the next fetch go through mmio_load. Only costs
+  // re-decoding. EG2 review R17, 2026-10-26.
+  flush_icache();
 }
 
 const std::vector<std::string> &SpikeCosim::get_errors() { return errors; }
@@ -1437,6 +1486,17 @@ SpikeCosim::check_mem_result_e SpikeCosim::check_mem_access(
       }
 
       // TODO: How to check BE? May need length of transaction?
+
+      // "If an error response is received for the first transaction, the second transaction will
+      // still be issued" (load_store_unit.rst): a store's second half without an error of its own
+      // wrote memory. Kept for check_sync_trap(), which applies it once Spike has taken the trap.
+      {
+        const DSideAccessInfo &second = pending_dside_accesses[1].dut_access_info;
+        if (second.store && !second.error) {
+          second_half_store = second;
+          second_half_store_pending = true;
+        }
+      }
 
       // Remove the top pending access now so both the first and second DUT
       // accesses for this misaligned access are removed.

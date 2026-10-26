@@ -1,0 +1,117 @@
+# Copyright lowRISC contributors.
+# Licensed under the Apache License, Version 2.0, see LICENSE for details.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Fault injection into the core's load filter (ibex_trvk), one site per test
+# (core_ibex_trvk_fault_test, tests/core_ibex_test_lib.sv). Each test forces one TRVK signal for one
+# cycle, at a moment where the fault makes a revoked capability reach the core tagged, and requires
+# alert_major_internal_o within the lockstep delay (EG2 REQ_CIB_03). The TRVK sits outside the
+# lockstep pair and has no countermeasure for its own logic (status/rtl_tickets.md, "ibex_trvk sits
+# outside the lockstep pair"), so every test here fails until the RTL protects it. They are left
+# red on purpose: a test that has never failed shows nothing.
+#
+# Program: cheriot_revoke_load_barrier_rnd (256 CLCs over bitmap words 0x180-0x187). The run ends
+# right after the check, so the program's own result is not used. Error words are off: an error
+# response revokes on its own and would hide the fault.
+
+- test: cheriot_trvk_fault_verdict
+  desc: >
+    revbm_revoked forced 0 on a revoked bitmap response: the capability reaches the core tagged.
+    Requires alert_major_internal_o within the lockstep delay.
+  iterations: 2
+  test_srcs: cheriot_revoke_load_barrier_rnd/cheriot_revoke_load_barrier_rnd.S
+  config: cheriot-c-tests
+  rtl_test: core_ibex_trvk_fault_test
+  sim_opts: >-
+    +trvk_fault_site=verdict +disable_cosim=1
+    +enable_cheriot_seq=1 +disable_spurious_dside_responses=1
+    +revbm_mode=random +revbm_revoke_pct=50 +revbm_heap_base=80000000 +revbm_err_pct=0
+    +revbm_gnt_delay_max=3 +revbm_rsp_delay_max=3
+
+- test: cheriot_trvk_fault_tag_out
+  desc: >
+    upstream_tag_o forced 1 on a revoked response (a fault at the TRVK's output to the core).
+    Requires alert_major_internal_o within the lockstep delay.
+  iterations: 2
+  test_srcs: cheriot_revoke_load_barrier_rnd/cheriot_revoke_load_barrier_rnd.S
+  config: cheriot-c-tests
+  rtl_test: core_ibex_trvk_fault_test
+  sim_opts: >-
+    +trvk_fault_site=tag_out +disable_cosim=1
+    +enable_cheriot_seq=1 +disable_spurious_dside_responses=1
+    +revbm_mode=random +revbm_revoke_pct=50 +revbm_heap_base=80000000 +revbm_err_pct=0
+    +revbm_gnt_delay_max=3 +revbm_rsp_delay_max=3
+
+- test: cheriot_trvk_fault_bit_select
+  desc: >
+    One bit of revbm_bit_select flipped, on a revoked response, to a bit that is clear in the same
+    bitmap word: the wrong granule's verdict is taken. Requires alert_major_internal_o within the
+    lockstep delay.
+  iterations: 2
+  test_srcs: cheriot_revoke_load_barrier_rnd/cheriot_revoke_load_barrier_rnd.S
+  config: cheriot-c-tests
+  rtl_test: core_ibex_trvk_fault_test
+  sim_opts: >-
+    +trvk_fault_site=bit_select +disable_cosim=1
+    +enable_cheriot_seq=1 +disable_spurious_dside_responses=1
+    +revbm_mode=random +revbm_revoke_pct=50 +revbm_heap_base=80000000 +revbm_err_pct=0
+    +revbm_gnt_delay_max=3 +revbm_rsp_delay_max=3
+
+- test: cheriot_trvk_fault_req_required
+  desc: >
+    revbm_req_required forced 0 in the cycle a lookup would be requested: no bitmap read, and the
+    tag passes. Every bit in the window is set, so the lookup would have revoked. Requires
+    alert_major_internal_o within the lockstep delay.
+  iterations: 2
+  test_srcs: cheriot_revoke_load_barrier_rnd/cheriot_revoke_load_barrier_rnd.S
+  config: cheriot-c-tests
+  rtl_test: core_ibex_trvk_fault_test
+  sim_opts: >-
+    +trvk_fault_site=req_required +disable_cosim=1
+    +enable_cheriot_seq=1 +disable_spurious_dside_responses=1
+    +revbm_mode=random +revbm_revoke_pct=100 +revbm_heap_base=80000000 +revbm_err_pct=0
+    +revbm_gnt_delay_max=3 +revbm_rsp_delay_max=3
+
+- test: cheriot_trvk_fault_out_of_range
+  desc: >
+    revbm_out_of_range forced 1 for an in-window base: no bitmap read, and the tag passes. Every
+    bit in the window is set. Requires alert_major_internal_o within the lockstep delay.
+  iterations: 2
+  test_srcs: cheriot_revoke_load_barrier_rnd/cheriot_revoke_load_barrier_rnd.S
+  config: cheriot-c-tests
+  rtl_test: core_ibex_trvk_fault_test
+  sim_opts: >-
+    +trvk_fault_site=out_of_range +disable_cosim=1
+    +enable_cheriot_seq=1 +disable_spurious_dside_responses=1
+    +revbm_mode=random +revbm_revoke_pct=100 +revbm_heap_base=80000000 +revbm_err_pct=0
+    +revbm_gnt_delay_max=3 +revbm_rsp_delay_max=3
+
+- test: cheriot_trvk_fault_sealing
+  desc: >
+    is_sealing_cap forced 1 for a memory capability: it is treated as exempt, no bitmap read, and
+    the tag passes. Every bit in the window is set. Requires alert_major_internal_o within the
+    lockstep delay.
+  iterations: 2
+  test_srcs: cheriot_revoke_load_barrier_rnd/cheriot_revoke_load_barrier_rnd.S
+  config: cheriot-c-tests
+  rtl_test: core_ibex_trvk_fault_test
+  sim_opts: >-
+    +trvk_fault_site=sealing +disable_cosim=1
+    +enable_cheriot_seq=1 +disable_spurious_dside_responses=1
+    +revbm_mode=random +revbm_revoke_pct=100 +revbm_heap_base=80000000 +revbm_err_pct=0
+    +revbm_gnt_delay_max=3 +revbm_rsp_delay_max=3
+
+- test: cheriot_trvk_fault_align
+  desc: >
+    misalign_flag_out forced 0 on a capability's second word: it is not recognised as one, no
+    bitmap read, and the tag passes. Every bit in the window is set. Requires
+    alert_major_internal_o within the lockstep delay.
+  iterations: 2
+  test_srcs: cheriot_revoke_load_barrier_rnd/cheriot_revoke_load_barrier_rnd.S
+  config: cheriot-c-tests
+  rtl_test: core_ibex_trvk_fault_test
+  sim_opts: >-
+    +trvk_fault_site=align +disable_cosim=1
+    +enable_cheriot_seq=1 +disable_spurious_dside_responses=1
+    +revbm_mode=random +revbm_revoke_pct=100 +revbm_heap_base=80000000 +revbm_err_pct=0
+    +revbm_gnt_delay_max=3 +revbm_rsp_delay_max=3

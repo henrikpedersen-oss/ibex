@@ -37,6 +37,8 @@ module ibex_decoder import ibex_cheriot_pkg::*; #(
                                                       // replicated to ease fan-out)
 
   input  logic                 illegal_c_insn_i,      // compressed instruction decode failed
+  // The instruction is a dummy (ibex_dummy_instr): exempt from the CHERIoT 16-register check below
+  input  logic                 dummy_instr_i,
 
   // immediates
   output ibex_pkg::imm_a_sel_e  imm_a_mux_sel_o,       // immediate selection for operand a
@@ -202,7 +204,12 @@ module ibex_decoder import ibex_cheriot_pkg::*; #(
   // RV32E and CHERIoT both enforce a 16-register address space (CheriLimit16Regs implies RV32E).
   // RV32E is a static build choice (unconditional); CHERIoT is runtime-gated on cheriot_enable_i.
   if (RV32E || CheriLimit16Regs) begin : gen_16reg_check_active
-    assign illegal_reg_16 = (RV32E || (cheriot_enable_i == IbexMuBiOn)) &&
+    // A dummy instruction is exempt in CHERIoT mode: it is generated in IF with operands chosen for
+    // the mode at that moment (reg16_only_i), so one generated in RISC-V mode just before the switch
+    // can name x16-x31 when it is decoded after it, and it then trapped as an illegal instruction
+    // the software never executed (found by review 2026-10-25, the switch-time twin of #955/F17).
+    // It only writes x0 and has no other effect; in CHERIoT mode raddr[4] reads the lower bank.
+    assign illegal_reg_16 = (RV32E || ((cheriot_enable_i == IbexMuBiOn) && !dummy_instr_i)) &&
                             ((raddr_a[4]   && rf_ren_a_o) ||
                              (raddr_b[4]   && rf_ren_b_o) ||
                              (instr_rd[4]  && rf_we_or_load));

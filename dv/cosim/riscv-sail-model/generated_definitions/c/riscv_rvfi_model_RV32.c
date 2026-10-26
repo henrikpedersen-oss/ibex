@@ -50304,6 +50304,16 @@ bool zcheck_Counteren(uint64_t zcsr, enum zPrivilege zp)
   // Local patch (VENDORED_FROM 2026-10-12), mirrors riscv_sys_control.sail check_Counteren:
   // Ibex's hpmcounterX(h): M-mode always, U-mode if mcounteren bit X is set.
   if (ibex_csr_defined(zcsr)) return zp == zMachine || ibex_csr_user_counter_enabled(zcsr);
+  // local (VENDORED_FROM 2026-10-26), mirrors riscv_sys_control.sail check_Counteren: cycleh,
+  // timeh, instreth below M-mode take mcounteren CY, TM, IR as their lower halves do (they fell
+  // to the default case, always accessible). The model has no S-mode, so scounteren plays no part.
+  if (zp != zMachine && (zcsr == UINT64_C(0xC80) || zcsr == UINT64_C(0xC81) ||
+                         zcsr == UINT64_C(0xC82))) {
+    uint64_t zen = zcsr == UINT64_C(0xC80) ? z_get_Counteren_CY(zmcounteren)
+                 : zcsr == UINT64_C(0xC81) ? z_get_Counteren_TM(zmcounteren)
+                 :                           z_get_Counteren_IR(zmcounteren);
+    return zen == UINT64_C(1);
+  }
   bool z6zE604;
   struct ztuple_z8z5bv12zCz0z5enumz0zzPrivilegez9 z3zE2086;
   z3zE2086.ztup0 = zcsr;

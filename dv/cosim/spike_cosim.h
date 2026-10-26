@@ -58,6 +58,13 @@ class SpikeCosim : public simif_t, public Cosim {
 
   std::vector<PendingMemAccess> pending_dside_accesses;
 
+  // The second half of a misaligned store whose first half got a bus error: the DUT still issues
+  // it and, without an error of its own, it writes memory; Spike aborts the whole store at the first
+  // half. check_mem_access() keeps it here and check_sync_trap() applies it once Spike has taken
+  // the store access fault (misaligned_store_second_half needs mepc and mtval).
+  bool second_half_store_pending = false;
+  DSideAccessInfo second_half_store;
+
   bool pending_iside_error;
   uint32_t pending_iside_err_addr;
 
@@ -119,6 +126,8 @@ class SpikeCosim : public simif_t, public Cosim {
 
   bool pc_is_debug_ebreak(uint32_t pc);
   bool check_debug_ebreak(uint32_t write_reg, uint32_t pc, bool sync_trap);
+  // A WFI Spike completed without a trace log: recorded as retired (spike_cosim.cc).
+  void recognise_completed_wfi(uint32_t initial_pc);
 
   bool check_gpr_write(const commit_log_reg_t::value_type &reg_change,
                        uint32_t write_reg, uint32_t write_reg_data);
@@ -189,6 +198,14 @@ class SpikeCosim : public simif_t, public Cosim {
   // EG2 chip bench's handover to its CHERIoT-mode model at the CHERIoT lock).
   uint32_t get_gpr(int idx) { return processor->get_state()->XPR[idx]; }
   uint32_t get_pc() { return processor->get_state()->pc; }
+  // The DUT's data-side accesses notify_dside_access() queued that no ISS access has matched yet,
+  // for a bench that checks none is left over where every one should have been matched (end of
+  // test, reset, a mode handover). 2026-10-25, EG2 chip bench review R9.
+  size_t get_num_pending_dside_accesses() const { return pending_dside_accesses.size(); }
+  // Drops Spike's decoded-instruction cache, for a bench that writes memory which may hold code
+  // behind the ISS's back: backdoor_write_mem() does not flush it (a bench that writes memory a
+  // byte at a time would flush it per byte). 2026-10-25, EG2 chip bench review R11.
+  void flush_icache();
   void set_ic_scr_key_valid(bool valid) override;
   void notify_dside_access(const DSideAccessInfo &access_info) override;
   // The spike co-simulator assumes iside and dside accesses within a step are

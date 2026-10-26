@@ -485,6 +485,7 @@ module ibex_id_stage import ibex_cheriot_pkg::*; #(
     .cheriot_enable_i(cheriot_enable_i),
 
     // controller
+    .dummy_instr_i (dummy_instr_id_i),
     .illegal_insn_o(illegal_insn_dec),
     .ebrk_insn_o   (ebrk_insn),
     .mret_insn_o   (mret_insn_dec),

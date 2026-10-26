@@ -111,6 +111,18 @@ function check_Counteren(csr : csreg, p : Privilege) -> bool =
     (0xC01, User) => mcounteren[TM] == 0b1 & (not(haveSupMode()) | scounteren[TM] == 0b1),
     (0xC02, User) => mcounteren[IR] == 0b1 & (not(haveSupMode()) | scounteren[IR] == 0b1),
 
+    /* Local (2026-10-26): the RV32 upper halves cycleh, timeh, instreth take the same enable bits
+     * as their lower halves (privileged spec, "Counter-Enable Registers"). They fell to the
+     * default below and were always accessible: a U-mode cycleh read with mcounteren.CY = 0 did
+     * not trap in the model while Ibex trapped (TestRIG riscv, regr-xlm 2026-10-25). */
+    (0xC80, Supervisor) => mcounteren[CY] == 0b1,
+    (0xC81, Supervisor) => mcounteren[TM] == 0b1,
+    (0xC82, Supervisor) => mcounteren[IR] == 0b1,
+
+    (0xC80, User) => mcounteren[CY] == 0b1 & (not(haveSupMode()) | scounteren[CY] == 0b1),
+    (0xC81, User) => mcounteren[TM] == 0b1 & (not(haveSupMode()) | scounteren[TM] == 0b1),
+    (0xC82, User) => mcounteren[IR] == 0b1 & (not(haveSupMode()) | scounteren[IR] == 0b1),
+
     (_, _) => /* no HPM counters for now */
               if   0xC03 <=_u csr & csr <=_u 0xC1F
               then false

@@ -91,6 +91,15 @@ CONTROLS = [
 MONITORS = [
     ("tbre_read_err", "cheriot-rtos-revocation-xlm", r"\[tbre_monitor\] \d+: rev_ctl shim: sweep failed"),
     ("tbre_fatal", "cheriot-rtos-revocation-xlm", r"\[tbre_monitor\] \d+: fatal errors 0+ -> [01]*1"),
+] + [
+    # One single-cycle fault in the core's load filter during the revocation suite (tb
+    # trvk_fault_inject): alert_major_internal_o must follow (EG2 REQ_CIB_03, core spec REQ_TMP_05,
+    # VP_REV_13). "active" is printed only for an effective injection, so a run without one is
+    # INACTIVE. Expected MISSED on today's RTL: the TRVK sits outside the lockstep pair
+    # (status/rtl_tickets.md, "ibex_trvk sits outside the lockstep pair").
+    (f"trvk_fault_{site}", "cheriot-rtos-revocation-xlm", rf"MUTATION trvk_fault_{site}: detected")
+    for site in ("verdict", "tag_out", "bit_select", "req_required", "out_of_range", "sealing",
+                 "align")
 ]
 
 # Mutations that are not run, with the reason; --check lists each as DISABLED (not a failure) so

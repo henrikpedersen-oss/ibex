@@ -60,10 +60,12 @@
 #   lw   W4 (bad intg); CHERI ops 0xFFFFFFE0  as above, every op independent of the load 126-133
 #   lw   W1; cincaddr reading rd  5           W1; the CHERI op, held in ID by the load hazard
 #                                             on rd, does not execute                 134-140
+#   lw   W4+2 (1st half bad intg) 0xFFFFFFE0  W4+2, MEPCC in {pc+4..pc+12}, rd not written,
+#                                             ops before MEPCC executed (lowRISC/ibex#2542)  141-147
 # The two CLC integrity probes also check MEPCC in {pc+4,pc+8,pc+12} (codes 72, 88); a later MEPC
 # inside the 8-nop sled is reported only at the end, so code 89 still runs (see NMI_MEPC). The
 # two later word-load integrity probes do the same (codes 122, 130) inside a sled of CHERI ops.
-# Probes 100-140 run before the lw W4 probe (62-67), whose late NMI ends the test at once.
+# Probes 100-147 run before the lw W4 probe (62-67), whose late NMI ends the test at once.
 # The two bus-error probes with a CHERI op in ID (106-112 independent, 134-140 reading rd) are
 # the exception_stall_instr_cross Cheri bins: the op is unstalled or never stalled (None) when
 # the error response arrives, or load-hazard stalled (LdHz); which of None u0/u1 is seen depends
@@ -461,6 +463,31 @@ r20: lw       t0, G_TRAPS(a5)
     NMI_MEPC  p20, 130
     RD_UNTOUCHED 131
     NMI_SLED_DONE p20, 132
+
+    # ── lw W4+2: misaligned, its first half (W4) has bad integrity ──────────
+    # The second half (W4+4) is clean. The LSU must not write rd from a split access whose first
+    # response failed its integrity check (lowRISC/ibex#2542, the misaligned case of
+    # earlgrey-internal-tracker#953); before the fix only the second response's integrity gated
+    # the write. rd is checked before mtval, so the write is judged even if the address differs.
+    ARM       r22
+    cmove     a2, a5
+    li        a0, 0x1234
+p22: lw       a0, W4+2(a4)
+    .rept 8
+    cincaddrimm a2, a2, 4
+    .endr
+p22_late:
+    li        a0, 141                # the NMI was not taken within the sled
+    j         test_end
+r22: lw       t0, G_TRAPS(a5)
+    CHECK_EQI t0, 1, 142, t1
+    lw        t0, G_MCAUSE(a5)
+    CHECK_EQI t0, MCAUSE_NMI_INTG, 143, t1
+    RD_UNTOUCHED 144                 # rd not written by a load whose first half failed integrity
+    lw        t0, G_MTVAL(a5)
+    CHECK_EQI t0, POISON_BASE+W4+2, 145, t1   # the faulting portion's address (the access's)
+    NMI_MEPC  p22, 146
+    NMI_SLED_DONE p22, 147
 
     # ── lw W4 with bad integrity: internal NMI ───────────────────────────────
     ARM       r11

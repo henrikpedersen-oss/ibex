@@ -177,6 +177,11 @@ class core_ibex_rf_intg_test extends core_ibex_base_test;
 
       // Disable TB assertion for alerts.
       `DV_ASSERT_CTRL_REQ("tb_no_alerts_triggered", 1'b0)
+      // And the d-side address-phase rules, as core_ibex_rf_addr_intg_test does: a corrupted read
+      // of a store's address or data register changes the request while it waits for its grant
+      // (the OBI checker's APhaseStable and WDataStable, seeds 6493-6538 of 2026-10-25). That is
+      // the fault's effect; the alert checked below is what must catch it.
+      `DV_ASSERT_CTRL_REQ("tb_data_req_held_until_gnt", 1'b0)
 
       // Force the corrupt value.
       `uvm_info(`gfn, $sformatf("Forcing corrupt value: 'h%0x", data), UVM_LOW)
@@ -3361,5 +3366,267 @@ class core_ibex_directed_stress_test extends core_ibex_base_test;
       end
     join_none
   endtask
+
+endclass
+
+// Fault injection into the core's load filter (`ibex_trvk`): one single-cycle fault at the site named
+// by +trvk_fault_site, injected only in a cycle where it makes a revoked capability reach the core
+// tagged. The obligation (EG2 REQ_CIB_03; status/rtl_tickets.md "ibex_trvk sits outside the lockstep
+// pair") is that such a fault is detected: `alert_major_internal_o` within the lockstep delay plus
+// a margin. With the TRVK outside the lockstep pair, as in the RTL of 2026-10-25, every site is
+// expected to fail.
+//
+//   +trvk_fault_site=verdict       revbm_revoked forced 0 on a revoked response
+//   +trvk_fault_site=tag_out       upstream_tag_o forced 1 on a revoked response
+//   +trvk_fault_site=bit_select    one bit of revbm_bit_select flipped to a clear bitmap bit
+//   +trvk_fault_site=req_required  revbm_req_required forced 0: no lookup, the tag passes
+//   +trvk_fault_site=out_of_range  revbm_out_of_range forced 1: no lookup, the tag passes
+//   +trvk_fault_site=sealing       is_sealing_cap forced 1: no lookup, the tag passes
+//   +trvk_fault_site=align         misalign_flag_out forced 0: no lookup, the tag passes
+//   +trvk_fault_skip=<n>           effective opportunities let pass before the injection (default:
+//                                  random 0-15)
+//
+// The four "no lookup" sites need every bitmap bit in the window set (+revbm_revoke_pct=100), so
+// that the skipped lookup would have revoked. The cosimulation is off (+disable_cosim=1): it would
+// rightly report the tagged capability.
+class core_ibex_trvk_fault_test extends core_ibex_base_test;
+
+  `uvm_component_utils(core_ibex_trvk_fault_test)
+  `uvm_component_new
+
+  uvm_report_server rs;
+  string trvk_path = "core_ibex_tb_top.dut.u_ibex_top.gen_cheriot_trvk.i_ibex_trvk";
+  string top_path  = "core_ibex_tb_top.dut.u_ibex_top";
+
+  function automatic uvm_hdl_data_t rd(string sig);
+    uvm_hdl_data_t v;
+    if (!(uvm_hdl_read($sformatf("%s.%s", trvk_path, sig), v))) `uvm_fatal(`gfn, $sformatf("Check failed (uvm_hdl_read($sformatf(\"%%s.%%s\", trvk_path, sig), v)) %s", ""))
+    return v;
+  endfunction
+
+  // In the cycle about to be sampled: is the fault at `site` effective, and with which value?
+  function automatic bit effective(string site, bit prev_req, output uvm_hdl_data_t value);
+    uvm_hdl_data_t rdata, bs;
+    bit first_req = rd("revbm_req_o") && !rd("revbm_outstanding_q") && !prev_req;
+    case (site)
+      "verdict":  begin value = 0; return rd("upstream_tag_revoked_o"); end
+      "tag_out":  begin value = 1; return rd("upstream_tag_revoked_o"); end
+      "bit_select": begin
+        if (!rd("upstream_tag_revoked_o") || rd("revbm_err_i") ||
+            rd("revbm_rsp_data_intg_error") != 0) return 0;
+        rdata = rd("revbm_rdata_i");
+        bs = rd("revbm_bit_select");
+        for (int k = 0; k < 5; k++) begin
+          if (!rdata[bs ^ (1 << k)]) begin value = bs ^ (1 << k); return 1; end
+        end
+        return 0;
+      end
+      "req_required": begin value = 0; return first_req; end
+      "out_of_range": begin value = 1; return first_req; end
+      "sealing":      begin value = 1; return first_req; end
+      "align":        begin value = 0; return first_req; end
+      default: `uvm_fatal(`gfn, $sformatf("unknown +trvk_fault_site=%s", site))
+    endcase
+    return 0;
+  endfunction
+
+  function automatic string site_signal(string site);
+    case (site)
+      "verdict":      return "revbm_revoked";
+      "tag_out":      return "upstream_tag_o";
+      "bit_select":   return "revbm_bit_select";
+      "req_required": return "revbm_req_required";
+      "out_of_range": return "revbm_out_of_range";
+      "sealing":      return "is_sealing_cap";
+      "align":        return "misalign_flag_out";
+      default:        return "";
+    endcase
+  endfunction
+
+  virtual task send_stimulus();
+    string site = "verdict";
+    int unsigned skip = $urandom_range(15);
+    int unsigned window, lockstep_delay, seen;
+    uvm_hdl_data_t value;
+    bit prev_req, alerted;
+    string path;
+
+    void'($value$plusargs("trvk_fault_site=%s", site));
+    void'($value$plusargs("trvk_fault_skip=%d", skip));
+    if (!(uvm_hdl_read($sformatf("%s.gen_lockstep.u_ibex_lockstep.LockstepOffset",
+                                           top_path), lockstep_delay))) `uvm_fatal(`gfn, $sformatf("Check failed (uvm_hdl_read($sformatf(\"%%s.gen_lockstep.u_ibex_lockstep.LockstepOffset\", top_path), lockstep_delay)) %s", ""))
+    window = lockstep_delay + 4;
+    path = $sformatf("%s.%s", trvk_path, site_signal(site));
+
+    fork
+      vseq.start(env.vseqr);
+    join_none
+
+    // Find the (skip+1)-th effective opportunity, judged just before the clock edge that samples it.
+    forever begin
+      @(negedge clk_vif.clk);
+      if (effective(site, prev_req, value)) begin
+        if (seen == skip) break;
+        seen++;
+      end
+      prev_req = rd("revbm_req_o");
+    end
+
+    `DV_ASSERT_CTRL_REQ("tb_no_alerts_triggered", 1'b0)
+    `uvm_info(`gfn, $sformatf("Injecting at %s: forcing %s to 'h%0x for one cycle (opportunity %0d)",
+                              site, path, value, seen), UVM_LOW)
+    `DV_CHECK_FATAL(uvm_hdl_force(path, value))
+    @(negedge clk_vif.clk);
+    `DV_CHECK_FATAL(uvm_hdl_release(path))
+
+    for (int unsigned i = 0; i < window && !alerted; i++) begin
+      @(dut_vif.dut_cb);
+      alerted = dut_vif.dut_cb.alert_major_internal;
+    end
+    if (alerted) begin
+      `uvm_info(`gfn, $sformatf("TRVK fault at %s detected: alert_major_internal_o", site), UVM_LOW)
+    end else begin
+      `uvm_error(`gfn, $sformatf({"TRVK fault at %s undetected: a revoked capability reached the ",
+                                  "core tagged and alert_major_internal_o stayed low for %0d ",
+                                  "cycles (REQ_CIB_03)"}, site, window))
+    end
+
+    // Stop here: the program and the reference model do not know about the fault.
+    rs = uvm_report_server::get_server();
+    rs.report_summarize();
+    $finish();
+  endtask
+
+endclass
+
+// CHERIoT-mode register-file integrity (Earl Grey 2 REQ_CIB_02: "In both modes a single-bit fault
+// in a register's data, capability metadata or tag, in the main or shadow register file, raises
+// alert_major_internal_o"). core_ibex_rf_intg_test covers ePMP mode; this runs a CHERIoT program
+// (directed_tests/directed_testlist_cheriot_soc.yaml cheriot_rf_intg_*) and, at the first
+// register read of a valid instruction after a random delay, injects one single-bit fault at the
+// site +cheriot_rf_intg_site names (random if absent):
+//   rcap_a, rcap_b   one bit (tag, metadata or correction bits) of a capability read port
+//                    (ibex_top rf_rcap_a / rf_rcap_b), forced for one cycle
+//   rdata_a, rdata_b one bit of an integer read port in CHERIoT mode, forced for one cycle
+//   shared           one bit of the capability half of the register being read, in its storage
+//                    (register_file_i.g_cheriot_rf.g_rf_shared_flops[n], the flops that hold
+//                    x16-x31 in ePMP mode), deposited: the fault stays until the register is
+//                    written
+//   data             the same in the register's data flops (g_rf_data_flops[n])
+// Check: alert_major_internal_o within the lockstep delay plus 4 cycles. The run then ends here,
+// as core_ibex_rf_intg_test does: the co-simulation does not know the fault.
+// +cheriot_rf_intg_inject_fail=1 expects no alert instead, so the run must fail.
+class core_ibex_cheriot_rf_intg_test extends core_ibex_rf_intg_test;
+
+  `uvm_component_utils(core_ibex_cheriot_rf_intg_test)
+  `uvm_component_new
+
+  string site;
+  bit    inject_fail;
+  bit    injected;
+  string rf_path = "gen_regfile_ff.register_file_i.g_cheriot_rf";
+
+  virtual task send_stimulus();
+    string       sites[6] = '{"rcap_a", "rcap_b", "rdata_a", "rdata_b", "shared", "data"};
+    int          rnd_delay;
+    int unsigned lockstep_delay, window, width, bit_idx, n;
+    bit          port_b, got;
+    string       target;
+
+    void'($value$plusargs("cheriot_rf_intg_site=%s", site));
+    void'($value$plusargs("cheriot_rf_intg_inject_fail=%0d", inject_fail));
+    if (site == "") site = sites[$urandom_range(5)];
+    if (!(site inside {"rcap_a", "rcap_b", "rdata_a", "rdata_b", "shared", "data"})) begin
+      `uvm_fatal(`gfn, $sformatf("unknown +cheriot_rf_intg_site=%s", site))
+    end
+    port_b = (site inside {"rcap_b", "rdata_b"}) ? 1'b1 :
+             (site inside {"shared", "data"}) ? 1'($urandom_range(1)) : 1'b0;
+
+    vseq.start(env.vseqr);
+
+    lockstep_delay = read_uint("gen_lockstep.u_ibex_lockstep.LockstepOffset");
+    window = lockstep_delay + 4;
+    `DV_CHECK_STD_RANDOMIZE_WITH_FATAL(rnd_delay, rnd_delay > 200; rnd_delay < 2_000;)
+    clk_vif.wait_n_clks(rnd_delay);
+
+    forever begin
+      logic          rf_ren, rf_rd_wb_match, rf_write_wb, valid;
+      uvm_hdl_data_t data, ena;
+
+      clk_vif.wait_n_clks(1);
+      ena = read_data("cheriot_enable_i");
+      if (ena[3:0] != 4'(ibex_pkg::IbexMuBiOn)) continue;
+      rf_write_wb = dut_vif.signal_probe_rf_write_wb(dv_utils_pkg::SignalProbeSample);
+      if (port_b) begin
+        rf_ren = dut_vif.signal_probe_rf_ren_b(dv_utils_pkg::SignalProbeSample);
+        rf_rd_wb_match = dut_vif.signal_probe_rf_rd_b_wb_match(dv_utils_pkg::SignalProbeSample);
+      end else begin
+        rf_ren = dut_vif.signal_probe_rf_ren_a(dv_utils_pkg::SignalProbeSample);
+        rf_rd_wb_match = dut_vif.signal_probe_rf_rd_a_wb_match(dv_utils_pkg::SignalProbeSample);
+      end
+      // A read of the register file itself (not forwarded) by a valid instruction: the alert is
+      // then required.
+      if (!(rf_ren == 1'b1 && (rf_rd_wb_match == 1'b0 || rf_write_wb == 1'b0))) continue;
+      valid = read_data("u_ibex_core.instr_valid_id");
+      if (valid !== 1'b1) continue;
+
+      if (site inside {"shared", "data"}) begin
+        n = read_uint(port_b ? "rf_raddr_b" : "rf_raddr_a") & 'hf;
+        if (n == 0) continue;
+        target = (site == "shared") ? $sformatf("%s.g_rf_shared_flops[%0d].rf_reg_q", rf_path, n)
+                                    : $sformatf("%s.g_rf_data_flops[%0d].rf_reg_q", rf_path, n);
+        width = (site == "shared") ? ibex_cheriot_pkg::REGCAP_W : reg_file_data_width;
+      end else begin
+        target = (site == "rcap_a") ? "rf_rcap_a" : (site == "rcap_b") ? "rf_rcap_b" :
+                 (site == "rdata_a") ? "rf_rdata_a" : "rf_rdata_b";
+        width = (site inside {"rcap_a", "rcap_b"}) ? ibex_cheriot_pkg::REGCAP_W
+                                                   : reg_file_data_width;
+      end
+      bit_idx = $urandom_range(width - 1);
+      data = read_data(target);
+      data[bit_idx] = !data[bit_idx];
+
+      `DV_ASSERT_CTRL_REQ("tb_no_alerts_triggered", 1'b0)
+      `uvm_info(`gfn, $sformatf("CHERIoT RF fault at %s: %s bit %0d flipped (value now 'h%0x)",
+                                site, target, bit_idx, data), UVM_LOW)
+      if (site inside {"shared", "data"}) begin
+        if (!uvm_hdl_deposit({ibex_top_path, ".", target}, data)) begin
+          `uvm_fatal(`gfn, $sformatf("cannot deposit %s", target))
+        end
+      end else begin
+        force_data(target, data);
+      end
+      injected = 1'b1;
+
+      got = 1'b0;
+      for (int unsigned i = 0; i < window && !got; i++) begin
+        clk_vif.wait_n_clks(1);
+        if (i == 0 && !(site inside {"shared", "data"})) release_force(target);
+        got = read_data("alert_major_internal_o");
+      end
+      if (got == inject_fail) begin
+        `uvm_error(`gfn, $sformatf({"REQ_CIB_02: a single-bit fault at %s (%s bit %0d) in CHERIoT ",
+                                    "mode %s alert_major_internal_o within %0d cycles%s"},
+                                   site, target, bit_idx, got ? "raised" : "did not raise",
+                                   window, inject_fail ? " (+cheriot_rf_intg_inject_fail)" : ""))
+      end else begin
+        `uvm_info(`gfn, $sformatf("alert_major_internal_o %s after the fault at %s",
+                                  got ? "raised" : "not raised", site), UVM_LOW)
+      end
+      break;
+    end
+
+    // As core_ibex_rf_intg_test: the co-simulation does not know the fault.
+    rs = uvm_report_server::get_server();
+    rs.report_summarize();
+    $finish();
+  endtask
+
+  virtual function void report_phase(uvm_phase phase);
+    super.report_phase(phase);
+    if (!injected) begin
+      `uvm_error(`gfn, $sformatf("no CHERIoT RF fault injected at %s before the program ended", site))
+    end
+  endfunction
 
 endclass

@@ -14,13 +14,18 @@
 // signals by name, which are the ones worth covering -- the ports alone do not show
 // why a capability was revoked.
 
-interface core_ibex_trvk_fcov_if (
+interface core_ibex_trvk_fcov_if #(
+  // The bound filter's RevBitmapSizeBytes (ibex_trvk, cheriot_trvk_core): the revocable window is
+  // 64 times it from the heap base. 2026-10-25 (EG2 F38).
+  parameter int unsigned RevBitmapSizeBytes = 32'd2048
+) (
   input logic        clk_i,
   input logic        rst_ni,
 
   // Revocation decision
   input logic        revbm_revoked,
   input logic        revbm_out_of_range,
+  input logic [31:0] revbm_bit_addr,
   input logic        revbm_req_required,
   input logic        revbm_outstanding_q,
   input logic [ 4:0] revbm_bit_select,
@@ -149,5 +154,39 @@ interface core_ibex_trvk_fcov_if (
   end
 
   `DV_FCOV_INSTANTIATE_CG(trvk_cg, en_trvk_cov)
+
+  // Where a capability's base falls against the bitmap (EG2 F38): in the window, in the band
+  // between the bitmap's size and the next power of two (what a width-only check looked up, past
+  // the bitmap's end), or beyond. The band exists only when the size is not a power of two, so the
+  // covergroup is generated only then; for a power-of-two bitmap cp_trvk_out_of_range covers it.
+  localparam int unsigned SizeBits = RevBitmapSizeBytes * 8;
+  localparam int unsigned Pow2Bits = (32'd1 << $clog2(RevBitmapSizeBytes)) * 8;
+
+  if (SizeBits < Pow2Bits) begin : g_window_band
+    covergroup trvk_window_cg @(posedge clk_i);
+      option.per_instance = 1;
+      option.name = "trvk_window_cg";
+
+      cp_trvk_base_window: coverpoint revbm_bit_addr iff (rst_ni && ptr_storage_valid_q) {
+        bins in_window   = {[0 : SizeBits - 1]};
+        bins past_size   = {[SizeBits : Pow2Bits - 1]};
+        bins beyond_pow2 = {[Pow2Bits : 32'hffff_ffff]};
+      }
+      cp_trvk_out_of_range_w: coverpoint revbm_out_of_range iff (rst_ni && ptr_storage_valid_q);
+
+      // Only the window is looked up: a base past the bitmap's size must be out of range (F38
+      // looked it up, read past the bitmap and revoked it), and one inside must not be.
+      trvk_window_range_cross: cross cp_trvk_base_window, cp_trvk_out_of_range_w {
+        illegal_bins past_size_looked_up =
+            binsof(cp_trvk_base_window.past_size) && binsof(cp_trvk_out_of_range_w) intersect {1'b0};
+        illegal_bins beyond_looked_up =
+            binsof(cp_trvk_base_window.beyond_pow2) && binsof(cp_trvk_out_of_range_w) intersect {1'b0};
+        illegal_bins in_window_skipped =
+            binsof(cp_trvk_base_window.in_window) && binsof(cp_trvk_out_of_range_w) intersect {1'b1};
+      }
+    endgroup
+
+    `DV_FCOV_INSTANTIATE_CG(trvk_window_cg, en_trvk_cov)
+  end
 
 endinterface
