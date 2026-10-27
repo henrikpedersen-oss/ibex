@@ -66,6 +66,12 @@ void cheriot_sail_cosim_cleanup(void);
 // Returns 0 on success, -1 (with an error recorded) if the model would not take it.
 int         cheriot_sail_cosim_take_interrupt(const svBitVecVal *mip);
 
+// The DUT's pending interrupts (mip) before each step(), so a csrr mip in the model reads what the
+// DUT read. The bits the model would take as an interrupt at the start of the step (enabled in mie
+// with mstatus.MIE set) are left out: the DUT retired an instruction, so it took none, and
+// take_interrupt() is the only way in. Until a bench calls it, mip is the model's own.
+void        cheriot_sail_cosim_set_mip(const svBitVecVal *mip);
+
 // The DUT's instruction took a bus error the model cannot see (the model executes the RVFI
 // instruction word and its memory never errors): the model takes the access fault instead of
 // executing it. kind 0 instruction fetch, 1 load, 2 store; tval the faulting address. Returns 0,

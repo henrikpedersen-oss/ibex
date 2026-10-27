@@ -54,6 +54,12 @@ import "DPI-C" function int cheriot_sail_cosim_step(
 // the interrupt from its own state. Call before stepping the handler's first instruction.
 import "DPI-C" function int cheriot_sail_cosim_take_interrupt(bit [31:0] mip);
 
+// The DUT's pending interrupts (the RVFI record's pre_mip), before every step: a csrr mip in the
+// model reads them. Bits the model would take as an interrupt are left out of the step (the DUT
+// retired an instruction, so took none; take_interrupt() is the way in). A bench that never calls
+// it keeps the model's own mip. 2026-10-27.
+import "DPI-C" function void cheriot_sail_cosim_set_mip(bit [31:0] mip);
+
 // cheriot_sail_cosim_step_bus_error (cheriot_sail_cosim_dpi.h, 2026-10-25) is imported by the EG2
 // chip bench's eg2_iss_wrapper.sv itself, so this bench elaborates with a library built before it.
 

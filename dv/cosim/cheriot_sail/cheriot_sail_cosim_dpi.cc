@@ -286,6 +286,31 @@ void cheriot_sail_cosim_handover(const svBitVecVal *next_pc_p, const svBitVecVal
   zmtval         = mtval_p[0];
 }
 
+// The DUT's pending interrupts (its mip) for the next step, from set_mip(); s_mip_set is false
+// until a bench calls it, and then mip stays what the model's own state makes it (as before
+// 2026-10-27).
+static bool s_mip_set = false;
+static uint64_t s_mip = 0;
+
+// The interrupt lines are the bench's, not the model's: before a step the model's mip is the
+// DUT's, so a csrr mip reads what the DUT read (2026-10-27: chip_sw_eg2_connectivity_cheriot read
+// mip 0x880 on the chip, 0 in the model, which saw pending bits only in take_interrupt()). Bits
+// the model would take as an interrupt at the start of this step (mstatus.MIE and the bit in mie)
+// are left out: the DUT retired an instruction, so it did not take one here; take_interrupt() is
+// the only way in. That leaves one difference: a csrr mip in the cycles between such an
+// interrupt arriving and the DUT taking it reads the bit on the DUT and not in the model, a
+// mismatch the bench reports rather than hides.
+static void apply_pending_mip(void) {
+  if (!s_mip_set) return;
+  const bool mie_set = (zmstatus.zbits >> 3) & 1;
+  zmip.zbits = s_mip & ~(mie_set ? zmie.zbits : UINT64_C(0));
+}
+
+void cheriot_sail_cosim_set_mip(const svBitVecVal *mip_p) {
+  s_mip_set = true;
+  s_mip = (uint64_t)mip_p[0];
+}
+
 int cheriot_sail_cosim_step(const svBitVecVal *insn_p,
                              const svBitVecVal *pc_p,
                              svBit cheri_rf_we,
@@ -344,6 +369,8 @@ int cheriot_sail_cosim_step(const svBitVecVal *insn_p,
   }
   // (C.SLLI/C.SRLI/C.SRAI with shamt[5]=1 are rejected by the model's own decoder:
   // generated_definitions/c patched, riscv_insts_cext.sail guard backported.)
+
+  apply_pending_mip();
 
   sail_int sail_step;
   CREATE(sail_int)(&sail_step);
@@ -664,6 +691,8 @@ void cheriot_sail_cosim_cleanup(void) {
   }
   s_step_no = 0;
   s_errors.clear();
+  s_mip_set = false;
+  s_mip = 0;
 }
 
 // Load one byte into the Sail model's memory (call after init, before first step).

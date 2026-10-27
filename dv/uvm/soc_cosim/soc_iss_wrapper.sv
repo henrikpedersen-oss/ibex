@@ -422,6 +422,8 @@ class soc_iss_wrapper extends uvm_component;
       cheriot_sail_cosim_set_mhpmcounter(3 + i, {item.mhpmcountersh[i], item.mhpmcounters[i]});
     end
     cheriot_sail_cosim_set_ic_scr_key_valid(item.ic_scr_key_valid);
+    // The core's pending interrupts: a csrr mip in the model reads them (2026-10-27).
+    cheriot_sail_cosim_set_mip(item.pre_mip);
     // The core entered an interrupt handler: the model takes the interrupt from its own state.
     if (item.intr && !sail_prev_trap && !item.nmi && !item.nmi_int && !item.debug_req) begin
       void'(cheriot_sail_cosim_take_interrupt(item.pre_mip));

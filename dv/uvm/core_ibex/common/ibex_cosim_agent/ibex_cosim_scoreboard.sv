@@ -351,6 +351,9 @@ class ibex_cosim_scoreboard extends uvm_scoreboard;
     end
     cheriot_sail_cosim_set_ic_scr_key_valid(it.ic_scr_key_valid);
     cheriot_sail_cosim_set_mcounteren_writable(dut_vif.mcounteren_writable == ibex_pkg::IbexMuBiOn);
+    // The DUT's pending interrupts: a csrr mip in the model reads them (2026-10-27, found by the EG2
+    // chip bench: the model saw pending bits only in take_interrupt and read mip as 0).
+    cheriot_sail_cosim_set_mip(it.pre_mip);
   endfunction
 
   // Steps the model over one retirement and compares. spike_ok is Spike's verdict on the same
