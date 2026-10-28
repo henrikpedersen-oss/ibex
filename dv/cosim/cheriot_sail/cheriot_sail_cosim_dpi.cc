@@ -721,6 +721,10 @@ void cheriot_sail_cosim_set_mhpmcounter(uint32_t idx, uint64_t value) {
   ibex_platform_set_mhpmcounter(idx, value);
 }
 
+void cheriot_sail_cosim_set_cpuctrlsts(unsigned int value) {
+  ibex_platform_set_cpuctrlsts(value);
+}
+
 void cheriot_sail_cosim_set_ic_scr_key_valid(svBit valid) {
   ibex_platform_set_ic_scr_key_valid(valid != 0);
 }

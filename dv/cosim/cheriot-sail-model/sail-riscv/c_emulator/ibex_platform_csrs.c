@@ -203,5 +203,6 @@ void ibex_platform_set_mhpm_counter_num(unsigned num) {
 }
 
 void ibex_platform_set_ic_scr_key_valid(bool valid) { s_ic_scr_key_valid = valid; }
+void ibex_platform_set_cpuctrlsts(uint64_t value) { s_cpuctrlsts = value & IBEX_CPUCTRLSTS_WMASK; }
 
 void ibex_platform_set_mcounteren_writable(bool writable) { s_mcounteren_writable = writable; }

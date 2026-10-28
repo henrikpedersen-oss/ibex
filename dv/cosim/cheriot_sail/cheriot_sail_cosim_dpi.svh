@@ -100,6 +100,8 @@ import "DPI-C" function void cheriot_sail_cosim_set_mcycle(longint unsigned mcyc
 import "DPI-C" function void cheriot_sail_cosim_set_mhpmcounter(int unsigned idx,
                                                                longint unsigned value);
 import "DPI-C" function void cheriot_sail_cosim_set_ic_scr_key_valid(bit valid);
+// cpuctrlsts bits [7:0] from the ISS that ran before (EG2's handover from Spike).
+import "DPI-C" function void cheriot_sail_cosim_set_cpuctrlsts(int unsigned value);
 import "DPI-C" function void cheriot_sail_cosim_set_mcounteren_writable(bit writable);
 // set_mhpm_counter_num: MHPMCounterNum of the build (configuration: call before init)
 import "DPI-C" function void cheriot_sail_cosim_set_mhpm_counter_num(int unsigned num);

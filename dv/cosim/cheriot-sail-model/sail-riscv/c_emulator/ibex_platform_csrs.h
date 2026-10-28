@@ -33,6 +33,8 @@ void ibex_platform_set_mhpmcounter(unsigned idx, uint64_t value);
 void ibex_platform_set_mhpm_counter_num(unsigned num);
 // cpuctrlsts.ic_scr_key_valid (bit 8): the instruction cache's scrambling key handshake.
 void ibex_platform_set_ic_scr_key_valid(bool valid);
+// cpuctrlsts bits [7:0], as a model before this one left them (a handover from another ISS).
+void ibex_platform_set_cpuctrlsts(uint64_t value);
 // The mcounteren_writable_i pin (default 1, ibex_configs/TestRIG tie it On).
 void ibex_platform_set_mcounteren_writable(bool writable);
 

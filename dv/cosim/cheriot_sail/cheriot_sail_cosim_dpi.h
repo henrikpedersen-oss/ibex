@@ -113,6 +113,8 @@ void cheriot_sail_cosim_set_mcycle(uint64_t mcycle);
 //   set_mcounteren_writable: the mcounteren_writable_i pin (default 1)
 void cheriot_sail_cosim_set_mhpmcounter(uint32_t idx, uint64_t value);
 void cheriot_sail_cosim_set_ic_scr_key_valid(svBit valid);
+// cpuctrlsts bits [7:0] from the ISS that ran before (EG2's handover from Spike).
+void cheriot_sail_cosim_set_cpuctrlsts(unsigned int value);
 void cheriot_sail_cosim_set_mcounteren_writable(svBit writable);
 // set_mhpm_counter_num: MHPMCounterNum of the build (configuration: call before init)
 void cheriot_sail_cosim_set_mhpm_counter_num(uint32_t num);
