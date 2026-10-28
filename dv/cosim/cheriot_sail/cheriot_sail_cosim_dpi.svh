@@ -90,6 +90,8 @@ import "DPI-C" function void cheriot_sail_cosim_write_mem_byte(
 // does not advance mcycle on its own; without this push both csrr reads
 // would return 0 and arithmetic on those values would mismatch the RTL.
 import "DPI-C" function void cheriot_sail_cosim_set_mcycle(longint unsigned mcycle);
+// minstret from the ISS that ran before (EG2's handover from Spike).
+import "DPI-C" function void cheriot_sail_cosim_set_minstret(longint unsigned minstret);
 
 // Bench inputs of CHERIoT-Ibex's CSRs in the model's platform (spec GAP-CS-3; reset values,
 // WARL masks and cpuctrlsts' trap/MRET effects are the model's own). Push before each step:

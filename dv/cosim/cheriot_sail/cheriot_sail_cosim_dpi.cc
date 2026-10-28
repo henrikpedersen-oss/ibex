@@ -711,6 +711,12 @@ void cheriot_sail_cosim_set_mcycle(uint64_t mcycle) {
   zmcycle = mcycle;
 }
 
+// minstret is the model's own count (architectural, compared), but a model that starts mid-run
+// (EG2's handover from Spike) must start from the instructions already retired.
+void cheriot_sail_cosim_set_minstret(uint64_t minstret) {
+  zminstret = minstret;
+}
+
 // Bench inputs of CHERIoT-Ibex's platform CSRs (cheriot-sail-model/sail-riscv/c_emulator/
 // ibex_platform_csrs.c, spec GAP-CS-3). Pushed before every step, like mcycle. Only values that
 // depend on timing or on the bench are pushed: what the counters counted (the RVFI record's

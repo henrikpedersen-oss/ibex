@@ -104,6 +104,8 @@ void cheriot_sail_cosim_write_mem_byte(const svBitVecVal *addr,
 // retired instruction, before cheriot_sail_cosim_step(), mirroring how
 // riscv_cosim_set_mcycle() feeds the same value into Spike.
 void cheriot_sail_cosim_set_mcycle(uint64_t mcycle);
+// minstret from the ISS that ran before (EG2's handover from Spike).
+void cheriot_sail_cosim_set_minstret(uint64_t minstret);
 
 // Bench inputs of CHERIoT-Ibex's CSRs in the model's platform (spec GAP-CS-3). Call before
 // each cheriot_sail_cosim_step(), like set_mcycle:
