@@ -1,0 +1,99 @@
+# Copyright lowRISC contributors.
+# Licensed under the Apache License, Version 2.0, see LICENSE for details.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Debug tests taken from two open upstream PRs by Kulan Palanichamy, before they are merged, as
+# evidence for the RTL fixes this tree carries from them (2026-10-28):
+#   lowRISC/ibex#2541  dcsr.cause with a trigger on the next instruction (ibex_controller.sv)
+#   lowRISC/ibex#2544  Zcmp expansion tag left set after a trap (ibex_if_stage.sv)
+# Each fails on the code before the fix. The .S files and core_ibex_debug_halt_once_test are the
+# PRs' own, unchanged. Once the PRs are merged and upstream is merged into this tree, drop this
+# file in favour of their entries in directed_testlist.yaml / gen_testlist.py.
+
+# lowRISC/ibex#2541
+- test: debug_trigger_ebreak_test
+  desc: >
+    An ebreak enters debug mode while an execute trigger is set on the
+    instruction after it. The trigger does not fire, so dcsr.cause must
+    be EBREAK.
+  iterations: 1
+  test_srcs: debug_trigger_ebreak_test/debug_trigger_ebreak_test.S
+  config: riscv-tests
+  rtl_test: core_ibex_debug_halt_once_test
+  rtl_params:
+    PMPEnable: 1
+    DbgTriggerEn: 1
+  sim_opts: +enable_debug_seq=1
+
+- test: debug_trigger_step_test
+  desc: >
+    A single step ends while an execute trigger is set on the next
+    instruction. The trigger does not fire, so dcsr.cause must be STEP.
+    A trigger on the first instruction of a step still fires.
+  iterations: 1
+  test_srcs: debug_trigger_step_test/debug_trigger_step_test.S
+  config: riscv-tests
+  rtl_test: core_ibex_debug_halt_once_test
+  rtl_params:
+    PMPEnable: 1
+    DbgTriggerEn: 1
+  sim_opts: +enable_debug_seq=1
+
+- test: debug_trigger_trap_test
+  desc: >
+    A single step over an illegal instruction ends at the trap handler
+    while an execute trigger is set on the address after the instruction.
+    The trigger does not fire, so dcsr.cause must be STEP.
+  iterations: 1
+  test_srcs: debug_trigger_trap_test/debug_trigger_trap_test.S
+  config: riscv-tests
+  rtl_test: core_ibex_debug_halt_once_test
+  rtl_params:
+    PMPEnable: 1
+    DbgTriggerEn: 1
+  sim_opts: +enable_debug_seq=1
+
+# lowRISC/ibex#2544
+- test: debug_step_zcmp_store_fault_test
+  desc: >
+    A single step over a cm.push whose first store faults must enter debug
+    mode at the trap vector, before the first instruction of the handler.
+  iterations: 1
+  test_srcs: debug_step_zcmp_store_fault_test/debug_step_zcmp_store_fault_test.S
+  config: riscv-tests
+  rtl_test: core_ibex_debug_halt_once_test
+  rtl_params:
+    PMPEnable: 1
+    RV32E: 0
+    RV32ZC: ["ibex_pkg::RV32ZcaZcmp", "ibex_pkg::RV32ZcaZcbZcmp"]
+  sim_opts: +disable_cosim=1 +enable_debug_seq=1
+
+- test: debug_step_zcmp_fetch_fault_test
+  desc: >
+    A single step over a cm.mva01s in U mode without execute permission
+    must enter debug mode at the trap vector, before the first instruction
+    of the handler.
+  iterations: 1
+  test_srcs: debug_step_zcmp_fetch_fault_test/debug_step_zcmp_fetch_fault_test.S
+  config: riscv-tests
+  rtl_test: core_ibex_debug_halt_once_test
+  rtl_params:
+    PMPEnable: 1
+    RV32E: 0
+    RV32ZC: ["ibex_pkg::RV32ZcaZcmp", "ibex_pkg::RV32ZcaZcbZcmp"]
+  sim_opts: +enable_debug_seq=1
+
+- test: debug_trigger_zcmp_trap_test
+  desc: >
+    An execute trigger on the trap vector must fire when a cm.push faults
+    on its first store, before the first instruction of the handler.
+  iterations: 1
+  test_srcs: debug_trigger_zcmp_trap_test/debug_trigger_zcmp_trap_test.S
+  config: riscv-tests
+  rtl_test: core_ibex_debug_halt_once_test
+  rtl_params:
+    PMPEnable: 1
+    RV32E: 0
+    DbgTriggerEn: 1
+    RV32ZC: ["ibex_pkg::RV32ZcaZcmp", "ibex_pkg::RV32ZcaZcbZcmp"]
+  sim_opts: +disable_cosim=1 +enable_debug_seq=1
