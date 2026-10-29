@@ -768,13 +768,15 @@ module core_ibex_tb_top;
     `DV_ASSERT_CTRL("tb_no_spurious_response",
       core_ibex_tb_top.dut.u_ibex_top.gen_cheriot_trvk.i_ibex_trvk.AlignValidOnRsp_A)
     // DsRspFifoNoOverflow_A is `downstream_rvalid_i |-> downstream_rsp_wready`
-    // (ibex_trvk.sv:411) -- a response may only arrive when the store has a slot for
-    // it. Spurious injection delivers downstream_rvalid_i with no matching request, so
-    // no slot was ever reserved and wready is low: the assertion cannot hold and says
-    // nothing about the RTL. It sits directly beside AlignValidOnRsp_A above and fails
-    // for the same reason; it was simply missed when that one was added, and accounted
-    // for 9 of the 57 failures in the 2026-09-23 regression. The give-away in the log is
-    // "[TAGMEM] <t> RSP is_read=0 rtag=0 depth=0" -- depth 0 means nothing outstanding.
+    // (ibex_trvk.sv:431) -- the response store must have room. Its wready is
+    // ~full & ~under_rst (prim_fifo_sync): low through a reset and the first clock after it.
+    // A spurious response (no request) on that first edge after a mid-test reset is dropped
+    // and fires the assertion; so can one that arrives while the store is full. Neither says
+    // anything about the RTL: spurious responses are illegal stimulus, as for
+    // AlignValidOnRsp_A above. It accounted for 9 of the 57 failures in the 2026-09-23
+    // regression ("[TAGMEM] <t> RSP is_read=0 rtag=0 depth=0": nothing outstanding).
+    // (2026-10-29: the earlier explanation here, "no slot reserved", was wrong; the same
+    // change is upstream PR lowRISC/ibex#2535, whose description has it right.)
     `DV_ASSERT_CTRL("tb_no_spurious_response",
       core_ibex_tb_top.dut.u_ibex_top.gen_cheriot_trvk.i_ibex_trvk.DsRspFifoNoOverflow_A)
   end
