@@ -530,13 +530,15 @@ module ibex_controller import ibex_pkg::*; #(
   // where a change in external stimulus can cause the cause to be recorded incorrectly.
   // The trigger compares the IF-stage PC: in FLUSH (EBREAK, a trap) and after a completed single
   // step that address has not been attempted, so its trigger has not fired (Debug spec 0.13.2
-  // 4.4) and must not take the cause (upstream lowRISC/ibex#2541).
+  // 4.4) and must not take the cause. A trigger match only fires if no other cause stops the core
+  // first: EBREAK, a halt request (also one that wakes the core from WFI) and a step rank above it
+  // (upstream lowRISC/ibex#2541; cs_registers.rst on the priority against spec 0.13.2).
   assign trigger_cause = trigger_match_i & (ctrl_fsm_cs != FLUSH) & ~do_single_step_d;
 
-  assign debug_cause_d = trigger_cause                      ? DBG_CAUSE_TRIGGER :
-                         ebrk_insn_prio & ebreak_into_debug ? DBG_CAUSE_EBREAK  :
+  assign debug_cause_d = ebrk_insn_prio & ebreak_into_debug ? DBG_CAUSE_EBREAK  :
                          debug_req_i                        ? DBG_CAUSE_HALTREQ :
                          do_single_step_d                   ? DBG_CAUSE_STEP    :
+                         trigger_cause                      ? DBG_CAUSE_TRIGGER :
                                                               DBG_CAUSE_NONE ;
 
   always_ff @(posedge clk_i or negedge rst_ni) begin
@@ -1130,6 +1132,22 @@ module ibex_controller import ibex_pkg::*; #(
   // hence preventing a fetched instruction from proceeding to the ID/EX stage in the next cycle.
   `ASSERT(IbexPipelineFlushOnChangingDebugMode,
     debug_mode_d != debug_mode_q |-> flush_id_o & pc_set_o)
+
+`ifdef INC_ASSERT
+  // Debug entries that another cause takes before an instruction with a trigger set
+  logic dbg_entry_with_trigger_match;
+  assign dbg_entry_with_trigger_match = trigger_match_i & ~debug_mode_q &
+      (ctrl_fsm_ns inside {DBG_TAKEN_IF, DBG_TAKEN_ID});
+
+  `COVER(DbgEbreakWithTriggerMatch,
+         dbg_entry_with_trigger_match && (debug_cause_d == DBG_CAUSE_EBREAK))
+  `COVER(DbgStepWithTriggerMatch, dbg_entry_with_trigger_match &&
+         (debug_cause_d == DBG_CAUSE_STEP) && (ctrl_fsm_cs != FLUSH))
+  `COVER(DbgStepTrapWithTriggerMatch, dbg_entry_with_trigger_match &&
+         (debug_cause_d == DBG_CAUSE_STEP) && (ctrl_fsm_cs == FLUSH) && csr_save_cause_o)
+  `COVER(DbgHaltReqWithTriggerMatch,
+         dbg_entry_with_trigger_match && (debug_cause_d == DBG_CAUSE_HALTREQ))
+`endif
 
   `ifdef RVFI
     // Workaround for internal verilator error when using hierarchical refers to calculate this
