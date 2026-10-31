@@ -7,6 +7,11 @@
 #
 # Only model, generator or upstream gaps belong here. RTL findings (status/rtl_todo.md) are
 # never waived. Every entry names its gap ID; remove the entry when the gap is closed.
+#
+# A directed test that exists to show an RTL gap declares it with the test instead
+# (directed_testlist*.yaml: expected_failure, kind known_gap). collect_results.py grades it
+# "FAIL (known gap <ref>)" through the same known-gap route: a failure in every report, the
+# requirement not met, the regression not red by itself, and red once the test passes.
 
 - id: GAP-RV-3
   test: riscv_debug_ebreakmu_test

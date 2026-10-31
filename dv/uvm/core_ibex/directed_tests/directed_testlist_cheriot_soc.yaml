@@ -60,6 +60,8 @@
             -DHANDOVER_INJECT_FAIL
   sim_opts: "+cheriot_enable_on_write=80200000 +disable_cosim=1 +disable_spurious_dside_responses=1"
   expected_failure:
+    # self_check: built to fail; its failure proves the handover test's tag check works.
+    kind: self_check
     ref: CHECK-MUTATION-REQ_SOC_07
     reason: HANDOVER_INJECT_FAIL deliberately reports TEST_FAIL at its first tag check.
     message: 'Test failed due to RISCV-DV handshake \(payload=TEST_FAIL\)'
@@ -95,6 +97,8 @@
     +cheriot_enable_on_write=10F00 +disable_cosim=1 +disable_spurious_dside_responses=1
     +enable_bad_intg_on_uninit_access=0
   expected_failure:
+    # self_check: built to fail; its failure proves the fetch-count check works.
+    kind: self_check
     ref: CHECK-MUTATION-REQ_SOC_06
     reason: PMP_GATED_INJECT_FAIL deliberately reports TEST_FAIL after expecting one extra fetch.
     message: 'Test failed due to RISCV-DV handshake \(payload=TEST_FAIL\)'
@@ -183,6 +187,8 @@
     +enable_cheriot_seq=1 +disable_spurious_dside_responses=1
     +revbm_mode=random +revbm_revoke_pct=50 +revbm_heap_base=80000000 +revbm_err_pct=0
   expected_failure:
+    # self_check: built to fail; its failure proves the RF-integrity alert check works.
+    kind: self_check
     ref: CHECK-MUTATION-REQ_CIB_02
     reason: The injected checker inversion must reject the correctly raised RF-integrity alert.
     message: 'REQ_CIB_02:.*alert_major_internal_o.*\(\+cheriot_rf_intg_inject_fail\)'

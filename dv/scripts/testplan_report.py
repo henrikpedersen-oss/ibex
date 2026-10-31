@@ -9,7 +9,8 @@ testplan is loaded with dvsim's Testplan class.
 
   without -s   dvsim's testplan document (Markdown), unchanged
   with -s      an HTML report with two parts only:
-                 Testpoints  each testpoint's description and every test's passing/total
+                 Testpoints  each testpoint's description and every test's passing/total; a test
+                             whose results entry has known_gaps shows FAIL (known gap <ref>)
                  Coverage    each covergroup of the --cg-detail report: its coverpoints and crosses
                              with their coverage, and their description from the testplan's
                              covergroups (a bullet that names the item, else the covergroup's)
@@ -110,11 +111,15 @@ def parse_cg_detail(path):
     return uniq
 
 
-def verdict(passing, total):
+def verdict(passing, total, gaps=None):
+    """gaps: {ref: seeds} of runs graded FAIL (known gap <ref>) (the results file's known_gaps):
+    still a failure, with the gap named."""
     if total == 0:
         return '<span class="notrun">NOT RUN</span>'
     if passing == total:
         return '<span class="pass">PASS</span>'
+    if gaps:
+        return f'<span class="fail">FAIL (known gap {html.escape(", ".join(sorted(gaps)))})</span>'
     return '<span class="fail">FAIL</span>'
 
 
@@ -122,6 +127,10 @@ def report(testplan_path, results_path, cg_detail, cov_testplans):
     tp = Testplan.Testplan(testplan_path)
     results = hjson.loads(Path(results_path).read_text())
     res = {r["name"]: (r["passing"], r["total"]) for r in results.get("test_results", [])}
+    # Known gaps (cheriot_mem_subsys_results.py, cheriot_rtos_results.py): the seeds that failed
+    # as a declared RTL gap. They are already not passing; this only names the gap.
+    known = {r["name"]: r["known_gaps"] for r in results.get("test_results", [])
+             if r.get("known_gaps")}
 
     out = ["<!DOCTYPE html><html><head><meta charset=\"utf-8\">",
            f"<title>{html.escape(tp.name)} testplan report</title>", CSS, "</head><body>",
@@ -129,25 +138,30 @@ def report(testplan_path, results_path, cg_detail, cov_testplans):
            f"<p>Run of {html.escape(str(results.get('timestamp', '?')))}.</p>"]
 
     # Testpoints
-    n_pass = n_fail = n_notrun = 0
+    n_pass = n_fail = n_gap = n_notrun = 0
     rows = []
     for t in tp.testpoints:
-        tests, p_sum, t_sum, cells = list(t.tests), 0, 0, []
+        tests, p_sum, t_sum, cells, tp_gaps = list(t.tests), 0, 0, [], {}
         for name in tests:
             p, tot = res.get(name, (0, 0))
             p_sum += p
             t_sum += tot
-            cells.append(f"<code>{html.escape(name)}</code> {verdict(p, tot)} {p}/{tot}")
-        v = verdict(p_sum, t_sum) if tests else '<span class="notrun">NO TESTS</span>'
+            for ref, n in known.get(name, {}).items():
+                tp_gaps[ref] = tp_gaps.get(ref, 0) + n
+            cells.append(f"<code>{html.escape(name)}</code> {verdict(p, tot, known.get(name))} "
+                         f"{p}/{tot}")
+        v = verdict(p_sum, t_sum, tp_gaps) if tests else '<span class="notrun">NO TESTS</span>'
         n_pass += t_sum > 0 and p_sum == t_sum
         n_fail += t_sum > 0 and p_sum < t_sum
+        n_gap += t_sum > 0 and p_sum < t_sum and bool(tp_gaps)
         n_notrun += t_sum == 0
         rows.append(f"<tr><td><code>{html.escape(t.name)}</code><br>{html.escape(t.stage)}</td>"
                     f"<td class=\"desc\">{md(t.desc)}</td><td>{'<br>'.join(cells)}</td>"
                     f"<td>{v}<br>{p_sum}/{t_sum}</td></tr>")
     out.append("<h2>Testpoints</h2>")
     out.append(f"<p>{len(tp.testpoints)} testpoints: <span class=\"pass\">{n_pass} pass</span>, "
-               f"<span class=\"fail\">{n_fail} fail</span>, "
+               f"<span class=\"fail\">{n_fail} fail</span>"
+               + (f" ({n_gap} with a known gap)" if n_gap else "") + ", "
                f"<span class=\"notrun\">{n_notrun} not run</span>.</p>")
     out.append("<table><tr><th>Testpoint</th><th>Description</th><th>Tests (passing/total)</th>"
                "<th>Result</th></tr>" + "".join(rows) + "</table>")

@@ -13,6 +13,11 @@
 # Program: cheriot_revoke_load_barrier_rnd (256 CLCs over bitmap words 0x180-0x187). The run ends
 # right after the check, so the program's own result is not used. Error words are off: an error
 # response revokes on its own and would hide the fault.
+#
+# Both cosims are off (+disable_cosim=1 Spike, +disable_cheriot_sail=1 CHERIoT-Sail): the forced
+# fault makes the core's tag differ from the model's, which the Sail check reports first
+# ("cd_wtag mismatch") before the test's own check, the alert, can run. That the cosim sees the
+# corrupted tag is shown by those runs; these tests check the RTL's alert.
 
 - test: cheriot_trvk_fault_verdict
   desc: >
@@ -23,11 +28,13 @@
   config: cheriot-c-tests
   rtl_test: core_ibex_trvk_fault_test
   sim_opts: >-
-    +trvk_fault_site=verdict +disable_cosim=1
+    +trvk_fault_site=verdict +disable_cosim=1 +disable_cheriot_sail=1
     +enable_cheriot_seq=1 +disable_spurious_dside_responses=1
     +revbm_mode=random +revbm_revoke_pct=50 +revbm_heap_base=80000000 +revbm_err_pct=0
     +revbm_gnt_delay_max=3 +revbm_rsp_delay_max=3
   expected_failure: &trvk_expected_failure
+    # known_gap: the failure is the finding (the RTL misses REQ_CIB_03), not a checker self-test.
+    kind: known_gap
     ref: GAP-RTL-TRVK-LOAD-FILTER
     reason: EG2 REQ_CIB_03 is unmet because ibex_trvk is outside lockstep and has no local protection.
     message: 'TRVK fault at .* undetected:.*alert_major_internal_o stayed low.*REQ_CIB_03'
@@ -41,7 +48,7 @@
   config: cheriot-c-tests
   rtl_test: core_ibex_trvk_fault_test
   sim_opts: >-
-    +trvk_fault_site=tag_out +disable_cosim=1
+    +trvk_fault_site=tag_out +disable_cosim=1 +disable_cheriot_sail=1
     +enable_cheriot_seq=1 +disable_spurious_dside_responses=1
     +revbm_mode=random +revbm_revoke_pct=50 +revbm_heap_base=80000000 +revbm_err_pct=0
     +revbm_gnt_delay_max=3 +revbm_rsp_delay_max=3
@@ -57,7 +64,7 @@
   config: cheriot-c-tests
   rtl_test: core_ibex_trvk_fault_test
   sim_opts: >-
-    +trvk_fault_site=bit_select +disable_cosim=1
+    +trvk_fault_site=bit_select +disable_cosim=1 +disable_cheriot_sail=1
     +enable_cheriot_seq=1 +disable_spurious_dside_responses=1
     +revbm_mode=random +revbm_revoke_pct=50 +revbm_heap_base=80000000 +revbm_err_pct=0
     +revbm_gnt_delay_max=3 +revbm_rsp_delay_max=3
@@ -73,7 +80,7 @@
   config: cheriot-c-tests
   rtl_test: core_ibex_trvk_fault_test
   sim_opts: >-
-    +trvk_fault_site=req_required +disable_cosim=1
+    +trvk_fault_site=req_required +disable_cosim=1 +disable_cheriot_sail=1
     +enable_cheriot_seq=1 +disable_spurious_dside_responses=1
     +revbm_mode=random +revbm_revoke_pct=100 +revbm_heap_base=80000000 +revbm_err_pct=0
     +revbm_gnt_delay_max=3 +revbm_rsp_delay_max=3
@@ -88,7 +95,7 @@
   config: cheriot-c-tests
   rtl_test: core_ibex_trvk_fault_test
   sim_opts: >-
-    +trvk_fault_site=out_of_range +disable_cosim=1
+    +trvk_fault_site=out_of_range +disable_cosim=1 +disable_cheriot_sail=1
     +enable_cheriot_seq=1 +disable_spurious_dside_responses=1
     +revbm_mode=random +revbm_revoke_pct=100 +revbm_heap_base=80000000 +revbm_err_pct=0
     +revbm_gnt_delay_max=3 +revbm_rsp_delay_max=3
@@ -104,7 +111,7 @@
   config: cheriot-c-tests
   rtl_test: core_ibex_trvk_fault_test
   sim_opts: >-
-    +trvk_fault_site=sealing +disable_cosim=1
+    +trvk_fault_site=sealing +disable_cosim=1 +disable_cheriot_sail=1
     +enable_cheriot_seq=1 +disable_spurious_dside_responses=1
     +revbm_mode=random +revbm_revoke_pct=100 +revbm_heap_base=80000000 +revbm_err_pct=0
     +revbm_gnt_delay_max=3 +revbm_rsp_delay_max=3
@@ -120,7 +127,7 @@
   config: cheriot-c-tests
   rtl_test: core_ibex_trvk_fault_test
   sim_opts: >-
-    +trvk_fault_site=align +disable_cosim=1
+    +trvk_fault_site=align +disable_cosim=1 +disable_cheriot_sail=1
     +enable_cheriot_seq=1 +disable_spurious_dside_responses=1
     +revbm_mode=random +revbm_revoke_pct=100 +revbm_heap_base=80000000 +revbm_err_pct=0
     +revbm_gnt_delay_max=3 +revbm_rsp_delay_max=3

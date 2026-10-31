@@ -5,6 +5,7 @@
 
 See waivers/known_gaps.yaml and the "Gap Analysis" chapter of the verification spec. A failure is a
 known gap only if both the test-name and the failure-message patterns of one entry match.
+Known RTL gaps are not waived here: the test declares them (expected_failures.py, kind known_gap).
 """
 
 import pathlib

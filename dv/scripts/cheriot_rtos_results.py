@@ -14,6 +14,11 @@ A required build with no log, or a log that never mentions the test, counts as n
 an incomplete run cannot read as a pass. A FAIL anywhere in a build's logs outranks a PASS in the
 same build.
 
+A test with a declared expected failure (cheriot-rtos-test-suite/data/expected_failures.yaml) is
+graded by that suite's cheriot_rtos_expected_failure.py: a self-check that failed as declared is
+"PASS (must fail)" and passes; a known gap that failed as declared is "FAIL (known gap <id>)", does
+not pass, and is listed under the test's "known_gaps" in the results file for the testplan report.
+
 The cheriot-rtos tests.extra runs (SIM_ONLY_TESTS) print no verdict lines. Each passes only if its
 <target>.<build>.sim.txt (the failure-marker grep of run.log that cheriot-rtos-test-xlm keeps) shows the
 run ended on the RTOS exit string and holds no other marker, its UART log reports
@@ -32,7 +37,12 @@ import sys
 from pathlib import Path
 
 import hjson
-import yaml
+
+# Declared expected failures are graded by the RTOS suite's own module, so the verdict script (one
+# run) and this report apply one copy of the rules.
+RTOS_SCRIPTS = Path(__file__).resolve().parent.parent / "cheriot-rtos-test-suite/dv/scripts"
+sys.path.insert(0, str(RTOS_SCRIPTS))
+import cheriot_rtos_expected_failure as xf  # noqa: E402
 
 # The build tag every log carries (<target>.<build>.uart.log). The CHERIoT RTOS test SoC
 # (ibex/dv/cheriot-rtos-test-suite) has one build, with the CHERIoT memory subsystem; the Sonata
@@ -97,8 +107,6 @@ PERF_WORKLOADS = ("hash_feed_core", "hash_feed_dma")
 PERF_BUDGET_CYCLES = 15_000_000
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
-UART_FAILURE = re.compile(
-    r"Invariant failure|One or more tests failed|Test runner: .* failed|: FAIL[: ]|Test\(s\) Failed")
 RTOS_LINE = re.compile(r"^Test runner: (?P<name>.+?) (?P<verdict>finished in \d+ cycles|failed)$")
 REVOCATION_LINE = re.compile(r"^Revocation barrier: (?P<verdict>PASS|FAIL) (?P<what>phase [123]|sweep|random|base|preempt|race|progress)\b")
 # "PASS race" and "PASS progress" are the sweep_race and sweep_progress tests; the others keep their word.
@@ -116,23 +124,6 @@ JULIET_LINE = re.compile(r"^.*?: (?P<verdict>PASS|FAIL): CWE-(?P<cwe>\d+)\b")
 CHERI_C_LINE = re.compile(r"^.*?: (?P<verdict>PASS|FAIL): clang_purecap_(?P<test>\w+)\b")
 EXPECTED_FAILURES = (Path(__file__).resolve().parent.parent /
                      "cheriot-rtos-test-suite/data/expected_failures.yaml")
-
-
-def expected_failure_verdict(entry, log):
-    """True only when one saved log has exactly its declared failure and required passes."""
-    lines = [ANSI.sub("", raw).strip() for raw in log.read_text(errors="replace").splitlines()]
-    observed = [line for line in lines if re.search(entry["failure"], line)]
-    if len(observed) != 1:
-        return False, f"expected one {entry['id']} failure, found {len(observed)}"
-    for pattern in entry["required_passes"]:
-        found = sum(1 for line in lines if re.search(pattern, line))
-        if found != 1:
-            return False, f"required one /{pattern}/ PASS, found {found}"
-    allowed = set(observed + ["Debug host: Test(s) Failed"])
-    unexpected = [line for line in lines if UART_FAILURE.search(line) and line not in allowed]
-    if unexpected:
-        return False, f"unexpected failure: {unexpected[0]}"
-    return True, entry["reason"]
 
 
 def parse_log(path):
@@ -239,7 +230,7 @@ def main():
     args = ap.parse_args()
 
     required = required_builds(hjson.loads(args.testplan.read_text()))
-    expected_failures = yaml.safe_load(EXPECTED_FAILURES.read_text()) or []
+    expected_failures = xf.load_declarations(EXPECTED_FAILURES)
 
     # verdict[(test, build)] = True / False; False sticks.
     verdict = {}
@@ -263,18 +254,17 @@ def main():
             key = (test, build)
             verdict[key] = verdict.get(key, True) and passed
 
-    # A declared must-fail test is accepted only when its exact failure is present.  This is done
-    # after ordinary parsing so an unexpected pass cannot quietly become a report PASS.
+    # A declared expected failure is graded by cheriot_rtos_expected_failure.py after ordinary
+    # parsing, so an unexpected pass cannot quietly become a report PASS. Only a self-check that
+    # failed as declared passes; a known gap that failed as declared stays a failure (the testplan
+    # shows it as FAIL (known gap <id>) through the results file's known_gaps).
+    known_gaps = {}
     logs_by_target_build = {}
     for log in logs:
         parts = log.name[: -len(".uart.log")].rsplit(".", 1)
         if len(parts) == 2 and parts[1] in BUILDS:
             logs_by_target_build[(parts[0], parts[1])] = log
     for entry in expected_failures:
-        for field in ("id", "target", "test", "tracker", "reason", "failure",
-                      "required_passes"):
-            if not entry.get(field):
-                raise RuntimeError(f"{EXPECTED_FAILURES}: entry has no {field}: {entry}")
         if entry["test"] not in required:
             raise RuntimeError(f"{EXPECTED_FAILURES}: expected-failure test {entry['test']!r} "
                                "is absent from the testplan")
@@ -282,10 +272,12 @@ def main():
             log = logs_by_target_build.get((entry["target"], build))
             if log is None:
                 continue
-            passed, reason = expected_failure_verdict(entry, log)
-            verdict[(entry["test"], build)] = passed
-            label = "PASS (must fail)" if passed else "FAIL (must fail mismatch)"
-            print(f"{label} {entry['test']}: {entry['id']} -- {reason}")
+            result, reason = xf.grade(entry, xf.uart_lines(log.read_text(errors="replace")))
+            verdict[(entry["test"], build)] = result == "self_check"
+            if result == "known_gap":
+                gaps = known_gaps.setdefault(entry["test"], {})
+                gaps[entry["id"]] = gaps.get(entry["id"], 0) + 1
+            print(f"{xf.grade_label(result, entry)} {entry['test']}: {reason}")
 
     # Sim-only targets (no UART verdict lines): sim_only_verdict().
     for log in sorted(args.logs.glob("*.uart.log")):
@@ -316,11 +308,17 @@ def main():
     for test in sorted(required):
         builds = required[test]
         passing = sum(1 for b in builds if verdict.get((test, b)) is True)
-        results.append({"name": test, "passing": passing, "total": len(builds)})
+        entry = {"name": test, "passing": passing, "total": len(builds)}
+        if test in known_gaps:
+            # Read by testplan_report.py, to show the test as a known gap; dvsim ignores it.
+            entry["known_gaps"] = known_gaps[test]
+        results.append(entry)
         missing = sorted(b for b in builds if (test, b) not in verdict)
         failed = sorted(b for b in builds if verdict.get((test, b)) is False)
         if failed:
-            print(f"FAIL     {test}: {', '.join(failed)}")
+            gap = (" (known gap " + ", ".join(sorted(known_gaps[test])) + ")"
+                   if test in known_gaps else "")
+            print(f"FAIL{gap}     {test}: {', '.join(failed)}")
         if missing:
             print(f"NOT RUN  {test}: {', '.join(missing)}")
 
@@ -331,8 +329,14 @@ def main():
     }, indent=2) + "\n")
     total = sum(r["total"] for r in results)
     passing = sum(r["passing"] for r in results)
-    print(f"{len(logs)} log(s), {len(results)} tests: {passing}/{total} test x build results pass "
-          f"-> {args.out}")
+    gaps = {}
+    for per_test in known_gaps.values():
+        for ref, n in per_test.items():
+            gaps[ref] = gaps.get(ref, 0) + n
+    gap_text = ("; " + str(sum(gaps.values())) + " FAIL (known gap " +
+                ", ".join(f"{ref}: {n}" for ref, n in sorted(gaps.items())) + ")") if gaps else ""
+    print(f"{len(logs)} log(s), {len(results)} tests: {passing}/{total} test x build results pass"
+          f"{gap_text} -> {args.out}")
 
 
 if __name__ == "__main__":

@@ -8,7 +8,7 @@
 import sys
 import pydantic
 import pathlib3x as pathlib
-from typing import List, Any, Optional
+from typing import List, Any, Literal, Optional
 
 import scripts_lib
 
@@ -70,13 +70,20 @@ class DConfig(pydantic.BaseModel):  # noqa
 
 
 class ExpectedFailure(pydantic.BaseModel):
-    """A directed test that is useful only when it fails in one specific way."""
+    """A directed test that fails in one specific way (graded by expected_failures.py)."""
+
+    # A misspelt field (say "kinds:") must not be dropped quietly: it would change the grade.
+    model_config = pydantic.ConfigDict(extra='forbid')
 
     # A verification-spec gap, RTL ticket, or other stable tracker reference.
     ref: str
     reason: str
     # Python regular expression searched in check_logs.py's failure_message.
     message: str
+    # self_check: the test is built to fail (an _inject_fail run proving a checker works), graded
+    # "PASS (must fail)". known_gap: the RTL misses a requirement, graded "FAIL (known gap <ref>)",
+    # never a pass. Anything that is not explicitly a self-check is a known gap.
+    kind: Literal['self_check', 'known_gap'] = 'known_gap'
 
     @pydantic.field_validator('ref', 'reason', 'message')
     @classmethod
@@ -113,9 +120,10 @@ class DTest(DConfig):  # noqa
     # scripts/compile_tb.py). metadata.py leaves it out of all_directed on a normal build and
     # refuses it by name there, since it could only fail.
     requires_dm: bool = False
-    # If present, a matching failure is graded "PASS (must fail)".  A pass or a failure whose
-    # log extract does not match `message` is a regression failure.  This declaration lives with
-    # the test so the simulator configuration and grading cannot drift into separate name lists.
+    # If present, a failure matching `message` is graded by its kind: "PASS (must fail)" for a
+    # self-check, "FAIL (known gap <ref>)" for a known gap. A pass or a failure whose log extract
+    # does not match `message` is a regression failure. This declaration lives with the test so
+    # the simulator configuration and grading cannot drift into separate name lists.
     expected_failure: Optional[ExpectedFailure] = None
 
     ##################################
