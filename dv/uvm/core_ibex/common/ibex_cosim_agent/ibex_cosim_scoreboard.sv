@@ -503,6 +503,10 @@ class ibex_cosim_scoreboard extends uvm_scoreboard;
 
   iside_err_t iside_error_queue [$];
 
+  // Incremented by every init_cosim(), so a caller can tell a re-created cosim from the old one.
+  // (lowRISC/ibex#2514)
+  int unsigned cosim_generation;
+
   `uvm_component_utils(ibex_cosim_scoreboard)
 
   function new(string name="", uvm_component parent=null);
@@ -613,6 +617,7 @@ class ibex_cosim_scoreboard extends uvm_scoreboard;
     end
     void'($value$plusargs("riscv_sail_cosim=%0b", riscv_sail_en));
     if (riscv_sail_enabled()) riscv_sail_init();
+    cosim_generation++;
   endfunction
 
   protected function void cleanup_cosim();
@@ -645,8 +650,11 @@ class ibex_cosim_scoreboard extends uvm_scoreboard;
         forever begin ibex_ifetch_pmp_seq_item it; ifetch_pmp_port.get(it); end
       join
     end
+    // Wait for the power-on reset only. After a mid-test reset, handle_reset() runs once reset is
+    // already released, so the checkers must restart straight away. Waiting here for every reset
+    // release stopped all checking after the first mid-test reset. (lowRISC/ibex#2514)
+    @(negedge instr_vif.reset);
     forever begin
-      @(negedge instr_vif.reset)
       fork : isolation_fork
         run_cosim_rvfi();
         run_cosim_dmem();
@@ -1067,6 +1075,18 @@ class ibex_cosim_scoreboard extends uvm_scoreboard;
   endfunction
 
   task handle_reset();
+    // RVFI order restarts after reset, so no instruction-side error state may carry over.
+    // (lowRISC/ibex#2514)
+    failed_iside_accesses.delete();
+    iside_pmp_failure.delete();
+    iside_error_queue.delete();
+    check_inserted_iside_error_e.reset();
+    // Ours, not in #2514: the opt-in mtval check (+check_mtval=1) compares on the item after a
+    // trap; a trap just before the reset must not make it compare the rebooted program's first item.
+    prev_item_trapped     = 1'b0;
+    prev_item_was_nmi_int = 1'b0;
+    `uvm_info(`gfn, $sformatf("Co-simulation matched %0d instructions before reset",
+                              riscv_cosim_get_insn_cnt(cosim_handle)), UVM_LOW)
     init_cosim();
   endtask
 endclass : ibex_cosim_scoreboard

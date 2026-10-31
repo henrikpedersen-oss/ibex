@@ -1,0 +1,79 @@
+# Copyright lowRISC contributors.
+# Licensed under the Apache License, Version 2.0, see LICENSE for details.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Tests that open lowRISC/ibex pull requests add, ported to this fork ahead of their merge. Each
+# keeps the PR's test name with the prefix prp_; the program and the bench class are the PR's
+# (bench classes in tests/core_ibex_test_lib.sv, marked with the PR number). Notes, with the
+# before/after results: pr_tests_ported.md at the top of the ibex_cheriot_verification checkout.
+# When a PR is merged upstream and merged here, drop its entries and classes in favour of the
+# upstream ones.
+#
+# Run them (from the top of the ibex_cheriot_verification checkout; on nyx inside
+# `nix develop .#eda_shell --command ...`) with the default configuration (earlgrey):
+#   make uvm-test-xlm TEST=prp_reset_stale_mem_test,prp_reset_irq_test,prp_icache_intg_test SEED=1 ITERATIONS=1
+#
+# Not ported:
+#   lowRISC/ibex#2541 debug_trigger_cause_test: every case it checks is already checked by
+#     debug_trigger_ebreak_test, debug_trigger_step_test, debug_trigger_trap_test
+#     (directed_testlist_upstream_debug.yaml) and prc_2541_wfi_halt_trigger
+#     (directed_testlist_pr_claude.yaml); see pr_tests_ported.md for the case-by-case mapping.
+#   lowRISC/ibex#1811 riscv_mem_intg_error_test: already here, from the later upstream version of
+#     the same work (riscv_dv_extension/testlist.yaml).
+#
+# Every test here carries +disable_spurious_dside_responses=1 -- see the note at the top of
+# directed_testlist.yaml. The PR programs have no handler for a spurious bus error.
+
+# lowRISC/ibex#2514: mid-test reset. Both need the bench fix of #2514 (cosim scoreboard keeps
+# checking after a reset, irq driver drives again after a reset, testbench memory cleared and the
+# binary loaded into the new cosim), which is in this fork's bench now. Without it, both fail.
+
+- test: prp_reset_stale_mem_test
+  desc: >
+    lowRISC/ibex#2514 (reset_stale_mem_test). The program stores a marker outside the binary and
+    writes mscratch; the bench (core_ibex_reset_stale_mem_test) resets the core at that write.
+    The rebooted program must not read the marker back: the testbench memory must start again
+    from the binary alone, as the new cosim does. The bench checks that mscratch was written
+    twice (once per boot). TEST_FAIL with TESTNUM (gp) 2 if the marker survived the reset.
+  iterations: 1
+  test_srcs: prp_reset_stale_mem_test/prp_reset_stale_mem_test.S
+  config: riscv-tests
+  rtl_test: core_ibex_reset_stale_mem_test
+  sim_opts: "+disable_spurious_dside_responses=1"
+
+- test: prp_reset_irq_test
+  desc: >
+    lowRISC/ibex#2514 (reset_irq_test). The program enables every interrupt, writes mscratch and
+    waits for an interrupt; the bench (core_ibex_reset_irq_test) resets the core at the first
+    mscratch write and raises one interrupt after the rebooted program's write. The handler writes
+    mscratch a third time. Fails (UVM_FATAL from the bench) if no interrupt reaches the core
+    after the reset, or if the program did not reach all three mscratch writes.
+  iterations: 1
+  test_srcs: prp_reset_irq_test/prp_reset_irq_test.S
+  config: riscv-tests
+  rtl_test: core_ibex_reset_irq_test
+  sim_opts: "+disable_spurious_dside_responses=1"
+
+# lowRISC/ibex#2536: the alert checks of the ICache integrity test. Upstream changes
+# core_ibex_icache_intg_test, used by riscv_icache_intg_test on a riscv-dv random program. Here
+# the PR's version is a separate class (core_ibex_prp_icache_intg_test), so riscv_icache_intg_test
+# keeps running our own version, and the program is a directed one that switches the ICache on.
+
+- test: prp_icache_intg_test
+  desc: >
+    lowRISC/ibex#2536 (riscv_icache_intg_test with the PR's bench). The program switches the
+    ICache on and runs a loop from it; the bench flips one bit of one ICache tag or data way read
+    on a cache lookup and checks the minor alert of the main core at the next rising edge and of
+    the lockstep shadow core LockstepOffset cycles later. Fails (UVM_FATAL from the bench) on a
+    wrong alert, or if the program ends before the check. TEST_FAIL with TESTNUM (gp) 2 = ICache
+    did not switch on, 3 = wrong loop result after the corrupted read.
+  iterations: 1
+  test_srcs: prp_icache_intg_test/prp_icache_intg_test.S
+  config: riscv-tests
+  rtl_test: core_ibex_prp_icache_intg_test
+  rtl_params:
+    PMPEnable: 1
+    SecureIbex: 1
+    ICache: 1
+    ICacheECC: 1
+  sim_opts: "+disable_spurious_dside_responses=1"

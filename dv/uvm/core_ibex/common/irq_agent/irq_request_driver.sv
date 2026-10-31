@@ -30,6 +30,8 @@ class irq_request_driver extends uvm_driver #(irq_seq_item);
         // Will only reach here on mid-test reset
         disable fork;
         handle_reset();
+        // Restart driving only once reset is released again. (lowRISC/ibex#2514)
+        wait (vif.driver_cb.reset === 1'b0);
       end join
     end
   endtask : run_phase
@@ -43,7 +45,10 @@ class irq_request_driver extends uvm_driver #(irq_seq_item);
         seq_item_port.item_done();
       end
     end while (req != null);
-    reset_signals();
+    // Reset is already asserted here, so do not wait for its posedge: reset_signals() did, which
+    // blocked the driver until a second reset and so every interrupt after the first mid-test
+    // reset. (lowRISC/ibex#2514)
+    drive_reset_value();
   endtask
 
   // Every cycle, check for a new REQ and drive it.

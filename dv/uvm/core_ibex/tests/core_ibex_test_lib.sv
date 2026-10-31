@@ -792,6 +792,254 @@ class core_ibex_icache_intg_test extends core_ibex_base_test;
 
 endclass
 
+// lowRISC/ibex#2536's version of core_ibex_icache_intg_test, for prp_icache_intg_test
+// (directed_testlist_pr_ported.yaml). The four tasks below are the PR's, unchanged; the rest is
+// inherited from core_ibex_icache_intg_test above, which keeps our own earlier fix of the data
+// check (main core's icache_ecc_error read a quarter period after the force) and the upstream tag
+// check the PR replaces. The PR checks the alert of each core in the cycle that core handles the
+// corrupted read (main core at the next rising edge, shadow core LockstepOffset cycles later),
+// corrupts only lookup reads, skips data reads that hit several ways, picks the way from the list
+// of valid ways for tags too, runs one corruptor (no thread left over from a fork) and fails if
+// the program ends before the check. Drop this class when #2536 is merged upstream and merged here.
+class core_ibex_prp_icache_intg_test extends core_ibex_icache_intg_test;
+
+  `uvm_component_utils(core_ibex_prp_icache_intg_test)
+  `uvm_component_new
+
+  string main_icache_path = "u_ibex_core.if_stage_i.gen_icache.icache_i";
+  string shadow_icache_path =
+      "gen_lockstep.u_ibex_lockstep.u_shadow_core.if_stage_i.gen_icache.icache_i";
+
+  int unsigned lockstep_offset;
+
+  // Read a core's IC1 lookup state. The tag match only has to be known for a valid lookup.
+  function automatic void read_lookup(string icache_path, output logic valid,
+                                      output logic [ibex_pkg::IC_NUM_WAYS-1:0] match);
+    uvm_hdl_data_t lookup_valid = read_data({icache_path, ".lookup_valid_ic1"});
+    uvm_hdl_data_t tag_match = read_data({icache_path, ".tag_match_ic1"});
+    valid = lookup_valid[0];
+    match = tag_match[ibex_pkg::IC_NUM_WAYS-1:0];
+    `DV_CHECK_FATAL(!$isunknown(valid))
+    if (valid) begin
+      `DV_CHECK_FATAL(!$isunknown(match))
+    end
+  endfunction
+
+  // ECC is only checked on a lookup. The cache also reads its RAMs while it is disabled.
+  function automatic bit read_is_lookup();
+    uvm_hdl_data_t lookup = read_data($sformatf("%s.lookup_actual_ic0", main_icache_path));
+    `DV_CHECK_FATAL(!$isunknown(lookup[0]))
+    return lookup[0];
+  endfunction
+
+  task automatic corrupt_used_icache_data();
+    clk_vif.wait_n_clks(1);
+    forever begin
+      uvm_hdl_data_t data_req, data_write, data_addr;
+      data_req = dut_vif.signal_probe_ic_data_req(dv_utils_pkg::SignalProbeSample);
+      data_write = dut_vif.signal_probe_ic_data_write(dv_utils_pkg::SignalProbeSample);
+
+      // Check if at least one data way is being read for a lookup.
+      if (data_req != '0 && data_write == 1'b0 && read_is_lookup()) begin
+        int unsigned valid_and_used_ways[$];
+
+        // Probe the data address.
+        data_addr = dut_vif.signal_probe_ic_data_addr(dv_utils_pkg::SignalProbeSample);
+
+        // Find out which data ways are valid and used in this clock cycle.
+        for (int unsigned i = 0; i < num_ways; i++) begin
+          if (data_req[i] && data_valid[i][data_addr]) valid_and_used_ways.push_back(i);
+        end
+
+        // The response comes in the next clock cycle, so wait one cycle.
+        clk_vif.wait_n_clks(1);
+
+        // Check if at least one data way is valid and used.
+        if (valid_and_used_ways.size() > 0) begin
+          int unsigned way_idx, bit_idx;
+          uvm_hdl_data_t data_rdata, mask, alert_minor;
+          logic main_valid, shadow_valid;
+          logic [ibex_pkg::IC_NUM_WAYS-1:0] main_match, shadow_match;
+          logic exp_alert_minor;
+
+          // If several ways hit, the ECC check may not see the corrupted way on its own. The shadow
+          // core repeats this lookup, so skip it for both.
+          read_lookup(main_icache_path, main_valid, main_match);
+          `DV_CHECK_FATAL(main_valid, "The corrupted read is not a main core lookup")
+          if ($countones(main_match) > 1) begin
+            `uvm_info(`gfn, "Several I$ ways hit, waiting for another read", UVM_LOW)
+            continue;
+          end
+
+          `uvm_info(`gfn,
+              $sformatf("The following I$ data ways are valid and used in this clock cycle: %p",
+                        valid_and_used_ways), UVM_LOW)
+
+          // Pick a way to corrupt.
+          way_idx = valid_and_used_ways[$urandom_range(valid_and_used_ways.size() - 1)];
+          `uvm_info(`gfn, $sformatf("Corrupting data way %0d", way_idx), UVM_LOW)
+
+          // Probe response data.
+          data_rdata = read_data($sformatf("ic_data_rdata[%0d]", way_idx));
+          `uvm_info(`gfn, $sformatf("Original data_rdata of way %0d: 'h%0x", way_idx, data_rdata),
+                    UVM_LOW)
+
+          // Pick a bit to corrupt.
+          bit_idx = $urandom_range(line_size - 1);
+          mask = 1 << bit_idx;
+          data_rdata ^= mask;
+          `uvm_info(`gfn, $sformatf("Corrupting data_rdata: 'h%0x", data_rdata), UVM_LOW)
+
+          // Disable TB assertion for alerts.
+          `DV_ASSERT_CTRL_REQ("tb_no_alerts_triggered", 1'b0)
+
+          // Force the corrupt value.
+          force_data($sformatf("ic_data_rdata[%0d]", way_idx), data_rdata);
+
+          // The main core handles the read in this cycle: check its alert at the next rising edge.
+          exp_alert_minor = main_valid & main_match[way_idx];
+          @(dut_vif.dut_cb);
+          `DV_CHECK_EQ_FATAL(dut_vif.dut_cb.alert_minor, exp_alert_minor)
+
+          // The lockstep delay captured the forced rdata at that edge. Release the force, so that
+          // only the shadow core sees it, LockstepOffset cycles after the main core.
+          release_force($sformatf("ic_data_rdata[%0d]", way_idx));
+          clk_vif.wait_n_clks(lockstep_offset);
+
+          // Data ECC is only checked for the way that hits.
+          read_lookup(shadow_icache_path, shadow_valid, shadow_match);
+          `DV_CHECK_FATAL(shadow_valid, "The corrupted read is not a shadow core lookup")
+          exp_alert_minor = shadow_valid & shadow_match[way_idx];
+
+          // Check that the minor alert matches the expectation.
+          alert_minor = dut_vif.signal_probe_alert_minor(dv_utils_pkg::SignalProbeSample);
+          `DV_CHECK_EQ_FATAL(alert_minor, exp_alert_minor)
+          return;
+        end
+      end else begin
+        clk_vif.wait_n_clks(1);
+      end
+    end
+  endtask
+
+  task automatic corrupt_used_icache_tag();
+    clk_vif.wait_n_clks(1);
+    forever begin
+      uvm_hdl_data_t tag_req, tag_write, tag_addr;
+      tag_req = dut_vif.signal_probe_ic_tag_req(dv_utils_pkg::SignalProbeSample);
+      tag_write = dut_vif.signal_probe_ic_tag_write(dv_utils_pkg::SignalProbeSample);
+
+      // Check if at least one tag way is being read for a lookup.
+      if (tag_req != '0 && tag_write == 1'b0 && read_is_lookup()) begin
+        int unsigned valid_and_used_ways[$];
+
+        // Probe the tag address.
+        tag_addr = dut_vif.signal_probe_ic_tag_addr(dv_utils_pkg::SignalProbeSample);
+
+        // Find out which tag ways are valid and used in this clock cycle.
+        for (int unsigned i = 0; i < num_ways; i++) begin
+          if (tag_req[i] && tag_valid[i][tag_addr]) valid_and_used_ways.push_back(i);
+        end
+
+        // The response comes in the next clock cycle, so wait one cycle.
+        clk_vif.wait_n_clks(1);
+
+        // Check if at least one tag way is valid and used.
+        if (valid_and_used_ways.size() > 0) begin
+          int unsigned way_idx, bit_idx;
+          uvm_hdl_data_t tag_rdata, mask, alert_minor;
+          logic main_valid, shadow_valid;
+          logic [ibex_pkg::IC_NUM_WAYS-1:0] main_match, shadow_match;
+          logic exp_alert_minor;
+
+          read_lookup(main_icache_path, main_valid, main_match);
+          `DV_CHECK_FATAL(main_valid, "The corrupted read is not a main core lookup")
+
+          `uvm_info(`gfn,
+              $sformatf("The following I$ tag ways are valid and used in this clock cycle: %p",
+                        valid_and_used_ways), UVM_LOW)
+
+          // Pick a way to corrupt.
+          way_idx = valid_and_used_ways[$urandom_range(valid_and_used_ways.size() - 1)];
+          `uvm_info(`gfn, $sformatf("Corrupting tag way %0d", way_idx), UVM_LOW)
+
+          // Probe response data.
+          tag_rdata = read_data($sformatf("ic_tag_rdata[%0d]", way_idx));
+          `uvm_info(`gfn, $sformatf("Original tag_rdata of way %0d: 'h%0x", way_idx, tag_rdata),
+                    UVM_LOW)
+
+          // Pick a bit to corrupt.
+          bit_idx = $urandom_range(tag_size - 1);
+          mask = 1 << bit_idx;
+          tag_rdata ^= mask;
+          `uvm_info(`gfn, $sformatf("Corrupting tag_rdata: 'h%0x", tag_rdata), UVM_LOW)
+
+          // Disable TB assertion for alerts.
+          `DV_ASSERT_CTRL_REQ("tb_no_alerts_triggered", 1'b0)
+
+          // Force the corrupt value.
+          force_data($sformatf("ic_tag_rdata[%0d]", way_idx), tag_rdata);
+
+          // As for data, check the main core's alert at the next rising edge, then release the
+          // force once the lockstep delay has captured it.
+          @(dut_vif.dut_cb);
+          `DV_CHECK_EQ_FATAL(dut_vif.dut_cb.alert_minor, main_valid)
+          release_force($sformatf("ic_tag_rdata[%0d]", way_idx));
+          clk_vif.wait_n_clks(lockstep_offset);
+
+          // Tag ECC is checked on all ways for any valid lookup.
+          read_lookup(shadow_icache_path, shadow_valid, shadow_match);
+          `DV_CHECK_FATAL(shadow_valid, "The corrupted read is not a shadow core lookup")
+          exp_alert_minor = shadow_valid;
+
+          // Check that the minor alert matches the expectation.
+          alert_minor = dut_vif.signal_probe_alert_minor(dv_utils_pkg::SignalProbeSample);
+          `DV_CHECK_EQ_FATAL(alert_minor, exp_alert_minor)
+          return;
+        end
+      end else begin
+        clk_vif.wait_n_clks(1);
+      end
+    end
+  endtask
+
+  task automatic corrupt_used_icache_entries();
+    // Run one corruptor only: a thread left over from a fork could corrupt again after the
+    // alert assertion is re-armed.
+    if ($urandom_range(1)) corrupt_used_icache_data();
+    else                   corrupt_used_icache_tag();
+
+    // The shadow core holds the corrupt rdata until the next rising edge.
+    clk_vif.wait_n_clks(1);
+
+    // Re-enable TB assertion for alerts.
+    `DV_ASSERT_CTRL_REQ("tb_no_alerts_triggered", 1'b1)
+  endtask
+
+  virtual task send_stimulus();
+    string shadow_valid_path =
+        $sformatf("%s.%s.lookup_valid_ic1", ibex_top_path, shadow_icache_path);
+    // The checks above need the lockstep shadow core.
+    `DV_CHECK_FATAL(uvm_hdl_check_path(shadow_valid_path))
+    lockstep_offset = read_uint("gen_lockstep.u_ibex_lockstep.LockstepOffset");
+    vseq.start(env.vseqr);
+    // Outer fork limits "disable fork" to these threads, sparing the vseq's responders.
+    fork begin
+      fork
+        track_icache_status();
+        corrupt_used_icache_entries();
+        begin
+          // Fail if the test ends before the corruption check has completed.
+          wait (test_done == 1'b1);
+          `uvm_fatal(`gfn, "Test ended before the I$ corruption check completed")
+        end
+      join_any
+      disable fork;
+    end join
+  endtask
+
+endclass
+
 // Reset test
 class core_ibex_reset_test extends core_ibex_base_test;
 
@@ -3649,6 +3897,121 @@ class core_ibex_debug_halt_once_test extends core_ibex_base_test;
         vseq.start_debug_single_seq();
       end
     join_none
+  endtask
+
+endclass
+
+// The three classes below are from lowRISC/ibex#2514, unchanged; used by prp_reset_stale_mem_test
+// and prp_reset_irq_test (directed_testlist_pr_ported.yaml). Drop them when #2514 is merged
+// upstream and merged here.
+
+// Base class for directed tests that reset the core once. The program writes mscratch at each
+// checkpoint, and the testbench resets the core at the first one.
+class core_ibex_directed_reset_test extends core_ibex_base_test;
+
+  `uvm_component_utils(core_ibex_directed_reset_test)
+  `uvm_component_new
+
+  int unsigned num_checkpoints;
+  int unsigned exp_checkpoints = 2;
+
+  virtual task send_stimulus();
+    fork
+      vseq.start(env.vseqr);
+      forever begin
+        wait_for_mscratch_write();
+        num_checkpoints++;
+      end
+    join_none
+    wait (num_checkpoints == 1);
+    dut_vif.dut_cb.fetch_enable <= ibex_pkg::IbexMuBiOff;
+    clk_vif.apply_reset(.reset_width_clks (100));
+    dut_vif.dut_cb.fetch_enable <= ibex_pkg::IbexMuBiOn;
+    after_reset();
+  endtask
+
+  // Stimulus for the rebooted program.
+  virtual task after_reset();
+  endtask
+
+  // Wait for a write to mscratch to start and end, so a stalled write counts once.
+  task wait_for_mscratch_write();
+    do @(csr_vif.csr_cb); while (!mscratch_write());
+    do @(csr_vif.csr_cb); while (mscratch_write());
+  endtask
+
+  function bit mscratch_write();
+    return csr_vif.csr_cb.csr_access === 1'b1 && csr_vif.csr_cb.csr_addr === CSR_MSCRATCH &&
+           csr_vif.csr_cb.csr_op != CSR_OP_READ;
+  endfunction
+
+  // Check that both boots and any post-reset stimulus reached their checkpoints.
+  virtual function void check_phase(uvm_phase phase);
+    super.check_phase(phase);
+    `DV_CHECK_EQ(num_checkpoints, exp_checkpoints, "Program did not reach all its checkpoints")
+  endfunction
+
+endclass
+
+// Used by reset_stale_mem_test: the program checks that it does not see memory contents from
+// before the reset.
+class core_ibex_reset_stale_mem_test extends core_ibex_directed_reset_test;
+
+  `uvm_component_utils(core_ibex_reset_stale_mem_test)
+  `uvm_component_new
+
+  // Disable bad integrity on uninitialized reads so this test checks the data without triggering
+  // a SecureIbex bus alert.
+  virtual function void build_phase(uvm_phase phase);
+    super.build_phase(phase);
+    dmem_cfg.enable_bad_intg_on_uninit_access = 0;
+  endfunction
+
+endclass
+
+// Used by reset_irq_test: after the reset, raise one interrupt and check the rebooted program takes
+// it.
+class core_ibex_reset_irq_test extends core_ibex_directed_reset_test;
+
+  `uvm_component_utils(core_ibex_reset_irq_test)
+  `uvm_component_new
+
+  virtual function void build_phase(uvm_phase phase);
+    super.build_phase(phase);
+    exp_checkpoints = 3;
+  endfunction
+
+  virtual task after_reset();
+    irq_raise_single_seq raise_seq = irq_raise_single_seq::type_id::create("raise_seq");
+    irq_drop_seq         drop_seq  = irq_drop_seq::type_id::create("drop_seq");
+    bit                  irq_delivered;
+
+    raise_seq.num_of_iterations = 1;
+    raise_seq.max_interval      = 1;
+    raise_seq.max_delay         = 10;
+    raise_seq.no_nmi            = 1'b1;
+    drop_seq.num_of_iterations  = 1;
+    drop_seq.max_interval       = 1;
+    drop_seq.max_delay          = 0;
+
+    fork begin
+      fork
+        begin
+          wait (num_checkpoints == 2);
+          raise_seq.start(env.vseqr.irq_seqr);
+          irq_delivered = 1'b1;
+          wait (num_checkpoints == 3);
+        end
+        begin
+          clk_vif.wait_clks(10000);
+          if (num_checkpoints < 2) `uvm_fatal(`gfn, "Program did not restart after the reset")
+          if (!irq_delivered) `uvm_fatal(`gfn, "No interrupt reached the core after the reset")
+          `uvm_fatal(`gfn, "Program did not take the interrupt")
+        end
+      join_any
+      disable fork;
+    end join
+    drop_seq.start(env.vseqr.irq_seqr);
   endtask
 
 endclass
