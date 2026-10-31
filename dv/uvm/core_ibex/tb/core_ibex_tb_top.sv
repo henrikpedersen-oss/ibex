@@ -838,6 +838,10 @@ module core_ibex_tb_top;
   assign rvfi_if.pc_wdata             = dut.rvfi_pc_wdata;
   assign rvfi_if.mem_addr             = dut.rvfi_mem_addr;
   assign rvfi_if.mem_rmask            = dut.rvfi_mem_rmask;
+  // Was never connected: every store reached the RVFI monitor with write mask 0,
+  // hence no address or data, and the RISC-V Sail checker (+riscv_sail_cosim=1, the only user)
+  // reported a mask mismatch on the first store of every test.
+  assign rvfi_if.mem_wmask            = dut.rvfi_mem_wmask;
   assign rvfi_if.mem_rdata            = dut.rvfi_mem_rdata;
   assign rvfi_if.mem_wdata            = dut.rvfi_mem_wdata;
   assign rvfi_if.ext_pre_mip          = dut.rvfi_ext_pre_mip;
