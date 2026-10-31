@@ -1,0 +1,50 @@
+# Copyright lowRISC contributors.
+# Licensed under the Apache License, Version 2.0, see LICENSE for details.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Pull-request tests that need an Ibex configuration other than the default earlgrey. Copied, with
+# their names, from the PR-review testlists (directed_testlist_pr_claude.yaml,
+# directed_testlist_pr_codex.yaml in the PR-review checkout). Each entry's rtl_params keeps it out
+# of the configurations it does not apply to.
+#
+# lowRISC/ibex#2521 (branch-predictor skid buffer), BranchPredictor = 1 only. From the top of the
+# ibex_cheriot_verification checkout (on nyx inside `nix develop .#eda_shell --command ...`):
+#   make uvm-test-xlm IBEX_CONFIG=experimental-branch-predictor TEST=prc_2521_bp_skid_trap,prx_2521_skid_redirect SEED=1 ITERATIONS=1
+# Seen on 2026-10-31 (pr_configs.md at the top of the repository), RTL without the PR's change:
+# prx_2521_skid_redirect fails at seed 1, but on the Spike comparison at its first mret (a stale
+# predicted jump retires), not with its own TEST_FAIL, so its expected_failure message does not
+# match and it grades as an unexpected failure. prc_2521_bp_skid_trap passes at seed 1: whether a
+# beq reaches the skid buffer depends on bus timing; at seeds 2 and 3 SkidClearedOnRedirect
+# (rtl/ibex_if_stage.sv) fires in it. With the change both pass at seeds 1-3 (prx_2521 then
+# grades "expected failure did not occur").
+
+- test: prc_2521_bp_skid_trap
+  desc: >
+    lowRISC/ibex#2521. With the branch predictor on, a trapping instruction (ecall, illegal)
+    followed by a backward, predicted-taken beq, at 4- and 2-byte alignment: the trap handler must
+    run before the beq executes; a skid-buffer entry that survives the trap redirect runs the beq
+    as the handler's first instruction. RISC-V mode. TEST_FAIL with TESTNUM (gp) = case 1-4,
+    10/20 + case, 99 liveness, 0x100|case on an unexpected trap.
+  iterations: 1
+  test_srcs: prc_2521_bp_skid_trap/prc_2521_bp_skid_trap.S
+  config: riscv-tests
+  rtl_params:
+    BranchPredictor: 1
+  sim_opts: "+disable_spurious_dside_responses=1"
+
+- test: prx_2521_skid_redirect
+  desc: >
+    PR 2521: a predicted backward jump immediately after a U-mode ECALL must be
+    discarded on the redirect. If the predictor skid survives, the stale jump
+    executes in M mode and returns failure 2. Returns 0; 1=wrong trap,
+    2=stale predicted instruction executed, 3=negative-control failure.
+  iterations: 1
+  test_srcs: prx_2521_skid_redirect/prx_2521_skid_redirect.S
+  config: riscv-tests
+  rtl_params:
+    BranchPredictor: 1
+  sim_opts: "+disable_spurious_dside_responses=1"
+  expected_failure:
+    ref: PR-2521-RTL-1023
+    reason: The branch-predictor skid retention term in this fork is not invalidated by pc_set_i.
+    message: 'Test failed due to RISCV-DV handshake \(payload=TEST_FAIL\)'

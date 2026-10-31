@@ -1,0 +1,194 @@
+# Copyright lowRISC contributors.
+# Licensed under the Apache License, Version 2.0, see LICENSE for details.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Directed tests written while reviewing the open lowRISC/ibex pull requests (Claude reviewer,
+# 2026-10-31). One test per PR claim, named prc_<PR number>_<what>. Review notes, with what each
+# test shows and how it was seen to fail: review_ibex_pr_claude.md at the top of the repository.
+#
+# Run all of them (from the top of the ibex_cheriot_verification checkout; on nyx inside
+# `nix develop .#eda_shell --command ...`). The default configuration (earlgrey) runs all of them:
+#   make uvm-test-xlm TEST=prc_2044_mtvec_direct,prc_2046_zicond,prc_2296_clz_ctz,prc_2324_zcmp_pop_fault,prc_2324_zcmp_push_pop,prc_2487_dret_sync_exc,prc_2495_mml_off_exec,prc_2513_top_of_memory,prc_2513_pmp_misaligned_store,prc_2513_dcsr_ebreak_bits,prc_2541_wfi_halt_trigger,prc_2552_cheriot_trap_counts,prc_2555_dbg_illegal_scr SEED=1 ITERATIONS=1
+# The #2521 tests need the branch predictor: directed_testlist_pr_configs.yaml.
+#
+# Tests that fail on our RTL because it does not have the PR's change carry expected_failure (same
+# mechanism as directed_testlist_trvk_fault.yaml): they are findings, not tests to weaken.
+# prc_2324_zcmp_push_pop is the exception: it fails on our cosim (bench), not on our RTL.
+
+- test: prc_2044_mtvec_direct
+  desc: >
+    lowRISC/ibex#2044. mtvec.MODE: writing 1 reads back 1, writing the reserved 2 or 3 does not
+    read back a reserved value, BASE[7:2] ignore writes, and writing 0 (direct mode, the PR's
+    feature) reads back 0. Fails with code 5 on RTL without direct mode. RISC-V mode.
+    TEST_FAIL with TESTNUM (gp) 1-5, 0x100|code on an unexpected trap.
+  iterations: 1
+  test_srcs: prc_2044_mtvec_direct/prc_2044_mtvec_direct.S
+  config: riscv-tests
+  sim_opts: "+disable_spurious_dside_responses=1"
+  expected_failure:
+    ref: lowRISC/ibex#2044
+    reason: Our RTL (like upstream master) has no mtvec direct mode in RISC-V mode; MODE reads 1.
+    message: 'Test failed due to RISCV-DV handshake \(payload=TEST_FAIL\)'
+
+- test: prc_2046_zicond
+  desc: >
+    lowRISC/ibex#2046. czero.eqz / czero.nez (Zicond 1.0, encoded with .insn) return rs1 or 0 as
+    the spec says, with operands where the decoder's default ALU operator (SLTU) would give a
+    different answer. Without Zicond the first czero traps as illegal (code 0x101). RISC-V mode.
+    TEST_FAIL with TESTNUM (gp) 1-5, 0x100|code on a trap.
+  iterations: 1
+  test_srcs: prc_2046_zicond/prc_2046_zicond.S
+  config: riscv-tests
+  sim_opts: "+disable_spurious_dside_responses=1"
+  expected_failure:
+    ref: lowRISC/ibex#2046
+    reason: Zicond is not implemented in our RTL (nor upstream master); czero is an illegal instruction.
+    message: 'Test failed due to RISCV-DV handshake \(payload=TEST_FAIL\)'
+
+- test: prc_2296_clz_ctz
+  desc: >
+    lowRISC/ibex#2296. clz, ctz and cpop (Zbb, encoded with .insn) on a table of edge values
+    (0, 1, 0x80000000, all ones, mixed) and on 1<<i, -1<<i and 0xFFFFFFFF>>i for every i: the
+    results the PR's new trailing-zero mask must keep. RISC-V mode, Spike cosim on. TEST_FAIL
+    with TESTNUM (gp) 1000+10n+k (table), 2000/3000/4000+10i+k (patterns), 99 liveness.
+  iterations: 1
+  test_srcs: prc_2296_clz_ctz/prc_2296_clz_ctz.S
+  config: riscv-tests
+  sim_opts: "+disable_spurious_dside_responses=1"
+
+- test: prc_2324_zcmp_pop_fault
+  desc: >
+    lowRISC/ibex#2324. A cm.pop {ra,s0-s1} whose s0 load hits a locked no-access PMP region
+    traps part-way (mcause 5, mepc = the cm.pop, mtval = the slot, sp unchanged); then an
+    ordinary cm.push/cm.pop with the Spike cosim on must still match. A cosim that keeps its
+    expanded-instruction state across the trap (as the PR's does) mismatches at the second
+    cm.pop. RISC-V mode. TEST_FAIL with TESTNUM (gp) 1-10, 0x10000|code on an unexpected trap.
+  iterations: 1
+  test_srcs: prc_2324_zcmp_pop_fault/prc_2324_zcmp_pop_fault.S
+  config: riscv-tests
+  sim_opts: "+disable_spurious_dside_responses=1"
+
+- test: prc_2324_zcmp_push_pop
+  desc: >
+    lowRISC/ibex#2324. cm.push {ra,s0-s1},-16 then cm.pop {ra,s0-s1},16 at another address, twice,
+    with the Spike cosim on; memory, registers and sp checked against the Zc spec. RISC-V mode.
+    TEST_FAIL with TESTNUM (gp) 1-9, 0x10000|code on an unexpected trap. Fails on our bench, not
+    on our RTL: the program's checks 1-4 after the cm.push pass, then our cosim stops at the cm.pop
+    because it never released the cm.push's three deferred store operations (spike_cosim.cc
+    clears deferred_dut_writes only on a trap or when Spike writes more than one GPR; cm.push
+    writes only sp).
+  iterations: 1
+  test_srcs: prc_2324_zcmp_push_pop/prc_2324_zcmp_push_pop.S
+  config: riscv-tests
+  sim_opts: "+disable_spurious_dside_responses=1"
+  expected_failure:
+    ref: prc-review-2324-cosim-push
+    reason: Our Zcmp cosim keeps cm.push's deferred operations, so the next Zcmp instruction at another PC is a false mismatch.
+    message: 'as part of an expanded instruction while 3 operation\(s\) from pc .* were still outstanding'
+
+- test: prc_2495_mml_off_exec
+  desc: >
+    lowRISC/ibex#2495. With mseccfg.MML = 1, RLB = 0: a locked NAPOT execute rule is refused
+    (control, code 10); the PR's claim is that a locked execute entry with A = OFF (code 11) or
+    A = TOR over an empty range (code 12) creates no rule and must be written. Spike cosim on, so
+    a mismatch at the read-back shows what the reference model does. RISC-V mode.
+    TEST_FAIL with TESTNUM (gp) 1-3 set-up, 10-12, 0x100|code on an unexpected trap.
+  iterations: 1
+  test_srcs: prc_2495_mml_off_exec/prc_2495_mml_off_exec.S
+  config: riscv-tests
+  sim_opts: "+disable_spurious_dside_responses=1"
+  expected_failure:
+    ref: lowRISC/ibex#2495
+    reason: Our RTL (and Spike, which agrees at the read-back) suppresses the A = OFF write; fails with code 11 until the PR is taken.
+    message: 'Test failed due to RISCV-DV handshake \(payload=TEST_FAIL\)'
+
+- test: prc_2487_dret_sync_exc
+  desc: >
+    lowRISC/ibex#2487. An illegal instruction traps (sync_exc_seen must be 1 in the handler); the
+    bench halts the core in the handler, the debug code resumes elsewhere with dret. The PR's claim:
+    sync_exc_seen reads 0 after the dret (code 10), and a later ecall is not a double fault (code
+    11). RISC-V mode, Spike cosim on. TEST_FAIL with TESTNUM (gp) 1-4, 10-13, 0x100|code.
+  iterations: 1
+  test_srcs: prc_2487_dret_sync_exc/prc_2487_dret_sync_exc.S
+  config: riscv-tests
+  rtl_test: core_ibex_debug_halt_once_test
+  sim_opts: "+enable_debug_seq=1 +disable_spurious_dside_responses=1"
+  expected_failure:
+    ref: lowRISC/ibex#2487
+    reason: Our RTL (and Spike) keep sync_exc_seen set after dret; fails with code 10 until the PR is taken.
+    message: 'Test failed due to RISCV-DV handshake \(payload=TEST_FAIL\)'
+
+- test: prc_2513_top_of_memory
+  desc: >
+    lowRISC/ibex#2513 top_of_memory_test (unchanged): store and load at 0xfffffffc, the last word
+    of the address space, with the Spike cosim on. TEST_FAIL with TESTNUM 2 on a wrong value or a
+    trap; a cosim memory that stops at 0xffff0000 gives a cosim mismatch.
+  iterations: 1
+  test_srcs: prc_2513_top_of_memory/prc_2513_top_of_memory.S
+  config: riscv-tests
+  sim_opts: "+disable_spurious_dside_responses=1"
+
+- test: prc_2513_pmp_misaligned_store
+  desc: >
+    lowRISC/ibex#2513 pmp_misaligned_store_test (unchanged): a halfword store across the end of a
+    locked read-only TOR region traps with a store access fault and Ibex still writes the high
+    byte; the program reads it back (0xa5) with the Spike cosim on. TEST_FAIL with TESTNUM 2.
+  iterations: 1
+  test_srcs: prc_2513_pmp_misaligned_store/prc_2513_pmp_misaligned_store.S
+  config: riscv-tests
+  sim_opts: "+disable_spurious_dside_responses=1"
+
+- test: prc_2513_dcsr_ebreak_bits
+  desc: >
+    lowRISC/ibex#2513 (DCSR ebreak bits in the cosim). Part A: in debug mode the program sets
+    dcsr.ebreakm only; an M-mode ebreak must enter debug mode (cause EBREAK, dpc at the ebreak).
+    Part B: ebreaku only; an M-mode ebreak must take a breakpoint exception (mcause 3). Spike
+    cosim on. TEST_FAIL with TESTNUM (gp) 1-9.
+  iterations: 1
+  test_srcs: prc_2513_dcsr_ebreak_bits/prc_2513_dcsr_ebreak_bits.S
+  config: riscv-tests
+  rtl_test: core_ibex_debug_halt_once_test
+  sim_opts: "+enable_debug_seq=1 +disable_spurious_dside_responses=1"
+
+
+# ---- BranchPredictor = 1 only: run with IBEX_CONFIG=experimental-branch-predictor ----
+#   make uvm-test-xlm TEST=prc_2521_bp_skid_trap IBEX_CONFIG=experimental-branch-predictor SEED=1 ITERATIONS=1
+
+- test: prc_2541_wfi_halt_trigger
+  desc: >
+    lowRISC/ibex#2541 (the halt case added on 2026-10-30). The bench (core_ibex_debug_wfi_test)
+    halts the core each time it sleeps. First wfi: set an execute trigger on the instruction after
+    the second wfi. Second wfi: dcsr.cause must be HALTREQ (not TRIGGER) with dpc at that
+    instruction; after dret the trigger must fire there (cause TRIGGER). RISC-V mode, Spike cosim
+    on. TEST_FAIL with TESTNUM (gp) 1-9, 0x100|code.
+  iterations: 1
+  test_srcs: prc_2541_wfi_halt_trigger/prc_2541_wfi_halt_trigger.S
+  config: riscv-tests
+  rtl_test: core_ibex_debug_wfi_test
+  rtl_params:
+    PMPEnable: 1
+    DbgTriggerEn: 1
+  sim_opts: "+require_signature_addr=1 +enable_debug_seq=1 +disable_spurious_dside_responses=1"
+
+- test: prc_2552_cheriot_trap_counts
+  desc: >
+    lowRISC/ibex#2552. In CHERIoT mode, minstret does not count a c.jr through an untagged register
+    (mcause 28), a CSpecialR of MSCRATCHC without SR (mcause 28) or a CSpecialR of SCR 0 (mcause 2):
+    each bracketed by two counter reads around a two-instruction handler (difference 3).
+    CHERIoT-Sail cosim on. Returns 0 or the failing code 40-45, 250, 251.
+  iterations: 1
+  test_srcs: prc_2552_cheriot_trap_counts/prc_2552_cheriot_trap_counts.S
+  config: cheriot-c-tests
+  sim_opts: "+enable_cheriot_seq=1 +disable_spurious_dside_responses=1"
+
+- test: prc_2555_dbg_illegal_scr
+  desc: >
+    lowRISC/ibex#2555. CHERIoT mode; the bench halts the core once; in debug mode the program runs
+    CSpecialR of SCR 0 (no such SCR), which must raise an exception to the debug exception address,
+    like an unimplemented CSR. Cosim off (CHERIoT-Sail has no debug mode). Returns 0, 1 (no debug
+    entry), 2 (no trap), 3 (more than one), 250.
+  iterations: 1
+  test_srcs: prc_2555_dbg_illegal_scr/prc_2555_dbg_illegal_scr.S
+  config: cheriot-dv-tests
+  rtl_test: core_ibex_debug_halt_once_test
+  sim_opts: "+cheriot_enable_on_write=80200000 +disable_cosim=1 +disable_spurious_dside_responses=1 +enable_debug_seq=1"
