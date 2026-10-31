@@ -19,6 +19,7 @@ from report_lib.html import output_results_html
 from report_lib.junit_xml import output_run_results_junit_xml
 from report_lib.dvsim_json import output_results_dvsim_json
 from known_gaps import load_known_gaps, match_known_gap
+from expected_failures import grade_expected_failure, load_expected_failures
 
 try:
     # SVG requires python 3.7 and above, for environments that don't have python
@@ -50,6 +51,8 @@ def main() -> int:
         # warnings, kept out of the exit status. Anything that matches no entry stays a failure.
         known_gaps = load_known_gaps()
         known_gap_tests = []
+        expected_failures = load_expected_failures(md.directed_test_data)
+        expected_fail_tests = []
         for f in md.tests_pickle_files:
             try:
                 trr = TestRunResult.construct_from_pickle(f)
@@ -58,8 +61,23 @@ def main() -> int:
                      'FAILED' + (" {T}" if (trr.failure_mode == Failure_Modes.TIMEOUT) else ""))
                 gap = None if trr.passed else \
                     match_known_gap(trr.testname, trr.failure_message, known_gaps)
-                if trr.passed:
+                expected_grade, expected = grade_expected_failure(
+                    trr.testname, trr.passed, trr.failure_message, expected_failures)
+                if expected_grade == 'unexpected_pass':
+                    # A must-fail test going green means its checker is no longer exercising the
+                    # declared condition.  Keep the simulator result intact on disk, but grade the
+                    # regression red with an explicit reason.
+                    trr.passed = False
+                    trr.failure_message = (f"[FAILED]: expected failure did not occur "
+                                           f"({expected['ref']}): {expected['reason']}\n")
+                    summary_dict[f"{trr.testname}.{trr.seed}"] = 'FAILED (must fail, but passed)'
+                    failing_tests.append(trr)
+                elif trr.passed:
                     passing_tests.append(trr)
+                elif expected_grade == 'expected_failure':
+                    summary_dict[f"{trr.testname}.{trr.seed}"] = \
+                        f"PASS (must fail) {expected['ref']}"
+                    expected_fail_tests.append((trr, expected))
                 elif gap is not None:
                     summary_dict[f"{trr.testname}.{trr.seed}"] = f"KNOWN-GAP {gap['id']}"
                     known_gap_tests.append((trr, gap))
@@ -76,6 +94,11 @@ def main() -> int:
         md.regr_log_junit = md.dir_run/'regr_junit.xml'
         md.regr_log_junit_merged = md.dir_run/'regr_junit_merged.xml'
 
+        # Report accepted must-fail runs as passing to machine-readable consumers.  The detailed
+        # text report below retains the original failed TestRunResult and its matching log extract.
+        accepted_expected = [dataclasses.replace(trr, passed=True)
+                             for trr, _ in expected_fail_tests]
+
         #  Write results as junit_xml
         with open(md.regr_log_junit,
                   'w',
@@ -84,7 +107,7 @@ def main() -> int:
                   'w',
                   encoding='UTF-8') as junit_merged_xml:
             # junit keeps known-gap tests as failures: it is a per-test record, not the verdict.
-            output_run_results_junit_xml(passing_tests,
+            output_run_results_junit_xml(passing_tests + accepted_expected,
                                          failing_tests + [t for t, _ in known_gap_tests],
                                          junit_xml,
                                          junit_merged_xml)
@@ -92,10 +115,12 @@ def main() -> int:
         with open(md.regr_log, 'w', encoding='UTF-8') as outfile:
             #  Write results as regr.log (custom logfile format)
             output_results_text(passing_tests, failing_tests, summary_dict,
-                                outfile, known_gap_tests)
+                                outfile, known_gap_tests, expected_fail_tests)
 
-        test_summary_dict = create_test_summary_dict(passing_tests +
-                failing_tests + [t for t, _ in known_gap_tests])
+        # Expected failures are accepted by grading, so the aggregate HTML/JSON count them as
+        # passing.  Their original failed TestRunResult remains in the detailed text and JUnit.
+        test_summary_dict = create_test_summary_dict(passing_tests + failing_tests +
+                [t for t, _ in known_gap_tests] + accepted_expected)
 
         cov_summary_dict = {}
         if md.simulator == "xlm":
@@ -106,7 +131,7 @@ def main() -> int:
 
         html_report_filename = md.dir_run/'report.html'
         with open(html_report_filename, 'w') as outfile:
-            output_results_html(md, passing_tests + failing_tests +
+            output_results_html(md, passing_tests + accepted_expected + failing_tests +
                     [t for t, _ in known_gap_tests],
                     test_summary_dict, cov_summary_dict, outfile)
 
@@ -124,7 +149,8 @@ def main() -> int:
             print('WARNING: svg module not available, skipping SVG results output')
 
         # Print a summary line to the terminal
-        print(gen_summary_line(passing_tests, failing_tests, known_gap_tests))
+        print(gen_summary_line(passing_tests, failing_tests, known_gap_tests,
+                               expected_fail_tests))
 
     # Succeed if no test failed; known-gap warnings do not fail the run (they are counted in the
     # summary line and listed in regr.log).

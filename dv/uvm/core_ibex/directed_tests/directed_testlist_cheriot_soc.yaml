@@ -59,6 +59,10 @@
             -I../../../vendor/riscv-tests/isa/macros/scalar/
             -DHANDOVER_INJECT_FAIL
   sim_opts: "+cheriot_enable_on_write=80200000 +disable_cosim=1 +disable_spurious_dside_responses=1"
+  expected_failure:
+    ref: CHECK-MUTATION-REQ_SOC_07
+    reason: HANDOVER_INJECT_FAIL deliberately reports TEST_FAIL at its first tag check.
+    message: 'Test failed due to RISCV-DV handshake \(payload=TEST_FAIL\)'
 
 # ---- REQ_SOC_06: cheriot_pmp_gated ----
 # On the earlgrey-pmprst build only (config earlgrey-pmp-reset, directed_testlist_earlgrey.yaml):
@@ -90,6 +94,10 @@
   sim_opts: >-
     +cheriot_enable_on_write=10F00 +disable_cosim=1 +disable_spurious_dside_responses=1
     +enable_bad_intg_on_uninit_access=0
+  expected_failure:
+    ref: CHECK-MUTATION-REQ_SOC_06
+    reason: PMP_GATED_INJECT_FAIL deliberately reports TEST_FAIL after expecting one extra fetch.
+    message: 'Test failed due to RISCV-DV handshake \(payload=TEST_FAIL\)'
 
 # ---- REQ_CIB_02: cheriot_rf_intg ----
 # core_ibex_cheriot_rf_intg_test (tests/core_ibex_test_lib.sv): one single-bit register-file fault
@@ -174,3 +182,7 @@
     +cheriot_rf_intg_site=rcap_a +cheriot_rf_intg_inject_fail=1 +disable_cosim=1
     +enable_cheriot_seq=1 +disable_spurious_dside_responses=1
     +revbm_mode=random +revbm_revoke_pct=50 +revbm_heap_base=80000000 +revbm_err_pct=0
+  expected_failure:
+    ref: CHECK-MUTATION-REQ_CIB_02
+    reason: The injected checker inversion must reject the correctly raised RF-integrity alert.
+    message: 'REQ_CIB_02:.*alert_major_internal_o.*\(\+cheriot_rf_intg_inject_fail\)'

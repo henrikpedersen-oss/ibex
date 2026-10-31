@@ -13,6 +13,8 @@ run) and the expected runs of <bench>/cms_regress.list, judges each run, and wri
                  Xcelium error (*E / *F) and no SVA failure in the log
   _corrupt_ run  scoreboard fault injection: the run FAILED, the "CMS_CORRUPT ... corrupted <kind>"
                  line is present, and no CMS_ERROR precedes it (the injection is the first error)
+  @xfail run     document/RTL disagreement: the run FAILED, with the named finding's exact
+                 first-error signature and no simulator/SVA failure. A pass is an XPASS and fails.
 
 Per test, total is the number of seeds cms_regress.list asks for (at least 1) and passing the
 number of those seeds whose kept run is accepted; a seed with no kept run counts as not passing.
@@ -45,12 +47,23 @@ def read_list(path):
         line = line.strip()
         if not line or line.startswith("#"):
             continue
-        name, _test, seeds = line.split()[:3]
-        runs[name] = int(seeds)
+        fields = line.split()
+        name, _test, seeds = fields[:3]
+        xfail = next((x.removeprefix("@xfail=") for x in fields[3:]
+                      if x.startswith("@xfail=")), "")
+        runs[name] = (int(seeds), xfail)
     return runs
 
 
-def judge(name, log):
+XFAIL_SIGNATURES = {
+    "F32_MUBI": ("REQ_CMS_01:", "rtl_tickets F32"),
+    "F33_LOCKSTEP": ("fatal_fault not raised within 256 cycles", "expected", "raised"),
+    "F33_TRVK": ("undetected:", "fatal_fault stayed low", "REQ_CMS_02"),
+    "REQ_CMS_07": ("the subsystem added 1 cycle(s)", "REQ_CMS_07 allows 0..0"),
+}
+
+
+def judge(name, log, xfail=""):
     """Return (accepted, reason) for one kept run."""
     m = None
     for m in RESULT.finditer(log):
@@ -71,6 +84,21 @@ def judge(name, log):
         if first_err and first_err.start() < corrupt.start():
             return False, "a CMS_ERROR precedes the injection"
         return True, f"corrupted {kind}, {errors} error(s) after it"
+    if xfail:
+        tool = TOOL_ERR.search(log)
+        first = re.search(r"^CMS_ERROR.*$", log, re.M)
+        signature = XFAIL_SIGNATURES.get(xfail)
+        if status != "FAIL" or not errors:
+            return False, f"XPASS: expected {xfail}, got {status} with {errors} error(s)"
+        if tool:
+            return False, f"simulator error, not {xfail}: {tool.group(0).strip()[:100]}"
+        if not first or not signature or not all(s in first.group(0) for s in signature):
+            return False, f"wrong first error for {xfail}: " + (first.group(0)[:120] if first else "none")
+        checked = stats.get("core", 0) + stats.get("revbm", 0) + stats.get("csr", 0)
+        if checked == 0 or stats.get("backdoor_compares", 0) == 0:
+            return False, f"inactive {xfail}: {checked} transactions, " \
+                          f"{stats.get('backdoor_compares', 0)} meta SRAM compares"
+        return True, f"XFAIL {xfail}: {first.group(0)[:120]}"
     if status != "PASS" or errors:
         first = re.search(r"^CMS_ERROR.*$", log, re.M)
         return False, f"FAIL, {errors} error(s)" + (f": {first.group(0)[:120]}" if first else "")
@@ -115,13 +143,14 @@ def main():
         if not log.exists():
             ok, why = False, f"no kept log {log.name}"
         else:
-            ok, why = judge(name, log.read_text(errors="replace"))
+            xfail = expected.get(name, (0, ""))[1]
+            ok, why = judge(name, log.read_text(errors="replace"), xfail)
         print(f"  {'ACCEPT' if ok else 'REJECT'}  {name:32s} seed {seed:<4d} {res.get('date', '')}  {why}")
         verdict[(name, seed)] = ok
 
     results = []
     for name in sorted(in_plan | set(expected)):
-        seeds = range(args.seed_base, args.seed_base + max(1, expected.get(name, 1)))
+        seeds = range(args.seed_base, args.seed_base + max(1, expected.get(name, (1, ""))[0]))
         passing = sum(1 for s in seeds if verdict.get((name, s)) is True)
         missing = [s for s in seeds if (name, s) not in verdict]
         if missing:

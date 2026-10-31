@@ -15,18 +15,22 @@ def box_comment(line: str) -> str:
 
 
 def gen_summary_line(passing_tests: List[TestRunResult], failing_tests:
-                     List[TestRunResult], known_gap_tests=()) -> str:
+                     List[TestRunResult], known_gap_tests=(), expected_fail_tests=()) -> str:
     '''Generate a string summarising test results.
 
     Known-gap warnings (failures waived by waivers/known_gaps.yaml) are counted in the total and
     appended as ", K KNOWN-GAP WARNINGS", so "N PASSED, M FAILED" keeps its form for parsers.'''
-    total_tests = len(passing_tests) + len(failing_tests) + len(known_gap_tests)
-    pass_pct = (len(passing_tests) / total_tests) * 100 if total_tests else 0.0
+    total_tests = (len(passing_tests) + len(failing_tests) + len(known_gap_tests) +
+                   len(expected_fail_tests))
+    accepted = len(passing_tests) + len(expected_fail_tests)
+    pass_pct = (accepted / total_tests) * 100 if total_tests else 0.0
 
     line = f'{pass_pct:0.2f}% PASS {len(passing_tests)} PASSED, ' \
            f'{len(failing_tests)} FAILED'
     if known_gap_tests:
         line += f', {len(known_gap_tests)} KNOWN-GAP WARNINGS'
+    if expected_fail_tests:
+        line += f', {len(expected_fail_tests)} PASS (must fail)'
     return line
 
 
@@ -34,11 +38,12 @@ def output_results_text(passing_tests: List[TestRunResult],
                         failing_tests: List[TestRunResult],
                         summary_dict: Dict[str, str],
                         report_file: TextIO,
-                        known_gap_tests=()):
+                        known_gap_tests=(), expected_fail_tests=()):
     '''Write results in text form to dest'''
 
     # Print a summary line right at the top of the file
-    report_file.write(gen_summary_line(passing_tests, failing_tests, known_gap_tests))
+    report_file.write(gen_summary_line(passing_tests, failing_tests, known_gap_tests,
+                                       expected_fail_tests))
     report_file.write('\n')
     # Print a short TEST.SEED   PASS/FAILED summary
     summary_yaml = io.StringIO()
@@ -66,6 +71,12 @@ def output_results_text(passing_tests: List[TestRunResult],
         print('', file=report_file)
         for trr, gap in known_gap_tests:
             print(f"[KNOWN-GAP {gap['id']}]", file=report_file)
+            print(gen_test_run_result_text(trr), file=report_file)
+
+    if expected_fail_tests:
+        print('\n'+box_comment('Passing tests that must fail'), file=report_file)
+        for trr, expected in expected_fail_tests:
+            print(f"[PASS (must fail) {expected['ref']}] {expected['reason']}", file=report_file)
             print(gen_test_run_result_text(trr), file=report_file)
 
     print('\n'+box_comment('Details of passing tests'), file=report_file)

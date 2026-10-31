@@ -69,6 +69,23 @@ class DConfig(pydantic.BaseModel):  # noqa
         return make_valid_pathlib_path(cls, v)
 
 
+class ExpectedFailure(pydantic.BaseModel):
+    """A directed test that is useful only when it fails in one specific way."""
+
+    # A verification-spec gap, RTL ticket, or other stable tracker reference.
+    ref: str
+    reason: str
+    # Python regular expression searched in check_logs.py's failure_message.
+    message: str
+
+    @pydantic.field_validator('ref', 'reason', 'message')
+    @classmethod
+    def _not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError('expected-failure fields must not be blank')
+        return v
+
+
 class DTest(DConfig):  # noqa
     """Represent a entry for a single directed test.
 
@@ -96,6 +113,10 @@ class DTest(DConfig):  # noqa
     # scripts/compile_tb.py). metadata.py leaves it out of all_directed on a normal build and
     # refuses it by name there, since it could only fail.
     requires_dm: bool = False
+    # If present, a matching failure is graded "PASS (must fail)".  A pass or a failure whose
+    # log extract does not match `message` is a regression failure.  This declaration lives with
+    # the test so the simulator configuration and grading cannot drift into separate name lists.
+    expected_failure: Optional[ExpectedFailure] = None
 
     ##################################
     # DTest.VALIDATORS

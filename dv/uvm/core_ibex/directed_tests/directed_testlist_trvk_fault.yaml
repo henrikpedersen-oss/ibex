@@ -27,6 +27,10 @@
     +enable_cheriot_seq=1 +disable_spurious_dside_responses=1
     +revbm_mode=random +revbm_revoke_pct=50 +revbm_heap_base=80000000 +revbm_err_pct=0
     +revbm_gnt_delay_max=3 +revbm_rsp_delay_max=3
+  expected_failure: &trvk_expected_failure
+    ref: GAP-RTL-TRVK-LOAD-FILTER
+    reason: EG2 REQ_CIB_03 is unmet because ibex_trvk is outside lockstep and has no local protection.
+    message: 'TRVK fault at .* undetected:.*alert_major_internal_o stayed low.*REQ_CIB_03'
 
 - test: cheriot_trvk_fault_tag_out
   desc: >
@@ -41,6 +45,7 @@
     +enable_cheriot_seq=1 +disable_spurious_dside_responses=1
     +revbm_mode=random +revbm_revoke_pct=50 +revbm_heap_base=80000000 +revbm_err_pct=0
     +revbm_gnt_delay_max=3 +revbm_rsp_delay_max=3
+  expected_failure: *trvk_expected_failure
 
 - test: cheriot_trvk_fault_bit_select
   desc: >
@@ -56,6 +61,7 @@
     +enable_cheriot_seq=1 +disable_spurious_dside_responses=1
     +revbm_mode=random +revbm_revoke_pct=50 +revbm_heap_base=80000000 +revbm_err_pct=0
     +revbm_gnt_delay_max=3 +revbm_rsp_delay_max=3
+  expected_failure: *trvk_expected_failure
 
 - test: cheriot_trvk_fault_req_required
   desc: >
@@ -71,6 +77,7 @@
     +enable_cheriot_seq=1 +disable_spurious_dside_responses=1
     +revbm_mode=random +revbm_revoke_pct=100 +revbm_heap_base=80000000 +revbm_err_pct=0
     +revbm_gnt_delay_max=3 +revbm_rsp_delay_max=3
+  expected_failure: *trvk_expected_failure
 
 - test: cheriot_trvk_fault_out_of_range
   desc: >
@@ -85,6 +92,7 @@
     +enable_cheriot_seq=1 +disable_spurious_dside_responses=1
     +revbm_mode=random +revbm_revoke_pct=100 +revbm_heap_base=80000000 +revbm_err_pct=0
     +revbm_gnt_delay_max=3 +revbm_rsp_delay_max=3
+  expected_failure: *trvk_expected_failure
 
 - test: cheriot_trvk_fault_sealing
   desc: >
@@ -100,6 +108,7 @@
     +enable_cheriot_seq=1 +disable_spurious_dside_responses=1
     +revbm_mode=random +revbm_revoke_pct=100 +revbm_heap_base=80000000 +revbm_err_pct=0
     +revbm_gnt_delay_max=3 +revbm_rsp_delay_max=3
+  expected_failure: *trvk_expected_failure
 
 - test: cheriot_trvk_fault_align
   desc: >
@@ -115,3 +124,4 @@
     +enable_cheriot_seq=1 +disable_spurious_dside_responses=1
     +revbm_mode=random +revbm_revoke_pct=100 +revbm_heap_base=80000000 +revbm_err_pct=0
     +revbm_gnt_delay_max=3 +revbm_rsp_delay_max=3
+  expected_failure: *trvk_expected_failure

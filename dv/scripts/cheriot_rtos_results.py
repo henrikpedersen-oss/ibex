@@ -32,6 +32,7 @@ import sys
 from pathlib import Path
 
 import hjson
+import yaml
 
 # The build tag every log carries (<target>.<build>.uart.log). The CHERIoT RTOS test SoC
 # (ibex/dv/cheriot-rtos-test-suite) has one build, with the CHERIoT memory subsystem; the Sonata
@@ -96,6 +97,8 @@ PERF_WORKLOADS = ("hash_feed_core", "hash_feed_dma")
 PERF_BUDGET_CYCLES = 15_000_000
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
+UART_FAILURE = re.compile(
+    r"Invariant failure|One or more tests failed|Test runner: .* failed|: FAIL[: ]|Test\(s\) Failed")
 RTOS_LINE = re.compile(r"^Test runner: (?P<name>.+?) (?P<verdict>finished in \d+ cycles|failed)$")
 REVOCATION_LINE = re.compile(r"^Revocation barrier: (?P<verdict>PASS|FAIL) (?P<what>phase [123]|sweep|random|base|preempt|race|progress)\b")
 # "PASS race" and "PASS progress" are the sweep_race and sweep_progress tests; the others keep their word.
@@ -111,6 +114,25 @@ DBG_HOST_TESTS = {
 }
 JULIET_LINE = re.compile(r"^.*?: (?P<verdict>PASS|FAIL): CWE-(?P<cwe>\d+)\b")
 CHERI_C_LINE = re.compile(r"^.*?: (?P<verdict>PASS|FAIL): clang_purecap_(?P<test>\w+)\b")
+EXPECTED_FAILURES = (Path(__file__).resolve().parent.parent /
+                     "cheriot-rtos-test-suite/data/expected_failures.yaml")
+
+
+def expected_failure_verdict(entry, log):
+    """True only when one saved log has exactly its declared failure and required passes."""
+    lines = [ANSI.sub("", raw).strip() for raw in log.read_text(errors="replace").splitlines()]
+    observed = [line for line in lines if re.search(entry["failure"], line)]
+    if len(observed) != 1:
+        return False, f"expected one {entry['id']} failure, found {len(observed)}"
+    for pattern in entry["required_passes"]:
+        found = sum(1 for line in lines if re.search(pattern, line))
+        if found != 1:
+            return False, f"required one /{pattern}/ PASS, found {found}"
+    allowed = set(observed + ["Debug host: Test(s) Failed"])
+    unexpected = [line for line in lines if UART_FAILURE.search(line) and line not in allowed]
+    if unexpected:
+        return False, f"unexpected failure: {unexpected[0]}"
+    return True, entry["reason"]
 
 
 def parse_log(path):
@@ -217,6 +239,7 @@ def main():
     args = ap.parse_args()
 
     required = required_builds(hjson.loads(args.testplan.read_text()))
+    expected_failures = yaml.safe_load(EXPECTED_FAILURES.read_text()) or []
 
     # verdict[(test, build)] = True / False; False sticks.
     verdict = {}
@@ -239,6 +262,30 @@ def main():
                 continue
             key = (test, build)
             verdict[key] = verdict.get(key, True) and passed
+
+    # A declared must-fail test is accepted only when its exact failure is present.  This is done
+    # after ordinary parsing so an unexpected pass cannot quietly become a report PASS.
+    logs_by_target_build = {}
+    for log in logs:
+        parts = log.name[: -len(".uart.log")].rsplit(".", 1)
+        if len(parts) == 2 and parts[1] in BUILDS:
+            logs_by_target_build[(parts[0], parts[1])] = log
+    for entry in expected_failures:
+        for field in ("id", "target", "test", "tracker", "reason", "failure",
+                      "required_passes"):
+            if not entry.get(field):
+                raise RuntimeError(f"{EXPECTED_FAILURES}: entry has no {field}: {entry}")
+        if entry["test"] not in required:
+            raise RuntimeError(f"{EXPECTED_FAILURES}: expected-failure test {entry['test']!r} "
+                               "is absent from the testplan")
+        for build in required.get(entry["test"], set()):
+            log = logs_by_target_build.get((entry["target"], build))
+            if log is None:
+                continue
+            passed, reason = expected_failure_verdict(entry, log)
+            verdict[(entry["test"], build)] = passed
+            label = "PASS (must fail)" if passed else "FAIL (must fail mismatch)"
+            print(f"{label} {entry['test']}: {entry['id']} -- {reason}")
 
     # Sim-only targets (no UART verdict lines): sim_only_verdict().
     for log in sorted(args.logs.glob("*.uart.log")):
