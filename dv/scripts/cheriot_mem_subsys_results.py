@@ -56,9 +56,9 @@ def read_list(path):
 
 
 XFAIL_SIGNATURES = {
-    "F32_MUBI": ("REQ_CMS_01:", "rtl_tickets F32"),
-    "F33_LOCKSTEP": ("fatal_fault not raised within 256 cycles", "expected", "raised"),
-    "F33_TRVK": ("undetected:", "fatal_fault stayed low", "REQ_CMS_02"),
+    "TAG_SIDEBAND_NOT_MUBI4": ("REQ_CMS_01:", "TODO(#31066)"),
+    "NO_LOCKSTEP_COPY": ("fatal_fault not raised within 256 cycles", "expected", "raised"),
+    "TRVK_FAULT_UNDETECTED": ("undetected:", "fatal_fault stayed low", "REQ_CMS_02"),
     "REQ_CMS_07": ("the subsystem added 1 cycle(s)", "REQ_CMS_07 allows 0..0"),
 }
 
