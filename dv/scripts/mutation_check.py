@@ -68,8 +68,8 @@ RUNS = [
                                                 ("revocation_sweep_race", "cheriot_mem")]),
     # Not juliet_cwe190_int_overflow: its wrapped cursor is unrepresentable, so the tag is
     # cleared and the store faults on the tag before it reaches the bounds check.
-    ("bounds_off", "cheriot-rtos-juliet-xlm", [("juliet_cwe121_bof", "cheriot_mem"),
-                                         ("juliet_cwe122_heap_bof", "cheriot_mem")]),
+    ("bounds_off", "cheriot-rtos-juliet-xlm", [("rtos_juliet_cwe121_bof", "cheriot_mem"),
+                                         ("rtos_juliet_cwe122_heap_bof", "cheriot_mem")]),
     ("barrier_none", "cheriot-rtos-suite-tests-xlm", [("rtos_test_allocator", "cheriot_mem")]),
     # The debug-access gate on the debug module's system bus access stuck open.
     ("dbg_lock_open", "cheriot-rtos-dbg-host-xlm", [("bus_master_dbg_host_locked", "cheriot_mem")]),

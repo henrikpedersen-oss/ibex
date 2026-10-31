@@ -65,11 +65,11 @@ RTOS_TESTS = {
 
 # examples/juliet_cwe/juliet_orchestrator.cc reports "CWE-nnn".
 JULIET_TESTS = {
-    "121": "juliet_cwe121_bof",
-    "122": "juliet_cwe122_heap_bof",
-    "190": "juliet_cwe190_int_overflow",
-    "415": "juliet_cwe415_double_free",
-    "416": "juliet_cwe416_uaf",
+    "121": "rtos_juliet_cwe121_bof",
+    "122": "rtos_juliet_cwe122_heap_bof",
+    "190": "rtos_juliet_cwe190_int_overflow",
+    "415": "rtos_juliet_cwe415_double_free",
+    "416": "rtos_juliet_cwe416_uaf",
 }
 
 # Targets with no UART verdict lines of their own (cheriot-rtos tests.extra): CHERIOT_RTOS_RESULT target
