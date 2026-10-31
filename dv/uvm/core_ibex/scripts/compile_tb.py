@@ -150,6 +150,14 @@ def _main() -> int:
         # runs on that build.
         boot_addr = '0001_0000' if get_config(md.ibex_config).pmp_rst_earlgrey else '8000_0000'
 
+        # A configuration without the CHERIoT block (BaseIsa other than BaseIsaRV32IorCHERIoT:
+        # small, maxperf*, experimental-branch-predictor) compiles out the functional coverage
+        # that samples it (fcov/core_ibex_fcov_if.sv, which checks the define against BaseIsa).
+        # CHERIoT configurations get no define and build as before.
+        no_cheriot_opts = ('' if get_config(md.ibex_config).base_isa ==
+                           'ibex_pkg::BaseIsaRV32IorCHERIoT'
+                           else ' +define+IBEX_DV_NO_CHERIOT ')
+
         # Populate the entire set of variables to substitute in the templated
         # compilation command, including the compiler flags for the ISS.
         subst_vars_dict = {
@@ -167,6 +175,7 @@ def _main() -> int:
                 # DEBUG_MODE_HALT_ADDR / DEBUG_MODE_EXCEPTION_ADDR (and, for DM=1, the
                 # debug module itself): see debug_mode_opts above.
                 debug_mode_opts + \
+                no_cheriot_opts + \
                 # Extra compile options for this build, e.g.
                 # IBEX_EXTRA_CMP_OPTS="+define+CHERIOT_FCOV_LARGE_CROSSES" (root Makefile
                 # FCOV_LARGE_CROSSES=1). The TB build stamp does not see it: rebuild after changing.

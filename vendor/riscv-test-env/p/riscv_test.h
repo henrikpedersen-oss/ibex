@@ -98,6 +98,13 @@
   li x30, 0;                                                            \
   li x31, 0;
 
+/* Ibex without the PMP (IBEX_PMP_ENABLE=0, set from the build's configuration by the UVM bench's
+   scripts/compile_test.py): pmpaddr0/pmpcfg0 are illegal there, and the trap cannot skip them as
+   intended below because Ibex's mtvec is vectored with a 256-byte aligned base, so the trap lands
+   at the base, not at 1f. Leave the PMP alone instead. */
+#if defined(IBEX_PMP_ENABLE) && !IBEX_PMP_ENABLE
+#define INIT_PMP
+#else
 #define INIT_PMP                                                        \
   la t0, 1f;                                                            \
   csrw mtvec, t0;                                                       \
@@ -108,6 +115,7 @@
   csrw pmpcfg0, t0;                                                     \
   .align 2;                                                             \
 1:
+#endif
 
 #define INIT_SATP                                                      \
   la t0, 1f;                                                            \

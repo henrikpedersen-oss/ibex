@@ -18,7 +18,10 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
     // ibex_core and the data bus and ibex_core has the cheriot_disable_err alert latch; with
     // BaseIsaRV32I neither exists. The bind should pass ibex_core's BaseIsa through; the default
     // is the configuration this bench builds (opentitan, TestRIG).
-    parameter base_isa_e BaseIsa = BaseIsaRV32IorCHERIoT
+    parameter base_isa_e BaseIsa = BaseIsaRV32IorCHERIoT,
+    // ibex_id_stage names the instruction kill only with the writeback stage
+    // (gen_stall_mem.instr_kill); the bind passes ibex_core's value through.
+    parameter bit WritebackStage = 1'b1
 ) (
   input clk_i,
   input rst_ni,
@@ -55,6 +58,22 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
   import uvm_pkg::*;
 
   localparam bit CheriotIsa = (BaseIsa == BaseIsaRV32IorCHERIoT);
+
+  // Most CHERIoT covergroups below sample the CHERIoT execute block (ibex_core g_cheriot_ex) and
+  // other scopes that exist only with BaseIsaRV32IorCHERIoT. A covergroup cannot sit in a generate
+  // block without moving its instance and type out of this interface's scope (the coverage reports
+  // and waivers name them there), so those groups are compiled out by a define instead:
+  // scripts/compile_tb.py sets IBEX_DV_NO_CHERIOT for a configuration whose BaseIsa is not
+  // BaseIsaRV32IorCHERIoT. CHERIoT configurations build without it, exactly as before. The define
+  // and the parameter must agree: without the define, a non-CHERIoT build stops at elaboration on
+  // the missing scopes; with it, a CHERIoT build would silently lose its CHERIoT coverage, hence
+  // the check.
+`ifdef IBEX_DV_NO_CHERIOT
+  if (CheriotIsa) begin : g_no_cheriot_define_check
+    $fatal(1, "IBEX_DV_NO_CHERIOT is set for a CHERIoT configuration (BaseIsaRV32IorCHERIoT): ",
+           "the CHERIoT covergroups would be compiled out");
+  end
+`endif
   // cp_obi_handshake value {0, req, gnt} that this configuration cannot produce: gnt without req
   // with TRVK in front of the core, else the 3-bit value no bin lists (see the coverpoint)
   localparam logic [2:0] GntNoReqUnreach = CheriotIsa ? 3'b001 : 3'b100;
@@ -194,6 +213,16 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
   assign fcov_id_exc_int = {id_stage_i.controller_i.handle_irq,
                              id_stage_i.controller_i.special_req_pc_change};
 
+  // The instruction in ID/EX is killed instead of executing. ibex_id_stage has the signal only with
+  // the writeback stage; without it nothing in writeback can kill, which leaves the fetch error and
+  // the controller not running (ibex_id_stage.sv gen_no_stall_mem, instr_executing_spec).
+  logic fcov_id_instr_kill;
+  if (WritebackStage) begin : g_fcov_id_kill_wb
+    assign fcov_id_instr_kill = id_stage_i.gen_stall_mem.instr_kill;
+  end else begin : g_fcov_id_kill_no_wb
+    assign fcov_id_instr_kill = id_stage_i.instr_fetch_err_i | ~id_stage_i.controller_run;
+  end
+
   always_ff @(posedge clk_i or negedge rst_ni) begin
     if (!rst_ni) begin
       wb_instr_category   <= InstrCategoryNone;
@@ -201,7 +230,7 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
       fcov_id_exc_int_q   <= 2'b0;
     end else begin
       wb_instr_category <= id_instr_category;
-      if (id_stage_i.instr_done | id_stage_i.gen_stall_mem.instr_kill) begin
+      if (id_stage_i.instr_done | fcov_id_instr_kill) begin
         id_instr_category_q <= id_instr_category;
         fcov_id_exc_int_q   <= fcov_id_exc_int;
       end
@@ -1296,6 +1325,11 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
 
   // ---- cheriot_operator shorthand (26-bit one-hot, ibex_core internal) ----
   // Accessed hierarchically; all CGET_* fold into CGET_FIELD (bit 0).
+
+  // From here to cheriot_cfi_detail_cg, and from cheri_spatial_gap_cg to the end, CHERIoT
+  // configurations only (IBEX_DV_NO_CHERIOT, see CheriotIsa above). cheriot_obi_backpressure_cg
+  // between them is built in every configuration.
+`ifndef IBEX_DV_NO_CHERIOT
 
   // ---- fcov signal assignments ----
 
@@ -2927,6 +2961,7 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
   end
 
   `DV_FCOV_INSTANTIATE_CG(cheriot_cfi_detail_cg, en_cheri_cfi_cov)
+`endif  // IBEX_DV_NO_CHERIOT
 
   // OBI grant backpressure crossed with the LSU state machine.
   //
@@ -3054,6 +3089,9 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
   end
 
   `DV_FCOV_INSTANTIATE_CG(cheriot_obi_backpressure_cg, en_cheri_obi_cov)
+
+  // CHERIoT configurations only, to the end of the interface (see CheriotIsa above).
+`ifndef IBEX_DV_NO_CHERIOT
 
   // REQ_BND_07: an instruction whose PC is 2 below PCC.Top. A 16-bit instruction there has both
   // its bytes in bounds and executes; a 32-bit one straddles Top and must take a bounds violation
@@ -3730,6 +3768,7 @@ interface core_ibex_fcov_if import ibex_pkg::*, ibex_cheriot_pkg::*; #(
   end
 
   `DV_FCOV_INSTANTIATE_CG(cheri_illegal_insn_cg, en_cheri_illegal_insn_cov)
+`endif  // IBEX_DV_NO_CHERIOT
 
 endinterface
 

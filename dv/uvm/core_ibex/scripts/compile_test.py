@@ -169,12 +169,15 @@ def get_directed_compile_cmds(md: RegressionMetadata, trr: TestRunResult) -> Lis
     # -DIBEX_MHPM_COUNTER_NUM / -DIBEX_DBG_HW_BREAK_NUM: the build's MHPMCounterNum and
     # DbgHwBreakNum (ibex_configs.yaml), so a test checks the counters and triggers the core it runs
     # on has (earlgrey: 2 and 4; opentitan: 10 and 1) instead of assuming one configuration.
+    # -DIBEX_PMP_ENABLE: the build's PMPEnable; without the PMP the riscv-tests start-up code
+    # leaves the PMP CSRs alone (vendor/riscv-test-env/p/riscv_test.h INIT_PMP).
     cfg = get_config(md.ibex_config)
     riscv_gcc_cmd = " ".join([env.get('RISCV_GCC'),
                               trr.directed_data.get('gcc_opts'),
                               f"-DDV_SEED={trr.seed}",
                               f"-DIBEX_MHPM_COUNTER_NUM={cfg.mhpm_counter_num}",
                               f"-DIBEX_DBG_HW_BREAK_NUM={cfg.dbg_hw_break_num}",
+                              f"-DIBEX_PMP_ENABLE={int(cfg.pmp_enable)}",
                               f"-I{trr.directed_data.get('includes')}",
                               f"-T{trr.directed_data.get('ld_script')}",
                               f"-o {trr.objectfile}",

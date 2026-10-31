@@ -7,7 +7,8 @@ module core_ibex_fcov_bind;
   #(.ICache(ICache),
     .FetchOutputReg(FetchOutputReg),
     .BranchTargetALU(BranchTargetALU),
-    .BaseIsa(BaseIsa)
+    .BaseIsa(BaseIsa),
+    .WritebackStage(WritebackStage)
   ) u_fcov_bind (
     .*
   );

@@ -37,6 +37,23 @@
 # NOTE: single sim_opts key per test -- YAML silently keeps the last duplicate,
 # so append to the existing string rather than adding a second sim_opts line.
 
+# Configurations without the PMP (small, maxperf, experimental-branch-predictor)
+# ------------------------------------------------------------------------------
+# Every config below asks for PMPEnable = 1 (riscv-tests has it from upstream), so
+# ibex_cmd.filter_tests_by_config drops all of their tests in a configuration
+# without the PMP. A test that does not need the PMP says so with its own
+# rtl_params, which replace its config's:
+#   rtl_params:
+#     PMPEnable: [0, 1]
+# Without the PMP the riscv-tests start-up code leaves the PMP CSRs alone
+# (riscv-test-env p/riscv_test.h INIT_PMP, IBEX_PMP_ENABLE from
+# scripts/compile_test.py): its own way of skipping them, a trap to the address
+# after the writes, does not work on Ibex, whose mtvec is vectored with a 256-byte
+# aligned base.
+# Marked so far, plain RISC-V tests that pass in small, opentitan and
+# experimental-branch-predictor: lw, sw, lh-misaligned, sw-misaligned, illegal,
+# csr, mul, rvc.
+
 ##########################################################
 
 - config: riscv-tests
@@ -1114,6 +1131,8 @@
   iterations: 1
   test_srcs: ../../../../vendor/riscv-tests/isa/rv32mi/csr.S
   config: riscv-tests
+  rtl_params:
+    PMPEnable: [0, 1]
 
 - test: illegal
   desc: >
@@ -1121,6 +1140,8 @@
   iterations: 1
   test_srcs: ../../../../vendor/riscv-tests/isa/rv32mi/illegal.S
   config: riscv-tests
+  rtl_params:
+    PMPEnable: [0, 1]
 
 - test: lh-misaligned
   desc: >
@@ -1128,6 +1149,8 @@
   iterations: 1
   test_srcs: ../../../../vendor/riscv-tests/isa/rv32mi/lh-misaligned.S
   config: riscv-tests
+  rtl_params:
+    PMPEnable: [0, 1]
 
 - test: lw-misaligned
   desc: >
@@ -1191,6 +1214,8 @@
   iterations: 1
   test_srcs: ../../../../vendor/riscv-tests/isa/rv32mi/sw-misaligned.S
   config: riscv-tests
+  rtl_params:
+    PMPEnable: [0, 1]
 
 - test: zicntr
   desc: >
@@ -1205,6 +1230,8 @@
   iterations: 1
   test_srcs: ../../../../vendor/riscv-tests/isa/rv32uc/rvc.S
   config: riscv-tests
+  rtl_params:
+    PMPEnable: [0, 1]
 
 - test: div
   desc: >
@@ -1226,6 +1253,8 @@
   iterations: 1
   test_srcs: ../../../../vendor/riscv-tests/isa/rv32um/mul.S
   config: riscv-tests
+  rtl_params:
+    PMPEnable: [0, 1]
 
 - test: mulh
   desc: >
@@ -1401,6 +1430,8 @@
   iterations: 1
   test_srcs: ../../../../vendor/riscv-tests/isa/rv32ui/lw.S
   config: riscv-tests
+  rtl_params:
+    PMPEnable: [0, 1]
 
 - test: or
   desc: >
@@ -1520,6 +1551,8 @@
   iterations: 1
   test_srcs: ../../../../vendor/riscv-tests/isa/rv32ui/sw.S
   config: riscv-tests
+  rtl_params:
+    PMPEnable: [0, 1]
 
 - test: xor
   desc: >
