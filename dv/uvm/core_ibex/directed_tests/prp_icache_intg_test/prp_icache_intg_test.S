@@ -8,7 +8,7 @@
 # the ICache on (cpuctrlsts.icache_enable) and a loop that runs from the cache
 # long enough for the bench to corrupt one tag or data read on a cache lookup.
 #
-# The bench (core_ibex_prp_icache_intg_test) flips one bit of a tag or data way
+# The bench (core_ibex_icache_intg_test) flips one bit of a tag or data way
 # read and checks the minor alert of the main core and of the lockstep shadow
 # core. A corrupted read is an ECC error: the cache treats it as a miss and
 # refetches, so the program must still compute the right result.

@@ -55,14 +55,15 @@
   sim_opts: "+disable_spurious_dside_responses=1"
 
 # lowRISC/ibex#2536: the alert checks of the ICache integrity test. Upstream changes
-# core_ibex_icache_intg_test, used by riscv_icache_intg_test on a riscv-dv random program. Here
-# the PR's version is a separate class (core_ibex_prp_icache_intg_test), so riscv_icache_intg_test
-# keeps running our own version, and the program is a directed one that switches the ICache on.
+# core_ibex_icache_intg_test, used by riscv_icache_intg_test on a riscv-dv random program. That
+# class now has the PR's checks here too (decision #59), so riscv_icache_intg_test runs them on
+# the random program and this test runs the same class on a directed program that switches the
+# ICache on.
 
 - test: prp_icache_intg_test
   desc: >
-    lowRISC/ibex#2536 (riscv_icache_intg_test with the PR's bench). The program switches the
-    ICache on and runs a loop from it; the bench flips one bit of one ICache tag or data way read
+    lowRISC/ibex#2536 (riscv_icache_intg_test's bench on a directed program). The program
+    switches the ICache on and runs a loop from it; the bench flips one bit of one ICache tag or data way read
     on a cache lookup and checks the minor alert of the main core at the next rising edge and of
     the lockstep shadow core LockstepOffset cycles later. Fails (UVM_FATAL from the bench) on a
     wrong alert, or if the program ends before the check. TEST_FAIL with TESTNUM (gp) 2 = ICache
@@ -70,7 +71,7 @@
   iterations: 1
   test_srcs: prp_icache_intg_test/prp_icache_intg_test.S
   config: riscv-tests
-  rtl_test: core_ibex_prp_icache_intg_test
+  rtl_test: core_ibex_icache_intg_test
   rtl_params:
     PMPEnable: 1
     SecureIbex: 1
