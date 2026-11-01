@@ -174,12 +174,13 @@ def add_cov_to_summary(metric_name: str, metric_data: Dict[str, Dict[str, int]],
        cov_summary_dict[metric_name] -- to None when the xcelium report has no
        data for this metric (e.g. a short single-test run) -- so the HTML
        template's cov_summary[metric_name] lookup can't KeyError; pct_str/
-       pct_style render None as 'n/a'.
+       pct_style render None as 'n/a'. A metric with nothing to cover (total 0) is
+       unavailable too, not a division by zero (lowRISC/ibex#2503).
     '''
     cov_summary_dict[metric_name] = None
     if (f'{metric_name}-covered' in metric_data):
-        cov_pct = (metric_data[f'{metric_name}-covered']['covered'] /
-            metric_data[f'{metric_name}-covered']['total'])
+        counts = metric_data[f'{metric_name}-covered']
+        cov_pct = counts['covered'] / counts['total'] if counts['total'] else None
 
         cov_summary_dict[metric_name] = cov_pct
 
