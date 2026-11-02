@@ -855,6 +855,11 @@ module ibex_if_stage import ibex_pkg::*; import ibex_cheriot_pkg::*; #(
 
     `ASSERT(NoPredictSkid, instr_skid_valid_q |-> ~predict_branch_taken)
     `ASSERT(NoPredictIllegal, predict_branch_taken |-> ~illegal_c_insn)
+    // A redirect discards the skid: the instruction in it belongs to the old instruction stream.
+    // Kept, it was handed out as the first instruction after a trap, with the handler's privilege
+    // (lowRISC/ibex#2520; fix proposed in #2521, which clears it on pc_set_i only). A not-taken
+    // mispredict is the other redirect: it does not assert pc_set_i (NoMispredBranch).
+    `ASSERT(SkidClearedOnRedirect, (pc_set_i | nt_branch_mispredict_i) |=> !instr_skid_valid_q)
   end else begin : g_no_branch_predictor
     assign instr_bp_taken_o     = 1'b0;
     assign predict_branch_taken = 1'b0;
