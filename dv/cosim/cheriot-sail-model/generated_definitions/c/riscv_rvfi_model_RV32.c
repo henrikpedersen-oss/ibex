@@ -53467,6 +53467,13 @@ void startup_zwithin_phys_mem(void)
 bool zwithin_phys_mem(uint64_t zaddr, sail_int zwidth)
 {
   __label__ end_function_3026, end_block_exception_3027;
+  /* EG2 patch (dv_todo S7, 3 Nov 2026): a data bus error the cosim bridge armed for this step
+     (cheriot_sail_cosim_step_data_error): the access is not to memory, so the model raises the
+     load or store access fault itself, after its own capability checks. */
+  {
+    extern bool cheriot_sail_cosim_data_error_armed(uint64_t, int64_t);
+    if (cheriot_sail_cosim_data_error_armed(zaddr, CONVERT_OF(mach_int, sail_int)(zwidth))) return false;
+  }
 
   bool z6zE577;
   int64_t zaddr_int;

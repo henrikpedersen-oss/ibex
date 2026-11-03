@@ -79,6 +79,20 @@ void        cheriot_sail_cosim_set_mip(const svBitVecVal *mip);
 int         cheriot_sail_cosim_step_bus_error(const svBitVecVal *pc, int kind,
                                               const svBitVecVal *tval);
 
+// A data bus error the model reaches itself (EG2 dv_todo S7): the bytes [err_addr, err_addr +
+// err_bytes) answer with an error for this one step, the instruction is executed normally, and
+// the model must take the load or store access fault there (its own capability checks first); its
+// mtval is then set to `tval`, the errored transaction's address as Ibex documents it. Returns 0,
+// or -1 with an error recorded.
+int         cheriot_sail_cosim_step_data_error(const svBitVecVal *insn, const svBitVecVal *pc,
+                                               const svBitVecVal *err_addr, int err_bytes,
+                                               const svBitVecVal *tval);
+bool        cheriot_sail_cosim_data_error_armed(uint64_t addr, int64_t width);
+
+// Whether the revocation engine is to clear the capability at addr: tagged, not a sealing
+// capability, its base revoked in the model's own bitmap (the load barrier's rule). EG2 dv_todo S10.
+int         cheriot_sail_cosim_tbre_revokes(uint32_t addr);
+
 // 1 if the model, in its current state, would take an interrupt were these bits pending: one is
 // enabled in mie and mstatus.MIE is set (CHERIoT is M-mode only). Changes nothing.
 int         cheriot_sail_cosim_irq_would_take(const svBitVecVal *mip);
@@ -106,6 +120,8 @@ void cheriot_sail_cosim_write_mem_byte(const svBitVecVal *addr,
 void cheriot_sail_cosim_set_mcycle(uint64_t mcycle);
 // minstret from the ISS that ran before (EG2's handover from Spike).
 void cheriot_sail_cosim_set_minstret(uint64_t minstret);
+// Take each instruction word from the model's own memory and report a different DUT word (EG2).
+void cheriot_sail_cosim_set_fetch_check(int on);
 
 // Bench inputs of CHERIoT-Ibex's CSRs in the model's platform (spec GAP-CS-3). Call before
 // each cheriot_sail_cosim_step(), like set_mcycle:

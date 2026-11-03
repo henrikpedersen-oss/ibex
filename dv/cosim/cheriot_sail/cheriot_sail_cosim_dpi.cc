@@ -55,6 +55,8 @@ FILE *trace_log               = nullptr;
 // write_mem is defined in the generated model C code; declare it here so we
 // can call it from cheriot_sail_cosim_write_mem_byte.
 void write_mem(uint64_t addr, uint64_t byte_val);
+// read_mem (sail rts.c), for the model's own instruction words (s_fetch_check).
+uint64_t read_mem(uint64_t addr);
 
 // Externally-visible memory layout globals (riscv_platform_impl.c)
 extern uint64_t rv_ram_base;
@@ -311,6 +313,23 @@ void cheriot_sail_cosim_set_mip(const svBitVecVal *mip_p) {
   s_mip = (uint64_t)mip_p[0];
 }
 
+// Whether the model takes each instruction word from its own memory (set_fetch_check). The DUT's
+// word comes with each step (RVFI-DII), so on its own the model checks what that word does, not
+// that it is the word at that address: a DUT that fetched or decoded the wrong word passed
+// (Codex review of EG2, 2 Nov; EG2 dv_todo S5). With the check on, the word at the model's PC is
+// read from the model's memory; a different DUT word is an error, and the model executes its own.
+// Off by default: TestRIG injects instructions that are in no memory.
+static bool s_fetch_check = false;
+
+void cheriot_sail_cosim_set_fetch_check(int on) { s_fetch_check = on != 0; }
+
+// The instruction at `pc` in the model's memory: 16 bits if compressed, else 32.
+static uint32_t model_insn_at(uint32_t pc) {
+  uint32_t w = (uint32_t)(read_mem(pc) & 0xff) | ((uint32_t)(read_mem(pc + 1) & 0xff) << 8);
+  if ((w & 3) != 3) return w;
+  return w | ((uint32_t)(read_mem(pc + 2) & 0xff) << 16) | ((uint32_t)(read_mem(pc + 3) & 0xff) << 24);
+}
+
 int cheriot_sail_cosim_step(const svBitVecVal *insn_p,
                              const svBitVecVal *pc_p,
                              svBit cheri_rf_we,
@@ -326,6 +345,22 @@ int cheriot_sail_cosim_step(const svBitVecVal *insn_p,
   if (trace_enabled()) {
     fprintf(stderr, "[cheriot-sail] step %lld: insn=0x%08x pc=0x%08x\n",
             (long long)s_step_no, insn, pc);
+  }
+
+  // The model's own word at its own PC (s_fetch_check). Where the PCs differ the PC check below
+  // reports it; the word is compared only where they agree.
+  if (s_fetch_check && !s_pcc_mtcc_loop && zPC == (uint64_t)pc) {
+    uint32_t mine = model_insn_at(pc);
+    uint32_t dut  = (mine & 3) != 3 ? (insn & 0xffff) : insn;
+    if (mine != dut || ((insn & 3) != 3) != ((mine & 3) != 3)) {
+      char buf[200];
+      snprintf(buf, sizeof(buf),
+               "cheriot-sail model's memory holds insn=0x%08x at pc=0x%08x, the DUT executed "
+               "0x%08x (step %lld): the model executes its own word",
+               mine, pc, insn, (long long)s_step_no);
+      s_errors.emplace_back(buf);
+      insn = mine;
+    }
   }
 
   // Encode RVFI-DII instruction packet (Sail bitfield RVFI_DII_Instruction_Packet):
@@ -648,6 +683,49 @@ int cheriot_sail_cosim_step_bus_error(const svBitVecVal *pc_p, int kind,
   return pc_diverged ? -1 : 0;
 }
 
+// The byte range a data bus error is armed on for the next step (step_data_error). The patched
+// zwithin_phys_mem (generated_definitions/c, EG2 dv_todo S7) answers false for an access that
+// overlaps it, so the model's own access raises the load or store access fault there.
+static bool s_err_armed = false;
+static uint64_t s_err_lo = 0, s_err_hi = 0;  // [lo, hi)
+
+extern "C" bool cheriot_sail_cosim_data_error_armed(uint64_t addr, int64_t width) {
+  return s_err_armed && addr < s_err_hi && addr + (uint64_t)width > s_err_lo;
+}
+
+int cheriot_sail_cosim_step_data_error(const svBitVecVal *insn_p, const svBitVecVal *pc_p,
+                                       const svBitVecVal *err_addr_p, int err_bytes,
+                                       const svBitVecVal *tval_p) {
+  s_err_lo    = err_addr_p[0];
+  s_err_hi    = s_err_lo + (uint64_t)err_bytes;
+  s_err_armed = true;
+  svBitVecVal zero = 0;
+  int rc = cheriot_sail_cosim_step(insn_p, pc_p, 0, &zero, 0, &zero, 1);
+  s_err_armed = false;
+  const uint32_t pc    = pc_p[0];
+  const uint32_t cause = (uint32_t)(zmcause.zbits & 0xffffffffULL);
+  const bool trapped   = cheriot_sail_cosim_get_trap();
+  // The model's own access reached the errored transaction only if its capability checks passed
+  // first: then it takes the load (5) or store (7) access fault. Anything else (a CHERI fault, 28,
+  // no trap, or a fault elsewhere) means the chip's access should not have been made, or was made
+  // at another address.
+  if (!trapped || (cause != 5 && cause != 7)) {
+    char buf[240];
+    snprintf(buf, sizeof(buf),
+             "cheriot-sail: the chip's access got a bus error at 0x%08llx (pc=0x%08x), the model's "
+             "instruction %s (mcause 0x%08x)",
+             (unsigned long long)s_err_lo, pc, trapped ? "took another trap" : "did not trap",
+             cause);
+    s_errors.emplace_back(buf);
+    return -1;
+  }
+  // mtval as Ibex documents it (cs_registers.rst, Machine Trap Value): "the address of the
+  // transaction causing the error", for a misaligned or two-word access "the address of the
+  // missing transaction part"; the model's access fault gives the access's own address.
+  zmtval = (uint64_t)tval_p[0];
+  return rc;
+}
+
 // The same condition take_interrupt() checks first; reads the model's state only.
 int cheriot_sail_cosim_irq_would_take(const svBitVecVal *mip_p) {
   if (!s_initialized) {
@@ -820,6 +898,22 @@ svBit cheriot_sail_cosim_get_mem_present(void) {
 uint32_t cheriot_sail_cosim_get_mem_addr(void) {
   if (!zrvfi_mem_data_present) return 0;
   return (uint32_t)z_get_RVFI_DII_Execution_Packet_Ext_MemAccess_rvfi_mem_addr(zrvfi_mem_data);
+}
+
+// Whether the revocation engine is to clear the capability at addr (EG2 dv_todo S10), by the
+// model's own memory and bitmap and the load barrier's own rule (cheri_mem.sail, the generated
+// code around mem_read_cap_revoked): tagged, not a sealing capability (permit_seal, permit_unseal
+// or user0), and its base's granule marked. 1 revoked, 0 not (untagged too). cheriot_mem_sys
+// theory_of_operation.md "Revocation Engine": the engine applies that load barrier.
+int cheriot_sail_cosim_tbre_revokes(uint32_t addr) {
+  addr &= ~UINT32_C(7);
+  if (!read_tag_bool(addr >> 3)) return 0;
+  uint64_t bits = 0;
+  for (int b = 0; b < 8; b++) bits |= (read_mem(addr + b) & UINT64_C(0xff)) << (8 * b);
+  struct zCapability c = zcapBitsToCapability(true, bits);
+  if (c.zpermit_seal || c.zpermit_unseal || c.zperm_user0) return 0;
+  uint64_t base = zgetCapBaseBits(c) & ~UINT64_C(7);
+  return zmem_read_cap_revoked(base) ? 1 : 0;
 }
 
 // The RVFI memory record has no tag (rvfi_write records the data bits only), so
