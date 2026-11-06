@@ -599,6 +599,26 @@ bool SpikeCosim::check_retired_instr(uint32_t write_reg,
 
     gpr_write_seen = true;
   } else {
+    // An expanded instruction whose ISS step wrote at most one GPR: cm.push writes only sp, its
+    // stores none. The DUT's earlier operations at this PC were recorded by step() via
+    // `more_ops`; they can only be operations without a register write (reported as x0). Check
+    // that and drop them, or the next expanded instruction finds them still outstanding
+    // (EG2 boot ROM built with Zcmp, upstream 54564a8246; 2026-11-06).
+    if (!deferred_dut_writes.empty()) {
+      for (const auto &w : deferred_dut_writes) {
+        if (w.reg != 0) {
+          std::stringstream err_str;
+          err_str << "Expanded instruction at pc " << std::hex << dut_pc
+                  << ": the DUT wrote x" << std::dec << w.reg
+                  << " in an earlier operation but the ISS made " << gpr_writes.size()
+                  << " register write(s)";
+          errors.emplace_back(err_str.str());
+          deferred_dut_writes.clear();
+          return false;
+        }
+      }
+      deferred_dut_writes.clear();
+    }
     for (auto *gpr_write : gpr_writes) {
       // should never see more than one GPR write per step
       assert(!gpr_write_seen);
